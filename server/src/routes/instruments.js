@@ -120,8 +120,11 @@ const EDITABLE = [
 /** Пустая строка из формы должна стать NULL, а не '' — иначе даты не сохранятся. */
 const nullify = (v) => (v === '' || v === undefined ? null : v);
 
+/** Комментарий — исключение: колонка NOT NULL, пустое значение должно остаться '', а не стать NULL. */
+const toDbValue = (key, v) => (key === 'comment' ? String(v ?? '') : nullify(v));
+
 instruments.post('/', requireAdmin, async (req, res) => {
-  const values = EDITABLE.map((key) => nullify(req.body?.[key]));
+  const values = EDITABLE.map((key) => toDbValue(key, req.body?.[key]));
   try {
     const row = await transaction(async (client) => {
       const { rows } = await client.query(
@@ -149,7 +152,7 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'Нечего обновлять' });
 
   const set = updates.map((key, i) => `${key} = $${i + 2}`).join(', ');
-  const params = [req.params.id, ...updates.map((key) => nullify(req.body[key]))];
+  const params = [req.params.id, ...updates.map((key) => toDbValue(key, req.body[key]))];
 
   try {
     const row = await transaction(async (client) => {
