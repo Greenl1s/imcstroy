@@ -118,7 +118,7 @@ label { display: grid; gap: 6px; font-weight: 500; font-size: 14px; }
 .form-grid { display: grid; gap: 14px; }
 
 /* ---------- Список ---------- */
-:root { --col-width: 152px; --col-gap: 10px; }
+:root { --col-width: 168px; --col-gap: 10px; }
 
 .list { display: grid; gap: 10px; }
 .row {
@@ -203,18 +203,34 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #7f1d1d; }
   display: flex; flex-direction: column; gap: 14px;
   padding: 16px 20px; margin-bottom: 20px;
 }
-.toolbar-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.toolbar-top .search { flex: 1 1 240px; min-width: 160px; }
+.search-full { width: 100%; }
 
-/* Строка фильтров: три колонки той же ширины, что и колонки в строках списка,
-   и с тем же отступом справа — поэтому они встают ровно над бейджами. */
-.filters-row {
-  display: flex; justify-content: flex-end; gap: var(--col-gap, 10px); flex-wrap: wrap;
+.toolbar-bottom {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 14px; flex-wrap: nowrap;
 }
-.filters-row .filter-group {
-  width: var(--col-width, 152px); justify-content: center;
+.toolbar-buttons { display: flex; flex-wrap: nowrap; gap: 8px; flex-shrink: 0; }
+
+/* Фильтры — компактные «чипы»: подпись сверху, значение снизу,
+   всё внутри своей ширины, без выпирающего текста. */
+.filters-row { display: flex; gap: var(--col-gap, 10px); flex-shrink: 0; }
+.filter-chip {
+  width: var(--col-width, 168px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 8px 10px; border-radius: 12px;
+  background: var(--badge-bg); border: 1px solid var(--line);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
-.filters-row .filter-group select { text-align: center; }
+.filter-chip:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+.filter-chip-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--muted);
+}
+.filter-chip select {
+  border: none; background: transparent; padding: 0; min-height: auto; width: 100%;
+  text-align: center; text-align-last: center; font-weight: 600; font-size: 14px;
+  color: var(--text); cursor: pointer; appearance: none; outline: none;
+}
 .filter-group {
   display: flex; align-items: center; gap: 8px; background: var(--input-bg);
   padding: 4px 12px 4px 16px; border-radius: 40px; border: 1px solid var(--line);
@@ -307,11 +323,12 @@ dialog::backdrop { background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(3px)
   .topbar { flex-direction: column; align-items: stretch; gap: 10px; }
   .topbar-actions > * { flex: 1 1 auto; }
   .toolbar { padding: 12px; }
-  .toolbar-top { flex-direction: column; align-items: stretch; }
-  .toolbar-top .search { font-size: 16px; min-height: 44px; }
-  .toolbar-top button { min-height: 44px; font-size: 15px; }
+  .search-full { font-size: 16px; min-height: 44px; }
+  .toolbar-bottom { flex-direction: column; align-items: stretch; }
+  .toolbar-buttons { justify-content: stretch; }
+  .toolbar-buttons button { flex: 1 1 auto; min-height: 44px; font-size: 15px; }
   .filters-row { flex-direction: column; align-items: stretch; }
-  .filters-row .filter-group { width: 100%; justify-content: space-between; }
+  .filter-chip { width: 100%; }
   .row, .row-link { grid-template-columns: 1fr; gap: 8px; }
   .row-selectable { grid-template-columns: auto 1fr; }
   .row { padding: 12px 14px; }
