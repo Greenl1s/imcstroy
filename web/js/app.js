@@ -4,7 +4,6 @@ import { escapeHtml } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm } from './instruments.js';
-import { showCalendar } from './calendar.js';
 import { displayNo, verificationBadge, verificationText } from './utils.js';
 
 // ---------- Тема ----------
@@ -53,13 +52,11 @@ function bindEvents() {
   document.getElementById('usersButton').onclick = showUsersManager;
   document.getElementById('profileButton').onclick = () => showUserForm(state.currentUser);
   document.getElementById('addInstrumentButton').onclick = () => showInstrumentForm();
-  document.getElementById('calendarButton').onclick = showCalendar;
   document.getElementById('retiredButton').onclick = showRetired;
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
   document.getElementById('conditionFilter').onchange = (e) => setFilter('condition', e.target.value);
-  document.getElementById('userFilter').onchange = (e) => setFilter('userFilter', e.target.value);
 
   document.getElementById('massToggleBtn').onclick = () => setMassMode(!state.massMode);
   document.getElementById('massRetireBtn').onclick = (e) => bulk(e.currentTarget, 'retire');
@@ -71,7 +68,6 @@ function bindEvents() {
     showAuth();
   });
   window.addEventListener('app:changed', () => {
-    populateUserFilter();
     setSync(`Приборов: ${state.instruments.length}`);
   });
   window.addEventListener('app:refresh-route', renderRoute);
@@ -147,18 +143,6 @@ function openCard(id) {
 function goList() {
   history.pushState(null, '', location.pathname);
   renderRoute();
-}
-
-// ---------- Фильтр по пользователю ----------
-
-function populateUserFilter() {
-  const filter = document.getElementById('userFilter');
-  const previous = filter.value;
-  filter.innerHTML = '<option value="all">Все</option>' +
-    state.users.map((u) =>
-      `<option value="${u.id}">${escapeHtml(u.username)}</option>`).join('');
-  filter.value = state.users.some((u) => String(u.id) === previous) ? previous : 'all';
-  state.userFilter = filter.value;
 }
 
 // ---------- Массовые операции ----------
