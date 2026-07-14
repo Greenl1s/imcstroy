@@ -33,7 +33,10 @@ export function renderList(openCard) {
   const showCheckboxes = isAdmin() && state.massMode;
 
   const html = list.length
-    ? list.map((item) => `
+    ? list.map((item) => {
+        // Кто держит прибор — показываем в третьей колонке, под фильтром «Пользователь»
+        const holder = item.taken_by_name || item.booked_by_name || '';
+        return `
       <div class="row panel${showCheckboxes ? ' row-selectable' : ''}">
         ${showCheckboxes
           ? `<input type="checkbox" class="instrument-checkbox" value="${escapeAttr(item.id)}">`
@@ -44,16 +47,22 @@ export function renderList(openCard) {
             <div class="row-subtitle">
               ${escapeHtml(item.model || 'Модель не указана')} ·
               ${escapeHtml(item.serial_number || 'Серийный номер не указан')}
-              ${item.taken_by_name ? ` · у ${escapeHtml(item.taken_by_name)}` : ''}
-              ${item.booked_by_name ? ` · бронь: ${escapeHtml(item.booked_by_name)}` : ''}
             </div>
           </div>
-          <div class="badges">
-            <span class="badge ${verificationBadge(item.valid_until)}">${verificationText(item.valid_until)}</span>
-            <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
+          <div class="row-status-group">
+            <div class="row-status-col">
+              <span class="badge ${verificationBadge(item.valid_until)}">${verificationText(item.valid_until)}</span>
+            </div>
+            <div class="row-status-col">
+              <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
+            </div>
+            <div class="row-status-col">
+              ${holder ? escapeHtml(holder) : '<span class="muted-text">—</span>'}
+            </div>
           </div>
         </a>
-      </div>`).join('')
+      </div>`;
+      }).join('')
     : '<div class="panel card">Нет приборов по выбранным условиям</div>';
 
   document.getElementById('instrumentList').innerHTML = html;
