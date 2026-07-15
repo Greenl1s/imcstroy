@@ -39,6 +39,13 @@
           <button id="usersButton" class="secondary admin-only" type="button">Пользователи</button>
           <button id="profileButton" class="secondary" type="button">Профиль</button>
           <button id="logoutButton" class="danger" type="button">Выйти</button>
+          <div class="menu-wrapper">
+            <button id="menuButton" class="secondary icon-btn" type="button" aria-label="Меню">☰</button>
+            <div id="menuDropdown" class="menu-dropdown hidden">
+              <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
+              <button id="exportExpiringButton" type="button">Окончание поверок</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -92,6 +99,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
