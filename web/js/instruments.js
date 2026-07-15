@@ -10,21 +10,17 @@ import { closeModal, field, input, openModal, select, toast, run } from './ui.js
 /** Клиентская фильтрация уже загруженного списка. */
 export function filteredInstruments() {
   const q = state.search.trim().toLowerCase();
-  const user = state.userFilter;
 
   return state.instruments.filter((i) => {
     const matchesSearch = !q || [i.name, i.serial_number, i.model, i.inventory_no]
       .some((v) => String(v || '').toLowerCase().includes(q));
-
-    const matchesUser = user === 'all' ||
-      String(i.taken_by) === user || String(i.booked_by) === user;
 
     const matchesVerification = state.verification === 'all' ||
       verificationState(i.valid_until) === state.verification;
 
     const matchesStatus = state.condition === 'all' || i.status === state.condition;
 
-    return matchesSearch && matchesUser && matchesVerification && matchesStatus;
+    return matchesSearch && matchesVerification && matchesStatus;
   });
 }
 
@@ -33,10 +29,7 @@ export function renderList(openCard) {
   const showCheckboxes = isAdmin() && state.massMode;
 
   const html = list.length
-    ? list.map((item) => {
-        // Кто держит прибор — показываем в третьей колонке, под фильтром «Пользователь»
-        const holder = item.taken_by_name || item.booked_by_name || '';
-        return `
+    ? list.map((item) => `
       <div class="row panel${showCheckboxes ? ' row-selectable' : ''}">
         ${showCheckboxes
           ? `<input type="checkbox" class="instrument-checkbox" value="${escapeAttr(item.id)}">`
@@ -56,13 +49,9 @@ export function renderList(openCard) {
             <div class="row-status-col">
               <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
             </div>
-            <div class="row-status-col">
-              ${holder ? escapeHtml(holder) : '<span class="muted-text">—</span>'}
-            </div>
           </div>
         </a>
-      </div>`;
-      }).join('')
+      </div>`).join('')
     : '<div class="panel card">Нет приборов по выбранным условиям</div>';
 
   document.getElementById('instrumentList').innerHTML = html;

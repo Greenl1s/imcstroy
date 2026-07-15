@@ -4,6 +4,7 @@ import { escapeHtml } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm } from './instruments.js';
+import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { displayNo, verificationBadge, verificationText } from './utils.js';
 
 // ---------- Тема ----------
@@ -48,6 +49,8 @@ function bindEvents() {
     history.pushState(null, '', location.pathname);
     showAuth();
   };
+
+  bindMenu();
 
   document.getElementById('usersButton').onclick = showUsersManager;
   document.getElementById('profileButton').onclick = () => showUserForm(state.currentUser);
@@ -237,4 +240,32 @@ async function showRetired() {
       showRetired();
     };
   });
+}
+
+// ---------- Меню экспорта в Excel ----------
+
+function bindMenu() {
+  const button = document.getElementById('menuButton');
+  const dropdown = document.getElementById('menuDropdown');
+
+  button.onclick = (event) => {
+    event.stopPropagation();
+    dropdown.classList.toggle('hidden');
+  };
+
+  // Клик где угодно за пределами меню — закрывает его
+  document.addEventListener('click', (event) => {
+    if (!dropdown.classList.contains('hidden') && !dropdown.contains(event.target)) {
+      dropdown.classList.add('hidden');
+    }
+  });
+
+  document.getElementById('exportAllButton').onclick = () => {
+    dropdown.classList.add('hidden');
+    exportAllInstruments();
+  };
+  document.getElementById('exportExpiringButton').onclick = () => {
+    dropdown.classList.add('hidden');
+    exportExpiringInstruments();
+  };
 }
