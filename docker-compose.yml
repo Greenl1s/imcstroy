@@ -62,21 +62,21 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
-  # Простой веб-файловый менеджер — замена Яндекс.Диску для хранения
-  # папок и документов. Только для входа по логину/паролю, без CORS
-  # и внешних зависимостей.
+  # Веб-файловый менеджер — замена Яндекс.Диску для хранения папок
+  # и документов. Умеет открывать PDF и Word прямо в браузере, без
+  # скачивания (обычный Filebrowser этого не умел — пришлось взять
+  # более новый форк, FileBrowser Quantum).
   files:
-    image: filebrowser/filebrowser:latest
+    image: gtstef/filebrowser:stable
     restart: unless-stopped
     volumes:
       # Сюда реально складываются файлы — обычная папка на диске сервера,
       # поэтому в неё можно копировать файлы напрямую командой scp.
-      - ./filestore/data:/srv
-      # Собственная база Filebrowser (логин, пароль, настройки) —
-      # непрозрачное хранилище Docker, руками туда лезть не нужно.
-      - filebrowser-db:/database
+      - ./filestore/data:/folder
+      # Конфигурация, база данных и кэш самого файлового менеджера.
+      - ./filestore/config:/home/filebrowser/data
     environment:
-      FB_DATABASE: /database/filebrowser.db
+      FILEBROWSER_ADMIN_PASSWORD: ${FILES_ADMIN_PASSWORD}
     expose:
       - "80"
 
@@ -84,4 +84,3 @@ volumes:
   db-data:
   caddy-data:
   caddy-config:
-  filebrowser-db:
