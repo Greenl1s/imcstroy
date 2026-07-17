@@ -1,3 +1,4 @@
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
 
 :root {
@@ -331,6 +332,7 @@ dialog::backdrop { background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(3px)
 /* ---------- QR ---------- */
 .qr-box { display: grid; place-items: center; padding: 8px; }
 .qr-box img, .qr-box canvas { background: #fff; padding: 8px; border-radius: 8px; }
+.document-photo { max-width: 100%; max-height: 70vh; object-fit: contain; }
 .qr-caption { text-align: center; color: var(--muted); margin-top: 8px; }
 
 /* ---------- Мобильные экраны ---------- */
