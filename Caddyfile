@@ -33,3 +33,22 @@
 		format console
 	}
 }
+
+# Файловый менеджер — на отдельном поддомене, своя пара HTTPS-сертификатов.
+# Для его работы нужна отдельная DNS-запись:  files  →  тот же публичный IP.
+files.{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy files:80
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
