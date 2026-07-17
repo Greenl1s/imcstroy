@@ -116,5 +116,18 @@ export const api = {
     });
     if (!response.ok) return null;
     return URL.createObjectURL(await response.blob());
+  },
+
+  // ---------- Фото документа (замена ссылки на документ) ----------
+  uploadDocument: (id, dataUrl) =>
+    request(`/instruments/${id}/document`, { method: 'PUT', body: { data_url: dataUrl } }),
+  deleteDocument: (id) => request(`/instruments/${id}/document`, { method: 'DELETE' }),
+
+  async documentUrl(id) {
+    const response = await fetch(`${BASE}/instruments/${id}/document`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) return null;
+    return URL.createObjectURL(await response.blob());
   }
 };

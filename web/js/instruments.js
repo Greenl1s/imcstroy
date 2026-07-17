@@ -114,6 +114,9 @@ export async function renderCard(id, goList) {
   }
 
   main += '<button class="secondary" data-qr>QR</button>';
+  if (item.has_document) {
+    main += '<button class="secondary" data-document>Документ</button>';
+  }
   main += '<button class="secondary" data-copy>Копировать</button>';
   main += '<button class="secondary" data-history>История</button>';
 
@@ -157,9 +160,6 @@ export async function renderCard(id, goList) {
         ${field('Тип', checkTypeText(item.check_type))}
         ${field('Дата поверки/калибровки', item.verification_date)}
         ${field('Действительно до', item.valid_until)}
-        ${field('Документ', item.document_url
-          ? `<a href="${escapeAttr(item.document_url)}" target="_blank" rel="noopener">Открыть</a>`
-          : '—', true)}
       </div>
       ${item.comment ? field('Комментарий', item.comment) : ''}
       ${holder}
@@ -201,6 +201,7 @@ function bindCardActions(item, goList) {
   on('[data-transfer]', () => showTransferForm(item));
   on('[data-edit]', () => showInstrumentForm(item));
   on('[data-qr]', () => showQr(item));
+  on('[data-document]', () => showDocument(item));
   on('[data-copy]', () => copyInfo(item));
   on('[data-history]', () => showHistory(item));
 
@@ -245,13 +246,16 @@ export function showInstrumentForm(item = null) {
       ${select('check_type', 'Тип', v.check_type, [['verification', 'Поверка'], ['calibration', 'Калибровка']])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
-      ${input('document_url', 'Ссылка на документ', v.document_url || '', 'url')}
       ${input('comment', 'Комментарий', v.comment || '')}
       <label>Фото прибора (до 5 МБ)
         <input type="file" name="photo" accept="image/*">
       </label>
+      <label>Фото документа поверки/калибровки (до 5 МБ)
+        <input type="file" name="document" accept="image/*">
+      </label>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
+        ${isEdit && v.has_document ? '<button type="button" class="danger" data-remove-document>Удалить документ</button>' : ''}
         <button class="primary" type="submit">Сохранить</button>
       </div>
     </form>`);
@@ -270,23 +274,43 @@ export function showInstrumentForm(item = null) {
     };
   }
 
+  const removeDocument = form.querySelector('[data-remove-document]');
+  if (removeDocument) {
+    removeDocument.onclick = async (event) => {
+      if (!confirm('Удалить документ?')) return;
+      const ok = await run(() => api.deleteDocument(item.id), { button: event.currentTarget, success: 'Документ удалён' });
+      if (ok === null) return;
+      closeModal();
+      await refresh();
+      window.dispatchEvent(new Event('app:refresh-route'));
+    };
+  }
+
   form.onsubmit = async (event) => {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     const data = formData(form);
-    const file = form.querySelector('input[name="photo"]').files[0];
+    const photoFile = form.querySelector('input[name="photo"]').files[0];
+    const documentFile = form.querySelector('input[name="document"]').files[0];
     delete data.photo;
+    delete data.document;
 
-    if (file && file.size > 5 * 1024 * 1024) {
-      return toast('Файл больше 5 МБ', true);
+    if (photoFile && photoFile.size > 5 * 1024 * 1024) {
+      return toast('Файл фото прибора больше 5 МБ', true);
+    }
+    if (documentFile && documentFile.size > 5 * 1024 * 1024) {
+      return toast('Файл фото документа больше 5 МБ', true);
     }
 
     const result = await run(async () => {
       const saved = isEdit
         ? await api.updateInstrument(item.id, data)
         : await api.createInstrument(data);
-      if (file) {
-        await api.uploadPhoto(saved.id, await readFileAsDataUrl(file));
+      if (photoFile) {
+        await api.uploadPhoto(saved.id, await readFileAsDataUrl(photoFile));
+      }
+      if (documentFile) {
+        await api.uploadDocument(saved.id, await readFileAsDataUrl(documentFile));
       }
       return saved;
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
@@ -432,6 +456,27 @@ function showQr(item) {
   };
 }
 
+async function showDocument(item) {
+  openModal('Документ', '<p class="qr-caption">Загрузка...</p>');
+
+  const url = await api.documentUrl(item.id);
+  if (!url) {
+    return openModal('Документ', '<p class="qr-caption">Не удалось загрузить документ</p>');
+  }
+
+  openModal('Документ', `
+    <div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>
+    <p class="qr-caption">${escapeHtml(item.name)}</p>
+    <div class="modal-actions"><button class="primary" data-download-document>Скачать</button></div>`);
+
+  document.querySelector('[data-download-document]').onclick = () => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `document-${item.id}`;
+    link.click();
+  };
+}
+
 async function copyInfo(item) {
   const text = [
     `Номер: ${displayNo(item)}`,
@@ -439,8 +484,7 @@ async function copyInfo(item) {
     `Серийный номер: ${item.serial_number || '—'}`,
     `Модель: ${item.model || '—'}`,
     `Тип: ${checkTypeText(item.check_type)}`,
-    `Действительно до: ${item.valid_until || '—'}`,
-    `Документ: ${item.document_url || '—'}`
+    `Действительно до: ${item.valid_until || '—'}`
   ].join('\n');
 
   try {
