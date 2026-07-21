@@ -22,6 +22,12 @@ fi
 DEFAULT_JSON=/etc/onlyoffice/documentserver/default.json
 if [ -f "$DEFAULT_JSON" ]; then
   sed -i 's/"limits_tempfile_upload": *[0-9]*/"limits_tempfile_upload": 524288000/' "$DEFAULT_JSON"
+
+  # Второй, отдельный лимит: docx/xlsx/pptx — это ZIP-архивы внутри,
+  # и есть ограничение на размер их РАСПАКОВАННОГО содержимого (защита
+  # от "zip-бомб"). У xlsx он и так 300MB по умолчанию, а у docx/pptx/vsdx —
+  # всего 50MB, поэтому большие Word-документы упирались именно в это.
+  sed -i 's/"uncompressed": "50MB"/"uncompressed": "300MB"/g' "$DEFAULT_JSON"
 fi
 
 exec /app/ds/run-document-server.sh "$@"
