@@ -2,6 +2,11 @@
 # Поднимает лимит размера файла в OnlyOffice с 100 МБ (по умолчанию) до 500 МБ.
 # Выполняется при КАЖДОМ запуске контейнера — поэтому переживает пересоздание
 # и обновление образа, в отличие от разовой ручной правки внутри контейнера.
+#
+# Важно: в конце передаём управление РОДНОМУ docker-entrypoint.sh, а не
+# запускаем сервер напрямую — иначе OnlyOffice не успевает правильно
+# настроить JWT из переменных окружения, и документы перестают открываться
+# с ошибкой "неправильный формат токена".
 set -e
 
 CONF=/etc/onlyoffice/documentserver/nginx/includes/ds-common.conf
@@ -12,18 +17,12 @@ if [ -f "$CONF" ] && ! grep -q "client_max_body_size 500m" "$CONF"; then
   sed -i 's/client_max_body_size [0-9]*m;/client_max_body_size 500m;/' "$CONF"
 fi
 
-# local.json — официально рекомендованный способ переопределить настройки
-# из default.json, не трогая сам оригинальный файл.
-cat > /etc/onlyoffice/documentserver/local.json << 'JSON'
-{
-  "services": {
-    "CoAuthoring": {
-      "server": {
-        "limits_tempfile_upload": 524288000
-      }
-    }
-  }
-}
-JSON
+# Точечная правка числа прямо в default.json — без замены всего файла.
+# Безопасно повторять при каждом запуске, поэтому переживает обновление образа.
+DEFAULT_JSON=/etc/onlyoffice/documentserver/default.json
+if [ -f "$DEFAULT_JSON" ]; then
+  sed -i 's/"limits_tempfile_upload": *[0-9]*/"limits_tempfile_upload": 524288000/' "$DEFAULT_JSON"
+fi
 
-exec /app/ds/run-document-server.sh
+exec /app/ds/docker-entrypoint.sh "$@"
+
