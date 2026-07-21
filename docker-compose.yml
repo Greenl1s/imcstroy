@@ -88,6 +88,9 @@ services:
   onlyoffice:
     image: onlyoffice/documentserver:latest
     restart: unless-stopped
+    # Свой сценарий запуска: сначала поднимает лимит размера файла
+    # (по умолчанию 100 МБ), потом передаёт управление обычному запуску.
+    entrypoint: ["/bin/sh", "/docker-init/apply-limits.sh"]
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
@@ -96,6 +99,7 @@ services:
       - onlyoffice-log:/var/log/onlyoffice
       - onlyoffice-lib:/var/lib/onlyoffice
       - onlyoffice-db:/var/lib/postgresql
+      - ./onlyoffice/apply-limits.sh:/docker-init/apply-limits.sh:ro
     expose:
       - "80"
 
