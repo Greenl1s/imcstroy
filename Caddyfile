@@ -55,3 +55,23 @@ files.{$SITE_ADDRESS} {
 		format console
 	}
 }
+
+# OnlyOffice — настоящий просмотр/редактирование Excel, Word, PowerPoint.
+# Файловый менеджер встраивает его в себя через iframe с ДРУГОГО поддомена,
+# поэтому здесь намеренно НЕТ X-Frame-Options — иначе браузер запретил бы
+# именно то встраивание, ради которого всё затевалось. Защиту от чужого
+# встраивания OnlyOffice обеспечивает сам, через общий секретный ключ (JWT).
+# Нужна ещё одна DNS-запись:  office  →  тот же публичный IP.
+office.{$SITE_ADDRESS} {
+	reverse_proxy onlyoffice:80
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

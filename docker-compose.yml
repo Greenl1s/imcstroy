@@ -51,6 +51,7 @@ services:
     depends_on:
       - api
       - files
+      - onlyoffice
     ports:
       - "80:80"
       - "443:443"
@@ -80,7 +81,29 @@ services:
     expose:
       - "80"
 
+  # Настоящий просмотр и редактирование Excel/Word/PowerPoint в браузере.
+  # Без него FileBrowser показывал вместо таблицы статичную картинку.
+  # Самая тяжёлая часть стека — если сервера станет не хватать, это
+  # первое, что стоит выключить или ради чего расширять тариф.
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-log:/var/log/onlyoffice
+      - onlyoffice-lib:/var/lib/onlyoffice
+      - onlyoffice-db:/var/lib/postgresql
+    expose:
+      - "80"
+
 volumes:
   db-data:
   caddy-data:
   caddy-config:
+  onlyoffice-data:
+  onlyoffice-log:
+  onlyoffice-lib:
+  onlyoffice-db:
