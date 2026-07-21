@@ -28,6 +28,10 @@ if [ -f "$DEFAULT_JSON" ]; then
   # от "zip-бомб"). У xlsx он и так 300MB по умолчанию, а у docx/pptx/vsdx —
   # всего 50MB, поэтому большие Word-документы упирались именно в это.
   sed -i 's/"uncompressed": "50MB"/"uncompressed": "300MB"/g' "$DEFAULT_JSON"
+
+  # Третий, отдельный лимит: сколько байт готов скачать сам механизм
+  # конвертации при подготовке документа к открытию. По умолчанию 100 МБ.
+  sed -i 's/"maxDownloadBytes": *[0-9]*/"maxDownloadBytes": 524288000/' "$DEFAULT_JSON"
 fi
 
 exec /app/ds/run-document-server.sh "$@"
