@@ -42,7 +42,10 @@ files.{$SITE_ADDRESS} {
 
 	header {
 		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
+		# SAMEORIGIN, а не DENY: превью PDF/Word встраивает файлы через iframe
+		# внутри самого files.imcstroy.ru — при DENY браузер такое блокировал.
+		# Посторонним сайтам встраивать files.imcstroy.ru всё равно нельзя.
+		X-Frame-Options SAMEORIGIN
 		Referrer-Policy same-origin
 		-Server
 	}
