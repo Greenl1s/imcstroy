@@ -315,18 +315,26 @@ els.backBtn.addEventListener("click", () => {
 
 els.uploadInput.addEventListener("change", async () => {
   const files = Array.from(els.uploadInput.files || []);
+  const errors = [];
   for (const file of files) {
     const form = new FormData();
     form.append("file", file);
     form.append("path", currentPath);
     try {
-      await fetch("/api/upload", { method: "POST", credentials: "same-origin", body: form });
+      const res = await fetch("/api/upload", { method: "POST", credentials: "same-origin", body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        errors.push(`${file.name}: ${body.message || "HTTP " + res.status}`);
+      }
     } catch (err) {
-      alert("Не удалось загрузить файл " + file.name);
+      errors.push(`${file.name}: ${err.message}`);
     }
   }
   els.uploadInput.value = "";
   renderFolder(currentPath);
+  if (errors.length > 0) {
+    alert("Не удалось загрузить некоторые файлы:\n" + errors.join("\n"));
+  }
 });
 
 /* ---------- Open file (OnlyOffice or download) ---------- */
