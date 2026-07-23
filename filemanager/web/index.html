@@ -25,6 +25,9 @@
 <div id="appScreen" class="app-screen hidden">
 
   <div class="rail">
+    <button class="rail-btn" id="profileBtn" title="Профиль" aria-label="Профиль">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+    </button>
     <button class="rail-btn" id="logoutBtn" title="Выйти" aria-label="Выйти">
       <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
     </button>
@@ -75,6 +78,40 @@
     <div class="folder-body" id="folderList"></div>
   </div>
 
+</div>
+
+<div id="usersOverlay" class="modal-overlay hidden">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <span>Пользователи</span>
+      <button class="back-btn" id="usersCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+
+    <div id="usersList" class="users-list"></div>
+
+    <div class="add-user-form">
+      <h3>Добавить пользователя</h3>
+      <div class="add-user-row">
+        <label>Логин<input id="newUserLogin" autocomplete="off"></label>
+        <label>Пароль<input id="newUserPassword" type="text" autocomplete="off"></label>
+        <label>Роль
+          <select id="newUserRole">
+            <option value="employee">Сотрудник</option>
+            <option value="admin">Администратор</option>
+          </select>
+        </label>
+      </div>
+      <div class="perm-checks">
+        <label><input type="checkbox" id="newPermTools" checked> Инструменты</label>
+        <label><input type="checkbox" id="newPermDb" checked> База данных</label>
+        <label><input type="checkbox" id="newPermCases" checked> Дела</label>
+      </div>
+      <button class="primary" id="createUserBtn" type="button">Создать пользователя</button>
+    </div>
+  </div>
 </div>
 
 <script src="/app.js"></script>

@@ -29,6 +29,11 @@ const els = {
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
   addToolBtn: document.getElementById("addToolBtn"),
+  profileBtn: document.getElementById("profileBtn"),
+  usersOverlay: document.getElementById("usersOverlay"),
+  usersCloseBtn: document.getElementById("usersCloseBtn"),
+  usersList: document.getElementById("usersList"),
+  createUserBtn: document.getElementById("createUserBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -81,6 +86,56 @@ function showApp() {
   els.appScreen.classList.remove("hidden");
 }
 
+/* ---------- Права доступа и адаптация интерфейса под пользователя ---------- */
+
+let currentUser = null;
+// Если у пользователя открыт доступ ровно к одному разделу с файлами
+// ("db" или "cases") — работаем сразу в нём, без экрана с колонками.
+let singleColumnMode = null;
+
+function applyPermissionsUI() {
+  const p = currentUser || {};
+  document.querySelector('[data-col="tools"]').classList.toggle("hidden", !p.can_tools);
+  document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
+  document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
+
+  const allowed = [];
+  if (p.can_tools) allowed.push("tools");
+  if (p.can_db) allowed.push("db");
+  if (p.can_cases) allowed.push("cases");
+
+  if (allowed.length === 1 && (allowed[0] === "db" || allowed[0] === "cases")) {
+    singleColumnMode = allowed[0];
+    els.backBtn.classList.add("hidden");
+  } else {
+    singleColumnMode = null;
+    els.backBtn.classList.remove("hidden");
+  }
+
+  return allowed;
+}
+
+// Запускает подходящий начальный экран после входа/загрузки страницы.
+function enterAppForUser() {
+  const allowed = applyPermissionsUI();
+
+  if (allowed.length === 0) {
+    showColumnsUI();
+    els.columnsView.innerHTML =
+      '<div class="empty-hint" style="padding:2rem;">Нет доступа ни к одному разделу. Обратитесь к администратору.</div>';
+    return;
+  }
+
+  if (singleColumnMode === "db") {
+    goToFolder(DB_PATH, [{ label: "База данных", path: DB_PATH }], false);
+  } else if (singleColumnMode === "cases") {
+    goToFolder(CASES_PATH, [{ label: "Дела", path: CASES_PATH }], false);
+  } else {
+    showColumnsUI();
+    loadColumns();
+  }
+}
+
 /* ---------- Login ---------- */
 
 els.loginForm.addEventListener("submit", async (e) => {
@@ -89,9 +144,14 @@ els.loginForm.addEventListener("submit", async (e) => {
   const username = document.getElementById("loginUsername").value;
   const password = document.getElementById("loginPassword").value;
   try {
-    await apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
+    const { user } = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    currentUser = user;
     showApp();
-    loadColumns();
+    history.replaceState({ view: "columns" }, "");
+    enterAppForUser();
   } catch (err) {
     els.loginError.textContent = "Не удалось войти: проверьте логин и пароль";
   }
@@ -99,7 +159,123 @@ els.loginForm.addEventListener("submit", async (e) => {
 
 els.logoutBtn.addEventListener("click", async () => {
   try { await apiFetch("/api/auth/logout", { method: "POST" }); } catch (e) {}
+  currentUser = null;
+  singleColumnMode = null;
   showLogin();
+});
+
+/* ---------- Профиль / управление пользователями ---------- */
+
+els.profileBtn.addEventListener("click", () => {
+  if (currentUser && currentUser.role === "admin") {
+    openUsersPanel();
+  } else {
+    alert(`Пользователь: ${currentUser?.username || "—"}\nРоль: сотрудник`);
+  }
+});
+
+els.usersCloseBtn.addEventListener("click", () => {
+  els.usersOverlay.classList.add("hidden");
+});
+
+async function openUsersPanel() {
+  els.usersOverlay.classList.remove("hidden");
+  await loadUsersList();
+}
+
+async function loadUsersList() {
+  els.usersList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const { users } = await apiFetch("/api/users");
+    renderUsersList(users);
+  } catch (err) {
+    els.usersList.innerHTML = '<div class="empty-hint">Не удалось загрузить список пользователей</div>';
+  }
+}
+
+function renderUsersList(list) {
+  els.usersList.innerHTML = "";
+  if (!list || list.length === 0) {
+    els.usersList.innerHTML = '<div class="empty-hint">Пользователей пока нет</div>';
+    return;
+  }
+  for (const u of list) {
+    const row = document.createElement("div");
+    row.className = "user-row";
+    row.innerHTML = `
+      <span class="user-name">${u.username}</span>
+      <span class="role-badge">${u.role === "admin" ? "администратор" : "сотрудник"}</span>
+      <label><input type="checkbox" data-perm="can_tools" ${u.can_tools ? "checked" : ""}> Инструменты</label>
+      <label><input type="checkbox" data-perm="can_db" ${u.can_db ? "checked" : ""}> База данных</label>
+      <label><input type="checkbox" data-perm="can_cases" ${u.can_cases ? "checked" : ""}> Дела</label>
+      <button class="delete-btn" title="Удалить пользователя" aria-label="Удалить пользователя">${svgTrash}</button>
+    `;
+    row.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        try {
+          await apiFetch(`/api/users/${u.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ [cb.dataset.perm]: cb.checked }),
+          });
+          if (currentUser && currentUser.username === u.username) {
+            currentUser[cb.dataset.perm] = cb.checked;
+            applyPermissionsUI();
+          }
+        } catch (err) {
+          alert("Не удалось обновить права: " + err.message);
+          cb.checked = !cb.checked;
+        }
+      });
+    });
+    row.querySelector(".delete-btn").addEventListener("click", async () => {
+      if (!confirm(`Удалить пользователя «${u.username}»?`)) return;
+      try {
+        await apiFetch(`/api/users/${u.id}`, { method: "DELETE" });
+        loadUsersList();
+      } catch (err) {
+        alert("Не удалось удалить: " + err.message);
+      }
+    });
+    els.usersList.appendChild(row);
+  }
+}
+
+els.createUserBtn.addEventListener("click", async () => {
+  const loginInput = document.getElementById("newUserLogin");
+  const passInput = document.getElementById("newUserPassword");
+  const roleSelect = document.getElementById("newUserRole");
+  const permTools = document.getElementById("newPermTools");
+  const permDb = document.getElementById("newPermDb");
+  const permCases = document.getElementById("newPermCases");
+
+  const username = loginInput.value.trim();
+  const password = passInput.value;
+  if (!username || !password) {
+    alert("Укажите логин и пароль");
+    return;
+  }
+  try {
+    await apiFetch("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        password,
+        role: roleSelect.value,
+        can_tools: permTools.checked,
+        can_db: permDb.checked,
+        can_cases: permCases.checked,
+      }),
+    });
+    loginInput.value = "";
+    passInput.value = "";
+    roleSelect.value = "employee";
+    permTools.checked = true;
+    permDb.checked = true;
+    permCases.checked = true;
+    loadUsersList();
+  } catch (err) {
+    alert("Не удалось создать пользователя: " + err.message);
+  }
 });
 
 /* ---------- Columns ---------- */
@@ -261,7 +437,13 @@ function openFolder(path, rootLabel) {
 window.addEventListener("popstate", (e) => {
   const state = e.state;
   if (!state || state.view === "columns") {
-    goToColumns(false);
+    if (singleColumnMode) {
+      const rootPath = singleColumnMode === "db" ? DB_PATH : CASES_PATH;
+      const rootLabel = singleColumnMode === "db" ? "База данных" : "Дела";
+      goToFolder(rootPath, [{ label: rootLabel, path: rootPath }], false);
+    } else {
+      goToColumns(false);
+    }
   } else if (state.view === "folder") {
     goToFolder(state.path, state.trail || [], false);
   }
@@ -388,10 +570,11 @@ function openFile(relPath, fileName) {
 
 (async function init() {
   try {
-    await apiFetch("/api/auth/me");
+    const { user } = await apiFetch("/api/auth/me");
+    currentUser = user;
     showApp();
     history.replaceState({ view: "columns" }, "");
-    loadColumns();
+    enterAppForUser();
   } catch (err) {
     showLogin();
   }
