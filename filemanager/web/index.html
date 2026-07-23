@@ -64,15 +64,23 @@
   <div id="folderView" class="folder-view hidden">
     <div class="folder-header">
       <div class="breadcrumbs" id="breadcrumbs"></div>
-      <div class="folder-actions">
-        <label class="upload-btn">
-          <input type="file" id="uploadInput" multiple hidden>
-          Загрузить
-        </label>
+      <div class="folder-actions" id="folderActions">
+        <button class="upload-btn" id="uploadTriggerBtn" type="button">Загрузить</button>
+        <input type="file" id="uploadInput" multiple hidden>
+        <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
+        <button class="back-btn" id="selectModeBtn" type="button">Выбрать</button>
         <button class="back-btn" id="backBtn">
           <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Назад к колонкам
         </button>
+      </div>
+      <div class="selection-bar hidden" id="selectionBar">
+        <span id="selectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="downloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="deleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="cancelSelectBtn" type="button">Отмена</button>
+        </div>
       </div>
     </div>
     <div class="folder-body" id="folderList"></div>
@@ -116,9 +124,19 @@
 
 <div id="uploadPanel" class="upload-panel hidden">
   <div class="upload-panel-header">
-    <span id="uploadPanelTitle">Загрузка файлов</span>
+    <span id="uploadPanelTitle">Загрузка</span>
     <button id="uploadPanelCloseBtn" aria-label="Закрыть">
       <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div id="uploadChoice" class="upload-choice">
+    <button class="upload-choice-btn" id="chooseFilesBtn" type="button">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      Загрузить файлы
+    </button>
+    <button class="upload-choice-btn" id="chooseFolderBtn" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      Загрузить папку
     </button>
   </div>
   <div id="uploadPanelList" class="upload-panel-list"></div>

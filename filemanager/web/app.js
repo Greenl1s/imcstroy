@@ -38,6 +38,18 @@ const els = {
   uploadPanelTitle: document.getElementById("uploadPanelTitle"),
   uploadPanelList: document.getElementById("uploadPanelList"),
   uploadPanelCloseBtn: document.getElementById("uploadPanelCloseBtn"),
+  uploadTriggerBtn: document.getElementById("uploadTriggerBtn"),
+  uploadFolderInput: document.getElementById("uploadFolderInput"),
+  uploadChoice: document.getElementById("uploadChoice"),
+  chooseFilesBtn: document.getElementById("chooseFilesBtn"),
+  chooseFolderBtn: document.getElementById("chooseFolderBtn"),
+  folderActions: document.getElementById("folderActions"),
+  selectModeBtn: document.getElementById("selectModeBtn"),
+  selectionBar: document.getElementById("selectionBar"),
+  selectionCount: document.getElementById("selectionCount"),
+  downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
+  deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
+  cancelSelectBtn: document.getElementById("cancelSelectBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -399,6 +411,9 @@ async function createFolderIn(basePath, onDone) {
 
 let currentPath = "/";
 let currentTrail = [];
+let currentFolderEntries = [];
+let selectMode = false;
+let selectedPaths = new Set();
 
 function showColumnsUI() {
   els.folderView.classList.add("hidden");
@@ -414,6 +429,7 @@ function showFolderUI() {
 // кнопки "назад" браузера, чтобы не создавать новую запись в истории.
 function goToColumns(pushHistory) {
   currentTrail = [];
+  exitSelectMode(false);
   showColumnsUI();
   loadColumns();
   if (pushHistory) {
@@ -426,6 +442,7 @@ function goToColumns(pushHistory) {
 function goToFolder(path, trail, pushHistory) {
   currentTrail = trail;
   currentPath = path;
+  exitSelectMode(false);
   showFolderUI();
   renderFolder(path);
   if (pushHistory) {
@@ -458,48 +475,65 @@ async function renderFolder(path) {
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
     const data = await apiFetch(`/api/resources?path=${encodeURIComponent(path)}`);
-    const entries = [
+    currentFolderEntries = [
       ...(data.folders || []).map((f) => ({ ...f, isDir: true })),
       ...(data.files || []).map((f) => ({ ...f, isDir: false })),
-    ];
-    els.folderList.innerHTML = "";
-    if (entries.length === 0) {
-      els.folderList.innerHTML = '<div class="empty-hint">Папка пуста</div>';
-      return;
-    }
-    for (const entry of entries) {
-      const row = document.createElement("div");
-      row.className = "file-row";
-      const nextPath = (path.endsWith("/") ? path : path + "/") + entry.name;
-      row.innerHTML = `
-        <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span></div>
-        <div class="right">
-          <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
-          <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
-        </div>
-      `;
-      row.addEventListener("click", () => {
-        if (entry.isDir) {
-          const trail = [...currentTrail, { label: entry.name, path: nextPath }];
-          goToFolder(nextPath, trail, true);
-        } else {
-          openFile(nextPath, entry.name);
-        }
-      });
+    ].map((entry) => ({
+      ...entry,
+      fullPath: (path.endsWith("/") ? path : path + "/") + entry.name,
+    }));
+    renderFolderRows();
+  } catch (err) {
+    currentFolderEntries = [];
+    els.folderList.innerHTML = '<div class="empty-hint">Не удалось загрузить содержимое</div>';
+  }
+}
+
+// Перерисовывает список из уже загруженных данных (currentFolderEntries),
+// без повторного запроса к серверу — используется при переключении режима
+// выбора и при отметке/снятии чекбоксов.
+function renderFolderRows() {
+  els.folderList.innerHTML = "";
+  if (currentFolderEntries.length === 0) {
+    els.folderList.innerHTML = '<div class="empty-hint">Папка пуста</div>';
+    return;
+  }
+  for (const entry of currentFolderEntries) {
+    const row = document.createElement("div");
+    row.className = "file-row" + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
+    row.innerHTML = `
+      ${selectMode ? `<input type="checkbox" class="select-checkbox" ${selectedPaths.has(entry.fullPath) ? "checked" : ""}>` : ""}
+      <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span></div>
+      <div class="right">
+        <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
+        ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
+      </div>
+    `;
+    row.addEventListener("click", (e) => {
+      if (selectMode) {
+        toggleSelect(entry.fullPath);
+        return;
+      }
+      if (entry.isDir) {
+        const trail = [...currentTrail, { label: entry.name, path: entry.fullPath }];
+        goToFolder(entry.fullPath, trail, true);
+      } else {
+        openFile(entry.fullPath, entry.name);
+      }
+    });
+    if (!selectMode) {
       row.querySelector(".delete-btn").addEventListener("click", async (e) => {
         e.stopPropagation();
         if (!confirm(`Удалить «${entry.name}»?`)) return;
         try {
-          await apiFetch(`/api/resources?path=${encodeURIComponent(nextPath)}`, { method: "DELETE" });
-          renderFolder(path);
+          await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
+          renderFolder(currentPath);
         } catch (err) {
           alert("Не удалось удалить: " + err.message);
         }
       });
-      els.folderList.appendChild(row);
     }
-  } catch (err) {
-    els.folderList.innerHTML = '<div class="empty-hint">Не удалось загрузить содержимое</div>';
+    els.folderList.appendChild(row);
   }
 }
 
@@ -529,6 +563,91 @@ els.backBtn.addEventListener("click", () => {
   goToColumns(true);
 });
 
+/* ---------- Режим выбора (массовое удаление / скачивание) ---------- */
+
+els.selectModeBtn.addEventListener("click", () => {
+  selectMode = true;
+  selectedPaths = new Set();
+  els.folderActions.classList.add("hidden");
+  els.selectionBar.classList.remove("hidden");
+  updateSelectionBar();
+  renderFolderRows();
+});
+
+els.cancelSelectBtn.addEventListener("click", () => {
+  exitSelectMode(true);
+});
+
+function exitSelectMode(rerender) {
+  const wasSelecting = selectMode;
+  selectMode = false;
+  selectedPaths = new Set();
+  els.selectionBar.classList.add("hidden");
+  els.folderActions.classList.remove("hidden");
+  if (rerender && wasSelecting) renderFolderRows();
+}
+
+function toggleSelect(fullPath) {
+  if (selectedPaths.has(fullPath)) {
+    selectedPaths.delete(fullPath);
+  } else {
+    selectedPaths.add(fullPath);
+  }
+  updateSelectionBar();
+  renderFolderRows();
+}
+
+function updateSelectionBar() {
+  els.selectionCount.textContent = `Выбрано: ${selectedPaths.size}`;
+}
+
+els.deleteSelectedBtn.addEventListener("click", async () => {
+  if (selectedPaths.size === 0) return;
+  if (!confirm(`Удалить выбранное (${selectedPaths.size})? Это действие необратимо.`)) return;
+  const paths = [...selectedPaths];
+  try {
+    const results = await Promise.allSettled(
+      paths.map((p) => apiFetch(`/api/resources?path=${encodeURIComponent(p)}`, { method: "DELETE" }))
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    exitSelectMode(false);
+    await renderFolder(currentPath);
+    if (failed.length > 0) {
+      alert(`Не удалось удалить ${failed.length} из ${paths.length} элементов`);
+    }
+  } catch (err) {
+    alert("Не удалось удалить выбранное: " + err.message);
+  }
+});
+
+els.downloadSelectedBtn.addEventListener("click", async () => {
+  if (selectedPaths.size === 0) return;
+  const paths = [...selectedPaths];
+  try {
+    const res = await fetch("/api/download-zip", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || "HTTP " + res.status);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "files.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert("Не удалось скачать выбранное: " + err.message);
+  }
+});
+
 /* ---------- Upload (с наглядным прогрессом) ---------- */
 
 const svgCheck = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.5"><path d="M20 6 9 17l-5-5"/></svg>`;
@@ -536,9 +655,30 @@ const svgError = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:no
 
 let activeUploadItems = [];
 
+els.uploadTriggerBtn.addEventListener("click", () => {
+  els.uploadPanel.classList.remove("hidden");
+  els.uploadPanelTitle.textContent = "Что загрузить?";
+  els.uploadChoice.classList.remove("hidden");
+  els.uploadPanelList.innerHTML = "";
+});
+
+els.chooseFilesBtn.addEventListener("click", () => {
+  els.uploadInput.click();
+});
+
+els.chooseFolderBtn.addEventListener("click", () => {
+  els.uploadFolderInput.click();
+});
+
 els.uploadInput.addEventListener("change", () => {
   const files = Array.from(els.uploadInput.files || []);
   els.uploadInput.value = "";
+  if (files.length > 0) uploadFiles(files);
+});
+
+els.uploadFolderInput.addEventListener("change", () => {
+  const files = Array.from(els.uploadFolderInput.files || []);
+  els.uploadFolderInput.value = "";
   if (files.length > 0) uploadFiles(files);
 });
 
@@ -548,10 +688,12 @@ els.uploadPanelCloseBtn.addEventListener("click", () => {
 
 function uploadFiles(files) {
   const targetPath = currentPath;
+  els.uploadChoice.classList.add("hidden");
+
   activeUploadItems = files.map((file, i) => ({
     id: `${Date.now()}_${i}`,
     file,
-    name: file.name,
+    name: file.webkitRelativePath || file.name,
     progress: 0,
     status: "uploading", // uploading | done | error
     error: "",
@@ -567,6 +709,10 @@ function uploadFiles(files) {
     const form = new FormData();
     form.append("file", item.file);
     form.append("path", targetPath);
+    // Если файл выбран как часть папки — сохраняем структуру подпапок на сервере.
+    if (item.file.webkitRelativePath) {
+      form.append("relativePath", item.file.webkitRelativePath);
+    }
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {

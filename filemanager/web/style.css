@@ -465,6 +465,64 @@ button.primary:hover { background: #2569c9; }
   margin-top: 4px;
 }
 
+.upload-choice {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+}
+
+.upload-choice-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.upload-choice-btn svg {
+  width: 26px; height: 26px;
+  fill: none; stroke: currentColor; stroke-width: 1.6;
+}
+
+.upload-choice-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* Selection bar (bulk actions) */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  flex: 1;
+}
+
+.selection-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.select-checkbox {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.file-row.selectable { cursor: pointer; }
+.file-row.selected { background: var(--accent-bg); }
+
 @media (max-width: 720px) {
   .upload-panel { left: 12px; right: 12px; width: auto; }
 }
