@@ -48,6 +48,15 @@
         <span>База данных</span>
         <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
       </div>
+      <div class="col-toolbar">
+        <input type="text" class="col-search-input" id="dbSearchInput" placeholder="Поиск...">
+        <select class="col-sort-select" id="dbSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
+      </div>
       <div class="col-body" id="dbList"></div>
     </div>
 
@@ -55,6 +64,15 @@
       <div class="col-header">
         <span>Дела</span>
         <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
+      </div>
+      <div class="col-toolbar">
+        <input type="text" class="col-search-input" id="casesSearchInput" placeholder="Поиск...">
+        <select class="col-sort-select" id="casesSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
       </div>
       <div class="col-body" id="casesList"></div>
     </div>
@@ -65,6 +83,23 @@
     <div class="folder-header">
       <div class="breadcrumbs" id="breadcrumbs"></div>
       <div class="folder-actions" id="folderActions">
+        <div class="add-menu-wrap">
+          <button class="upload-btn" id="addMenuBtn" type="button">Добавить</button>
+          <div class="add-menu hidden" id="addMenu">
+            <button type="button" id="addFolderOption">
+              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+              Новая папка
+            </button>
+            <button type="button" id="addDocxOption">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Текстовый документ
+            </button>
+            <button type="button" id="addXlsxOption">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Таблица
+            </button>
+          </div>
+        </div>
         <button class="upload-btn" id="uploadTriggerBtn" type="button">Загрузить</button>
         <input type="file" id="uploadInput" multiple hidden>
         <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
@@ -81,6 +116,15 @@
           <button class="back-btn" id="deleteSelectedBtn" type="button">Удалить</button>
           <button class="back-btn" id="cancelSelectBtn" type="button">Отмена</button>
         </div>
+      </div>
+      <div class="folder-toolbar" id="folderToolbar">
+        <input type="text" id="folderSearchInput" placeholder="Поиск по этой папке и вложенным...">
+        <select id="folderSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
       </div>
     </div>
     <div class="folder-body" id="folderList"></div>

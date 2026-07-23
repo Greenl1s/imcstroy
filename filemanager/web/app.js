@@ -50,6 +50,17 @@ const els = {
   downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
   deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
   cancelSelectBtn: document.getElementById("cancelSelectBtn"),
+  dbSearchInput: document.getElementById("dbSearchInput"),
+  dbSortSelect: document.getElementById("dbSortSelect"),
+  casesSearchInput: document.getElementById("casesSearchInput"),
+  casesSortSelect: document.getElementById("casesSortSelect"),
+  folderSearchInput: document.getElementById("folderSearchInput"),
+  folderSortSelect: document.getElementById("folderSortSelect"),
+  addMenuBtn: document.getElementById("addMenuBtn"),
+  addMenu: document.getElementById("addMenu"),
+  addFolderOption: document.getElementById("addFolderOption"),
+  addDocxOption: document.getElementById("addDocxOption"),
+  addXlsxOption: document.getElementById("addXlsxOption"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -73,6 +84,48 @@ function extOf(name) {
 }
 
 const OFFICE_EXTS = new Set(["doc", "docx", "odt", "rtf", "xls", "xlsx", "ods", "csv", "ppt", "pptx", "odp"]);
+
+function joinPath(base, name) {
+  return (base.endsWith("/") ? base : base + "/") + name;
+}
+
+// Папки всегда сверху и сортируются по имени; файлы — по выбранному критерию.
+function sortEntries(entries, sortMode) {
+  const [field, dir] = (sortMode || "name-asc").split("-");
+  const mul = dir === "desc" ? -1 : 1;
+  const folders = entries.filter((e) => e.isDir)
+    .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }) * mul);
+  const files = entries.filter((e) => !e.isDir)
+    .sort((a, b) => {
+      if (field === "size") return ((a.size || 0) - (b.size || 0)) * mul;
+      return a.name.localeCompare(b.name, "ru", { numeric: true }) * mul;
+    });
+  return [...folders, ...files];
+}
+
+function debounce(fn, delay) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// Строит цепочку "хлебных крошек" от baseTrail/basePath до произвольного
+// вложенного fullPath — нужно, чтобы клик по результату поиска (который
+// может лежать на любой глубине) вёл в правильное место с корректными крошками.
+function buildTrailExtending(baseTrail, basePath, fullPath) {
+  const trail = [...baseTrail];
+  const baseNorm = basePath.endsWith("/") ? basePath : basePath + "/";
+  const relative = fullPath.startsWith(baseNorm) ? fullPath.slice(baseNorm.length) : "";
+  const segs = relative.split("/").filter(Boolean);
+  let acc = basePath;
+  for (const seg of segs) {
+    acc = joinPath(acc, seg);
+    trail.push({ label: seg, path: acc });
+  }
+  return trail;
+}
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(path, {
@@ -350,50 +403,98 @@ els.addToolBtn?.addEventListener("click", async () => {
   }
 });
 
-function renderFileColumn(container, items, sourcePath, rootLabel) {
+// Состояние каждой из файловых колонок: что сейчас показываем (обычный
+// список или результаты поиска) и откуда брать данные.
+const columnState = {
+  db: { rootPath: DB_PATH, rootLabel: "База данных", entries: [], searching: false },
+  cases: { rootPath: CASES_PATH, rootLabel: "Дела", entries: [], searching: false },
+};
+
+function colRefs(key) {
+  return key === "db"
+    ? { container: els.dbList, sortSelect: els.dbSortSelect, searchInput: els.dbSearchInput }
+    : { container: els.casesList, sortSelect: els.casesSortSelect, searchInput: els.casesSearchInput };
+}
+
+async function loadColumnList(key) {
+  const state = columnState[key];
+  const { container } = colRefs(key);
+  try {
+    const data = await apiFetch(`/api/resources?path=${encodeURIComponent(state.rootPath)}`);
+    state.entries = [
+      ...(data.folders || []).map((f) => ({ ...f, isDir: true, fullPath: joinPath(state.rootPath, f.name) })),
+      ...(data.files || []).map((f) => ({ ...f, isDir: false, fullPath: joinPath(state.rootPath, f.name) })),
+    ];
+    state.searching = false;
+    renderColumnList(key);
+  } catch (err) {
+    container.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+  }
+}
+
+function renderColumnList(key) {
+  const state = columnState[key];
+  const { container, sortSelect } = colRefs(key);
+  const sorted = sortEntries(state.entries, sortSelect.value);
   container.innerHTML = "";
-  const entries = [
-    ...(items.folders || []).map((f) => ({ ...f, isDir: true })),
-    ...(items.files || []).map((f) => ({ ...f, isDir: false })),
-  ];
-  if (entries.length === 0) {
-    container.innerHTML = '<div class="empty-hint">Здесь пока пусто</div>';
+  if (sorted.length === 0) {
+    container.innerHTML = `<div class="empty-hint">${state.searching ? "Ничего не найдено" : "Здесь пока пусто"}</div>`;
     return;
   }
-  for (const entry of entries) {
+  for (const entry of sorted) {
     const row = document.createElement("div");
     row.className = "row-item";
-    row.innerHTML = (entry.isDir ? svgFolder : svgFile) + `<span>${entry.name}</span>`;
+    const pathHint = state.searching
+      ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
+      : "";
+    row.innerHTML = `${entry.isDir ? svgFolder : svgFile}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}`;
     row.addEventListener("click", () => {
-      const nextPath = (sourcePath.endsWith("/") ? sourcePath : sourcePath + "/") + entry.name;
       if (entry.isDir) {
-        openFolder(nextPath, rootLabel);
+        const trail = buildTrailExtending([{ label: state.rootLabel, path: state.rootPath }], state.rootPath, entry.fullPath);
+        goToFolder(entry.fullPath, trail, true);
       } else {
-        openFile(nextPath, entry.name);
+        openFile(entry.fullPath, entry.name);
       }
     });
     container.appendChild(row);
   }
 }
 
-async function loadColumns() {
-  loadToolsColumn();
-  try {
-    const db = await apiFetch(`/api/resources?path=${encodeURIComponent(DB_PATH)}`);
-    renderFileColumn(els.dbList, db, DB_PATH, "База данных");
-  } catch (err) {
-    els.dbList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+async function searchColumn(key, query) {
+  const state = columnState[key];
+  const { container } = colRefs(key);
+  if (!query) {
+    await loadColumnList(key);
+    return;
   }
+  container.innerHTML = '<div class="empty-hint">Поиск…</div>';
   try {
-    const cases = await apiFetch(`/api/resources?path=${encodeURIComponent(CASES_PATH)}`);
-    renderFileColumn(els.casesList, cases, CASES_PATH, "Дела");
+    const { results } = await apiFetch(`/api/search?path=${encodeURIComponent(state.rootPath)}&q=${encodeURIComponent(query)}`);
+    state.entries = results.map((r) => ({ ...r, fullPath: r.path }));
+    state.searching = true;
+    renderColumnList(key);
   } catch (err) {
-    els.casesList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+    container.innerHTML = '<div class="empty-hint">Ошибка поиска</div>';
   }
 }
 
-els.mkdirDbBtn.addEventListener("click", () => createFolderIn(DB_PATH, loadColumns));
-els.mkdirCasesBtn.addEventListener("click", () => createFolderIn(CASES_PATH, loadColumns));
+const debouncedDbSearch = debounce((q) => searchColumn("db", q), 300);
+const debouncedCasesSearch = debounce((q) => searchColumn("cases", q), 300);
+els.dbSearchInput.addEventListener("input", (e) => debouncedDbSearch(e.target.value.trim()));
+els.casesSearchInput.addEventListener("input", (e) => debouncedCasesSearch(e.target.value.trim()));
+els.dbSortSelect.addEventListener("change", () => renderColumnList("db"));
+els.casesSortSelect.addEventListener("change", () => renderColumnList("cases"));
+
+async function loadColumns() {
+  loadToolsColumn();
+  els.dbSearchInput.value = "";
+  els.casesSearchInput.value = "";
+  loadColumnList("db");
+  loadColumnList("cases");
+}
+
+els.mkdirDbBtn.addEventListener("click", () => createFolderIn(DB_PATH, () => loadColumnList("db")));
+els.mkdirCasesBtn.addEventListener("click", () => createFolderIn(CASES_PATH, () => loadColumnList("cases")));
 
 async function createFolderIn(basePath, onDone) {
   const name = prompt("Название новой папки:");
@@ -407,6 +508,50 @@ async function createFolderIn(basePath, onDone) {
   }
 }
 
+/* ---------- Добавить (новая папка / docx / xlsx) в текущей папке ---------- */
+
+els.addMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  els.addMenu.classList.toggle("hidden");
+});
+
+document.addEventListener("click", () => {
+  els.addMenu.classList.add("hidden");
+});
+
+els.addMenu.addEventListener("click", (e) => e.stopPropagation());
+
+els.addFolderOption.addEventListener("click", async () => {
+  els.addMenu.classList.add("hidden");
+  const name = prompt("Название новой папки:");
+  if (!name) return;
+  try {
+    await apiFetch("/api/folder", { method: "POST", body: JSON.stringify({ path: joinPath(currentPath, name) }) });
+    renderFolder(currentPath);
+  } catch (err) {
+    alert("Не удалось создать папку: " + err.message);
+  }
+});
+
+els.addDocxOption.addEventListener("click", () => createNewDocument("docx", "текстового документа"));
+els.addXlsxOption.addEventListener("click", () => createNewDocument("xlsx", "таблицы"));
+
+async function createNewDocument(type, label) {
+  els.addMenu.classList.add("hidden");
+  const name = prompt(`Название ${label} (можно без расширения):`);
+  if (name === null) return;
+  try {
+    const { name: savedName } = await apiFetch("/api/create-file", {
+      method: "POST",
+      body: JSON.stringify({ path: currentPath, type, name }),
+    });
+    await renderFolder(currentPath);
+    openFile(joinPath(currentPath, savedName), savedName);
+  } catch (err) {
+    alert("Не удалось создать документ: " + err.message);
+  }
+}
+
 /* ---------- Folder (single big panel) view ---------- */
 
 let currentPath = "/";
@@ -414,6 +559,8 @@ let currentTrail = [];
 let currentFolderEntries = [];
 let selectMode = false;
 let selectedPaths = new Set();
+let folderSearching = false;
+let folderSearchResults = [];
 
 function showColumnsUI() {
   els.folderView.classList.add("hidden");
@@ -450,11 +597,6 @@ function goToFolder(path, trail, pushHistory) {
   }
 }
 
-function openFolder(path, rootLabel) {
-  const trail = [{ label: rootLabel, path: "/" }, { label: path.split("/").filter(Boolean).pop(), path }];
-  goToFolder(path, trail, true);
-}
-
 window.addEventListener("popstate", (e) => {
   const state = e.state;
   if (!state || state.view === "columns") {
@@ -471,6 +613,9 @@ window.addEventListener("popstate", (e) => {
 });
 
 async function renderFolder(path) {
+  folderSearching = false;
+  folderSearchResults = [];
+  if (els.folderSearchInput) els.folderSearchInput.value = "";
   renderBreadcrumbs();
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
@@ -489,21 +634,27 @@ async function renderFolder(path) {
   }
 }
 
-// Перерисовывает список из уже загруженных данных (currentFolderEntries),
-// без повторного запроса к серверу — используется при переключении режима
-// выбора и при отметке/снятии чекбоксов.
+// Перерисовывает список из уже загруженных данных (currentFolderEntries
+// либо, в режиме поиска, folderSearchResults) — без повторного запроса
+// к серверу. Используется при переключении режима выбора, отметке
+// чекбоксов и смене сортировки.
 function renderFolderRows() {
+  const source = folderSearching ? folderSearchResults : currentFolderEntries;
+  const list = sortEntries(source, els.folderSortSelect.value);
   els.folderList.innerHTML = "";
-  if (currentFolderEntries.length === 0) {
-    els.folderList.innerHTML = '<div class="empty-hint">Папка пуста</div>';
+  if (list.length === 0) {
+    els.folderList.innerHTML = `<div class="empty-hint">${folderSearching ? "Ничего не найдено" : "Папка пуста"}</div>`;
     return;
   }
-  for (const entry of currentFolderEntries) {
+  for (const entry of list) {
     const row = document.createElement("div");
     row.className = "file-row" + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
+    const pathHint = folderSearching
+      ? `<span class="search-path-hint">${entry.fullPath}</span>`
+      : "";
     row.innerHTML = `
       ${selectMode ? `<input type="checkbox" class="select-checkbox" ${selectedPaths.has(entry.fullPath) ? "checked" : ""}>` : ""}
-      <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span></div>
+      <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
@@ -515,7 +666,7 @@ function renderFolderRows() {
         return;
       }
       if (entry.isDir) {
-        const trail = [...currentTrail, { label: entry.name, path: entry.fullPath }];
+        const trail = buildTrailExtending(currentTrail, currentPath, entry.fullPath);
         goToFolder(entry.fullPath, trail, true);
       } else {
         openFile(entry.fullPath, entry.name);
@@ -527,7 +678,11 @@ function renderFolderRows() {
         if (!confirm(`Удалить «${entry.name}»?`)) return;
         try {
           await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
-          renderFolder(currentPath);
+          if (folderSearching) {
+            searchFolder(els.folderSearchInput.value.trim());
+          } else {
+            renderFolder(currentPath);
+          }
         } catch (err) {
           alert("Не удалось удалить: " + err.message);
         }
@@ -536,6 +691,28 @@ function renderFolderRows() {
     els.folderList.appendChild(row);
   }
 }
+
+async function searchFolder(query) {
+  if (!query) {
+    folderSearching = false;
+    folderSearchResults = [];
+    renderFolderRows();
+    return;
+  }
+  els.folderList.innerHTML = '<div class="empty-hint">Поиск…</div>';
+  try {
+    const { results } = await apiFetch(`/api/search?path=${encodeURIComponent(currentPath)}&q=${encodeURIComponent(query)}`);
+    folderSearchResults = results.map((r) => ({ ...r, fullPath: r.path }));
+    folderSearching = true;
+    renderFolderRows();
+  } catch (err) {
+    els.folderList.innerHTML = '<div class="empty-hint">Ошибка поиска</div>';
+  }
+}
+
+const debouncedFolderSearch = debounce((q) => searchFolder(q), 300);
+els.folderSearchInput.addEventListener("input", (e) => debouncedFolderSearch(e.target.value.trim()));
+els.folderSortSelect.addEventListener("change", () => renderFolderRows());
 
 function renderBreadcrumbs() {
   els.breadcrumbs.innerHTML = "";

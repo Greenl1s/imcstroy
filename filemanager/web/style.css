@@ -523,6 +523,120 @@ button.primary:hover { background: #2569c9; }
 .file-row.selectable { cursor: pointer; }
 .file-row.selected { background: var(--accent-bg); }
 
+/* Search & sort toolbars */
+.col-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.col-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.col-sort-select {
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  font-size: 11px;
+  padding: 0 4px;
+  max-width: 84px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.col-search-input:focus, .col-sort-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.folder-toolbar {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.folder-toolbar input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.folder-toolbar select {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  font-size: 13px;
+  padding: 0 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.folder-toolbar input:focus, .folder-toolbar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search-path-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+/* Add menu dropdown */
+.add-menu-wrap {
+  position: relative;
+}
+
+.add-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  padding: 6px;
+  min-width: 200px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.add-menu button:hover { background: var(--accent-bg); color: var(--accent); }
+
+.add-menu button svg {
+  width: 18px; height: 18px;
+  flex: 0 0 18px;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+}
+
 @media (max-width: 720px) {
   .upload-panel { left: 12px; right: 12px; width: auto; }
 }
