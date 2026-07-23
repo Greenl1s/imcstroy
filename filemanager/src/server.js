@@ -131,8 +131,17 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), async (req, res
     }
     const targetDir = filesLib.safeResolve(req.body.path || "/");
     await fs.promises.mkdir(targetDir, { recursive: true });
-    const destPath = path.join(targetDir, req.file.originalname);
-    await fs.promises.rename(req.file.path, destPath);
+
+    // multer/busboy старых версий отдают имя файла в кодировке latin1,
+    // из-за чего кириллица превращается в кракозябры — перекодируем обратно в utf8.
+    const fixedName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const destPath = path.join(targetDir, fixedName);
+
+    // /tmp и примонтированный том /data — разные файловые системы,
+    // поэтому fs.rename() падает с EXDEV. Копируем и затем удаляем исходник.
+    await fs.promises.copyFile(req.file.path, destPath);
+    await fs.promises.unlink(req.file.path);
+
     res.json({ ok: true });
   } catch (err) {
     console.error("Не удалось загрузить файл:", err);
