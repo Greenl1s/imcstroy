@@ -354,17 +354,24 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
   try {
     onlyoffice.verifyInternalToken(req.query.token, req.query.path);
   } catch (err) {
+    console.error("OnlyOffice callback: недействительный/просроченный токен для", req.query.path, "-", err.message);
     return res.status(403).json({ error: 1, message: "Недействительный токен" });
   }
 
   const { status, url } = req.body || {};
+  console.log(`OnlyOffice callback: path="${req.query.path}" status=${status}`);
+
   // status 2 = документ готов к сохранению, 6 = принудительное сохранение
   if (status === 2 || status === 6) {
     try {
       const abs = filesLib.safeResolve(req.query.path);
       const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`не удалось скачать сохранённый файл у OnlyOffice, HTTP ${response.status}`);
+      }
       const buffer = Buffer.from(await response.arrayBuffer());
       await fs.promises.writeFile(abs, buffer);
+      console.log(`OnlyOffice callback: файл "${req.query.path}" успешно сохранён (${buffer.length} байт)`);
     } catch (err) {
       console.error("Не удалось сохранить документ из OnlyOffice:", err);
       return res.json({ error: 1 });

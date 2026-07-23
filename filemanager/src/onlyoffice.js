@@ -31,8 +31,12 @@ function isOfficeFile(fileName) {
 
 // Короткоживущий токен для внутренних запросов (OnlyOffice -> наш backend).
 // НЕ то же самое, что токен пользовательской сессии.
+// Срок жизни специально большой (24 часа): OnlyOffice вызывает сохранение
+// только при закрытии документа — если бы токен истекал раньше, чем
+// длится реальное редактирование, финальное сохранение отклонялось бы
+// как "недействительный токен".
 function signInternalToken(relPath) {
-  return jwt.sign({ path: relPath }, INTERNAL_TOKEN_SECRET, { expiresIn: "20m" });
+  return jwt.sign({ path: relPath }, INTERNAL_TOKEN_SECRET, { expiresIn: "24h" });
 }
 
 function verifyInternalToken(token, relPath) {
