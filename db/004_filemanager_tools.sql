@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS fm_tools_links (
+  id SERIAL PRIMARY KEY,
+  label TEXT NOT NULL,
+  url TEXT NOT NULL,
+  position INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
