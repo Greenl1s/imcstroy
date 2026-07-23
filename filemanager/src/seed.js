@@ -12,8 +12,8 @@ async function main() {
   }
   const hash = await bcrypt.hash(password, 10);
   await db.query(
-    `INSERT INTO fm_users (username, password_hash, role)
-     VALUES ($1, $2, $3)
+    `INSERT INTO fm_users (username, password_hash, role, can_tools, can_db, can_cases)
+     VALUES ($1, $2, $3, true, true, true)
      ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role`,
     [username, hash, role]
   );

@@ -12,7 +12,7 @@ const TOKEN_TTL = "12h";
 
 async function findUser(username) {
   const res = await db.query(
-    "SELECT id, username, password_hash, role FROM fm_users WHERE username = $1",
+    "SELECT id, username, password_hash, role, can_tools, can_db, can_cases FROM fm_users WHERE username = $1",
     [username]
   );
   return res.rows[0] || null;
@@ -23,12 +23,26 @@ async function verifyLogin(username, password) {
   if (!user) return null;
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return null;
-  return { id: user.id, username: user.username, role: user.role };
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    can_tools: user.can_tools,
+    can_db: user.can_db,
+    can_cases: user.can_cases,
+  };
 }
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, role: user.role },
+    {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      can_tools: user.can_tools,
+      can_db: user.can_db,
+      can_cases: user.can_cases,
+    },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL }
   );
@@ -60,11 +74,19 @@ function requireAuth(req, res, next) {
   }
 }
 
+function requireAdmin(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Требуются права администратора" });
+  }
+  next();
+}
+
 module.exports = {
   verifyLogin,
   signToken,
   setAuthCookie,
   clearAuthCookie,
   requireAuth,
+  requireAdmin,
   COOKIE_NAME,
 };

@@ -8,6 +8,8 @@ const auth = require("./auth");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
+const users = require("./users");
+const { requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
 app.use(express.json());
@@ -43,7 +45,15 @@ app.post("/api/auth/login", async (req, res) => {
     }
     const token = auth.signToken(user);
     auth.setAuthCookie(res, token);
-    res.json({ user: { username: user.username, role: user.role } });
+    res.json({
+      user: {
+        username: user.username,
+        role: user.role,
+        can_tools: user.can_tools,
+        can_db: user.can_db,
+        can_cases: user.can_cases,
+      },
+    });
   } catch (err) {
     console.error("Ошибка входа:", err);
     res.status(500).json({ message: "Внутренняя ошибка сервера, попробуйте позже" });
@@ -56,12 +66,20 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/auth/me", auth.requireAuth, (req, res) => {
-  res.json({ user: { username: req.user.username, role: req.user.role } });
+  res.json({
+    user: {
+      username: req.user.username,
+      role: req.user.role,
+      can_tools: req.user.can_tools,
+      can_db: req.user.can_db,
+      can_cases: req.user.can_cases,
+    },
+  });
 });
 
 /* ---------------- Инструменты (ссылки) ---------------- */
 
-app.get("/api/tools", auth.requireAuth, async (req, res) => {
+app.get("/api/tools", auth.requireAuth, requireToolsAccess, async (req, res) => {
   try {
     const links = await tools.listLinks();
     res.json({ links });
@@ -71,7 +89,7 @@ app.get("/api/tools", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/tools", auth.requireAuth, async (req, res) => {
+app.post("/api/tools", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     const { label, url } = req.body || {};
     if (!label || !url) {
@@ -85,7 +103,7 @@ app.post("/api/tools", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.delete("/api/tools/:id", auth.requireAuth, async (req, res) => {
+app.delete("/api/tools/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     await tools.removeLink(req.params.id);
     res.json({ ok: true });
@@ -95,9 +113,70 @@ app.delete("/api/tools/:id", auth.requireAuth, async (req, res) => {
   }
 });
 
+/* ---------------- Пользователи и права доступа (только администратор) ---------------- */
+
+app.get("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    res.json({ users: await users.listUsers() });
+  } catch (err) {
+    console.error("Не удалось получить список пользователей:", err);
+    res.status(500).json({ message: "Не удалось получить список пользователей" });
+  }
+});
+
+app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const { username, password, role, can_tools, can_db, can_cases } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ message: "Укажите логин и пароль" });
+    }
+    const user = await users.createUser({ username, password, role, can_tools, can_db, can_cases });
+    res.json({ user });
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(400).json({ message: "Пользователь с таким логином уже существует" });
+    }
+    console.error("Не удалось создать пользователя:", err);
+    res.status(500).json({ message: "Не удалось создать пользователя" });
+  }
+});
+
+app.patch("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    await users.updateUser(req.params.id, req.body || {});
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось обновить пользователя:", err);
+    res.status(500).json({ message: "Не удалось обновить пользователя" });
+  }
+});
+
+app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    if (String(req.user.id) === String(req.params.id)) {
+      return res.status(400).json({ message: "Нельзя удалить самого себя" });
+    }
+    const target = await users.getUser(req.params.id);
+    if (!target) {
+      return res.status(404).json({ message: "Пользователь не найден" });
+    }
+    if (target.role === "admin") {
+      const adminCount = await users.countAdmins();
+      if (adminCount <= 1) {
+        return res.status(400).json({ message: "Нельзя удалить последнего администратора" });
+      }
+    }
+    await users.deleteUser(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось удалить пользователя:", err);
+    res.status(500).json({ message: "Не удалось удалить пользователя" });
+  }
+});
+
 /* ---------------- File browsing ---------------- */
 
-app.get("/api/resources", auth.requireAuth, async (req, res) => {
+app.get("/api/resources", auth.requireAuth, requireColumnAccess, async (req, res) => {
   try {
     const data = await filesLib.listDir(req.query.path || "/");
     res.json(data);
@@ -106,7 +185,7 @@ app.get("/api/resources", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/folder", auth.requireAuth, async (req, res) => {
+app.post("/api/folder", auth.requireAuth, requireColumnAccess, async (req, res) => {
   try {
     await filesLib.ensureDir(req.body.path);
     res.json({ ok: true });
@@ -115,7 +194,7 @@ app.post("/api/folder", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.delete("/api/resources", auth.requireAuth, async (req, res) => {
+app.delete("/api/resources", auth.requireAuth, requireColumnAccess, async (req, res) => {
   try {
     await filesLib.removeEntry(req.query.path);
     res.json({ ok: true });
@@ -124,7 +203,7 @@ app.delete("/api/resources", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/upload", auth.requireAuth, upload.single("file"), async (req, res) => {
+app.post("/api/upload", auth.requireAuth, requireColumnAccess, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "Файл не получен" });
@@ -149,7 +228,7 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), async (req, res
   }
 });
 
-app.get("/api/download", auth.requireAuth, (req, res) => {
+app.get("/api/download", auth.requireAuth, requireColumnAccess, (req, res) => {
   try {
     const abs = filesLib.safeResolve(req.query.path);
     res.download(abs);
@@ -161,7 +240,7 @@ app.get("/api/download", auth.requireAuth, (req, res) => {
 // В отличие от /api/download — не заставляет браузер скачивать файл,
 // а отдаёт его "как есть", чтобы браузер сам решил, показать его
 // (например, PDF) или предложить сохранить.
-app.get("/api/view", auth.requireAuth, (req, res) => {
+app.get("/api/view", auth.requireAuth, requireColumnAccess, (req, res) => {
   try {
     const abs = filesLib.safeResolve(req.query.path);
     res.setHeader("Content-Disposition", "inline");
@@ -173,7 +252,7 @@ app.get("/api/view", auth.requireAuth, (req, res) => {
 
 /* ---------------- OnlyOffice ---------------- */
 
-app.get("/api/onlyoffice/config", auth.requireAuth, (req, res) => {
+app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess, (req, res) => {
   try {
     const relPath = req.query.path;
     const fileName = path.basename(relPath);
