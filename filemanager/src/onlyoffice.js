@@ -4,6 +4,10 @@ const path = require("path");
 const ONLYOFFICE_JWT_SECRET = process.env.ONLYOFFICE_JWT_SECRET;
 const INTERNAL_TOKEN_SECRET = process.env.INTERNAL_TOKEN_SECRET || process.env.JWT_SECRET;
 const ONLYOFFICE_PUBLIC_URL = process.env.ONLYOFFICE_PUBLIC_URL; // например https://office.imcstroy.ru
+// Адрес, по которому наш backend сам обращается к OnlyOffice ВНУТРИ docker-сети,
+// не через публичный домен (иначе будет уходить в интернет и возвращаться
+// обратно на тот же сервер — часто виснет по таймауту).
+const ONLYOFFICE_INTERNAL_URL = process.env.ONLYOFFICE_INTERNAL_URL || "http://onlyoffice:80";
 const FILEMANAGER_INTERNAL_URL = process.env.FILEMANAGER_INTERNAL_URL || "http://filemanager:3000";
 
 if (!ONLYOFFICE_JWT_SECRET) {
@@ -45,6 +49,24 @@ function verifyInternalToken(token, relPath) {
     throw new Error("Токен не соответствует пути файла");
   }
   return true;
+}
+
+// OnlyOffice в колбэке присылает ссылку на сохранённый файл через свой
+// ПУБЛИЧНЫЙ адрес (ONLYOFFICE_PUBLIC_URL). Если наш backend попробует
+// обратиться по этому адресу напрямую, запрос уйдёт в интернет и будет
+// пытаться вернуться на этот же сервер — это часто зависает по таймауту.
+// Подменяем начало адреса на внутренний docker-адрес перед тем, как идти за файлом.
+function toInternalOnlyOfficeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const publicOrigin = new URL(ONLYOFFICE_PUBLIC_URL).origin;
+    if (parsed.origin === publicOrigin) {
+      return ONLYOFFICE_INTERNAL_URL + parsed.pathname + parsed.search;
+    }
+    return url;
+  } catch (err) {
+    return url;
+  }
 }
 
 function buildEditorConfig({ relPath, fileName, userId, userName }) {
@@ -91,4 +113,5 @@ module.exports = {
   buildEditorConfig,
   signInternalToken,
   verifyInternalToken,
+  toInternalOnlyOfficeUrl,
 };

@@ -365,7 +365,8 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
   if (status === 2 || status === 6) {
     try {
       const abs = filesLib.safeResolve(req.query.path);
-      const response = await fetch(url);
+      const fetchUrl = onlyoffice.toInternalOnlyOfficeUrl(url);
+      const response = await fetch(fetchUrl);
       if (!response.ok) {
         throw new Error(`не удалось скачать сохранённый файл у OnlyOffice, HTTP ${response.status}`);
       }
