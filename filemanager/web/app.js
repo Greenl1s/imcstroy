@@ -29,10 +29,6 @@ const els = {
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
   addToolBtn: document.getElementById("addToolBtn"),
-  officeOverlay: document.getElementById("officeOverlay"),
-  officeTitle: document.getElementById("officeTitle"),
-  officeEditorHolder: document.getElementById("officeEditorHolder"),
-  officeCloseBtn: document.getElementById("officeCloseBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -224,15 +220,54 @@ async function createFolderIn(basePath, onDone) {
 let currentPath = "/";
 let currentTrail = [];
 
-async function openFolder(path, rootLabel) {
-  currentTrail = [{ label: rootLabel, path: "/" }, { label: path.split("/").filter(Boolean).pop(), path }];
-  await renderFolder(path);
+function showColumnsUI() {
+  els.folderView.classList.add("hidden");
+  els.columnsView.classList.remove("hidden");
+}
+
+function showFolderUI() {
   els.columnsView.classList.add("hidden");
   els.folderView.classList.remove("hidden");
 }
 
-async function renderFolder(path) {
+// Переход в колонки. pushHistory=false используется при обработке
+// кнопки "назад" браузера, чтобы не создавать новую запись в истории.
+function goToColumns(pushHistory) {
+  currentTrail = [];
+  showColumnsUI();
+  loadColumns();
+  if (pushHistory) {
+    history.pushState({ view: "columns" }, "");
+  }
+}
+
+// Переход в папку (первое открытие из колонок, клик по подпапке или по хлебной крошке).
+// trail передаётся уже обновлённым вызывающей стороной.
+function goToFolder(path, trail, pushHistory) {
+  currentTrail = trail;
   currentPath = path;
+  showFolderUI();
+  renderFolder(path);
+  if (pushHistory) {
+    history.pushState({ view: "folder", path, trail }, "");
+  }
+}
+
+function openFolder(path, rootLabel) {
+  const trail = [{ label: rootLabel, path: "/" }, { label: path.split("/").filter(Boolean).pop(), path }];
+  goToFolder(path, trail, true);
+}
+
+window.addEventListener("popstate", (e) => {
+  const state = e.state;
+  if (!state || state.view === "columns") {
+    goToColumns(false);
+  } else if (state.view === "folder") {
+    goToFolder(state.path, state.trail || [], false);
+  }
+});
+
+async function renderFolder(path) {
   renderBreadcrumbs();
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
@@ -259,8 +294,8 @@ async function renderFolder(path) {
       `;
       row.addEventListener("click", () => {
         if (entry.isDir) {
-          currentTrail.push({ label: entry.name, path: nextPath });
-          renderFolder(nextPath);
+          const trail = [...currentTrail, { label: entry.name, path: nextPath }];
+          goToFolder(nextPath, trail, true);
         } else {
           openFile(nextPath, entry.name);
         }
@@ -290,8 +325,8 @@ function renderBreadcrumbs() {
     span.textContent = crumb.label;
     if (i !== currentTrail.length - 1) {
       span.addEventListener("click", () => {
-        currentTrail = currentTrail.slice(0, i + 1);
-        renderFolder(crumb.path);
+        const trail = currentTrail.slice(0, i + 1);
+        goToFolder(crumb.path, trail, true);
       });
     }
     els.breadcrumbs.appendChild(span);
@@ -305,10 +340,7 @@ function renderBreadcrumbs() {
 }
 
 els.backBtn.addEventListener("click", () => {
-  els.folderView.classList.add("hidden");
-  els.columnsView.classList.remove("hidden");
-  currentTrail = [];
-  loadColumns();
+  goToColumns(true);
 });
 
 /* ---------- Upload ---------- */
@@ -337,49 +369,20 @@ els.uploadInput.addEventListener("change", async () => {
   }
 });
 
-/* ---------- Open file (OnlyOffice or download) ---------- */
+/* ---------- Open file (PDF / OnlyOffice в новой вкладке, остальное — скачивание) ---------- */
 
-let officeScriptLoaded = false;
-let currentEditor = null;
-
-function loadOfficeScript(src) {
-  return new Promise((resolve, reject) => {
-    if (officeScriptLoaded) return resolve();
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = () => { officeScriptLoaded = true; resolve(); };
-    script.onerror = reject;
-    document.body.appendChild(script);
-  });
-}
-
-async function openFile(relPath, fileName) {
+function openFile(relPath, fileName) {
   const ext = extOf(fileName);
   if (ext === "pdf") {
-    window.open(`/api/download?path=${encodeURIComponent(relPath)}`, "_blank");
+    window.open(`/api/view?path=${encodeURIComponent(relPath)}`, "_blank");
     return;
   }
-  if (!OFFICE_EXTS.has(ext)) {
-    window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
+  if (OFFICE_EXTS.has(ext)) {
+    window.open(`/office.html?path=${encodeURIComponent(relPath)}`, "_blank");
     return;
   }
-  try {
-    const { config, scriptUrl } = await apiFetch(`/api/onlyoffice/config?path=${encodeURIComponent(relPath)}`);
-    await loadOfficeScript(scriptUrl);
-    els.officeTitle.textContent = fileName;
-    els.officeEditorHolder.innerHTML = "";
-    els.officeOverlay.classList.remove("hidden");
-    currentEditor = new DocsAPI.DocEditor("officeEditorHolder", config);
-  } catch (err) {
-    alert("Не удалось открыть документ: " + err.message);
-  }
+  window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
 }
-
-els.officeCloseBtn.addEventListener("click", () => {
-  els.officeOverlay.classList.add("hidden");
-  els.officeEditorHolder.innerHTML = "";
-  currentEditor = null;
-});
 
 /* ---------- Init ---------- */
 
@@ -387,6 +390,7 @@ els.officeCloseBtn.addEventListener("click", () => {
   try {
     await apiFetch("/api/auth/me");
     showApp();
+    history.replaceState({ view: "columns" }, "");
     loadColumns();
   } catch (err) {
     showLogin();

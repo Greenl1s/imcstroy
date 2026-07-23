@@ -222,28 +222,6 @@ button.primary:hover { background: #2569c9; }
 
 .file-row .delete-btn:hover { color: var(--danger); background: #fbeceb; }
 
-/* OnlyOffice overlay */
-.office-overlay {
-  position: fixed; inset: 0;
-  background: var(--bg-page);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-}
-
-.office-bar {
-  height: 48px;
-  flex: 0 0 48px;
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-#officeEditorHolder { flex: 1; }
-
 @media (max-width: 720px) {
   .app-screen { flex-direction: column; }
   .rail { flex-direction: row; width: 100%; }
