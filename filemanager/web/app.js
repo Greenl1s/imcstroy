@@ -444,16 +444,36 @@ function renderColumnList(key) {
   for (const entry of sorted) {
     const row = document.createElement("div");
     row.className = "row-item";
+    row.style.justifyContent = "space-between";
     const pathHint = state.searching
       ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
       : "";
-    row.innerHTML = `${entry.isDir ? svgFolder : svgFile}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}`;
+    row.innerHTML = `
+      <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+        ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
+      </span>
+      <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
+    `;
     row.addEventListener("click", () => {
       if (entry.isDir) {
         const trail = buildTrailExtending([{ label: state.rootLabel, path: state.rootPath }], state.rootPath, entry.fullPath);
         goToFolder(entry.fullPath, trail, true);
       } else {
         openFile(entry.fullPath, entry.name);
+      }
+    });
+    row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Удалить «${entry.name}»?`)) return;
+      try {
+        await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
+        if (state.searching) {
+          searchColumn(key, colRefs(key).searchInput.value.trim());
+        } else {
+          loadColumnList(key);
+        }
+      } catch (err) {
+        alert("Не удалось удалить: " + err.message);
       }
     });
     container.appendChild(row);

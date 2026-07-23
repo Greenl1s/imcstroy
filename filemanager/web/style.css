@@ -212,15 +212,16 @@ button.primary:hover { background: #2569c9; }
 
 .file-row .size { color: var(--text-muted); font-size: 12px; }
 
-.file-row .delete-btn {
+.delete-btn {
   width: 26px; height: 26px;
   border: none; background: transparent;
   color: var(--text-muted);
   border-radius: 6px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-.file-row .delete-btn:hover { color: var(--danger); background: #fbeceb; }
+.delete-btn:hover { color: var(--danger); background: #fbeceb; }
 
 /* Users management modal */
 .modal-overlay {
@@ -290,14 +291,7 @@ button.primary:hover { background: #2569c9; }
 
 .user-row .delete-btn {
   margin-left: auto;
-  width: 28px; height: 28px;
-  border: none; background: transparent;
-  color: var(--text-muted);
-  border-radius: 6px;
-  cursor: pointer;
 }
-
-.user-row .delete-btn:hover { color: var(--danger); background: #fbeceb; }
 
 .add-user-form {
   border-top: 1px solid var(--border);
