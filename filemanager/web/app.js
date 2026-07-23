@@ -1,17 +1,11 @@
 /* ============================================================
-   НАСТРОЙКИ — правьте здесь
+   НАСТРОЙКИ
    ============================================================ */
 
-// Какую папку показывать в колонке "База данных" ("/" = корень)
-const DB_PATH = "/";
-
-// Какую папку показывать в колонке "Дела"
-const CASES_PATH = "/";
-
-// Ссылки в колонке "Инструменты"
-const TOOLS_LINKS = [
-  { label: "Учёт приборов", url: "https://imcstroy.ru" },
-];
+// У каждой колонки — своя папка, чтобы содержимое не пересекалось.
+// Можно поменять на любые другие подпапки, если понадобится.
+const DB_PATH = "/База данных";
+const CASES_PATH = "/Дела";
 
 /* ============================================================
    Ниже — логика
@@ -34,6 +28,7 @@ const els = {
   uploadInput: document.getElementById("uploadInput"),
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
+  addToolBtn: document.getElementById("addToolBtn"),
   officeOverlay: document.getElementById("officeOverlay"),
   officeTitle: document.getElementById("officeTitle"),
   officeEditorHolder: document.getElementById("officeEditorHolder"),
@@ -113,22 +108,59 @@ els.logoutBtn.addEventListener("click", async () => {
 
 /* ---------- Columns ---------- */
 
-function renderToolsColumn() {
+async function loadToolsColumn() {
+  els.toolsList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const { links } = await apiFetch("/api/tools");
+    renderToolsColumn(links);
+  } catch (err) {
+    els.toolsList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+  }
+}
+
+function renderToolsColumn(links) {
   els.toolsList.innerHTML = "";
-  if (TOOLS_LINKS.length === 0) {
+  if (!links || links.length === 0) {
     els.toolsList.innerHTML = '<div class="empty-hint">Ссылок пока нет</div>';
     return;
   }
-  for (const link of TOOLS_LINKS) {
-    const a = document.createElement("a");
-    a.className = "row-item";
-    a.href = link.url;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.innerHTML = svgLink + `<span>${link.label}</span>`;
-    els.toolsList.appendChild(a);
+  for (const link of links) {
+    const row = document.createElement("div");
+    row.className = "row-item";
+    row.style.justifyContent = "space-between";
+    row.innerHTML = `
+      <a href="${link.url}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
+        ${svgLink}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${link.label}</span>
+      </a>
+      <button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>
+    `;
+    row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (!confirm(`Удалить ссылку «${link.label}»?`)) return;
+      try {
+        await apiFetch(`/api/tools/${link.id}`, { method: "DELETE" });
+        loadToolsColumn();
+      } catch (err) {
+        alert("Не удалось удалить ссылку: " + err.message);
+      }
+    });
+    els.toolsList.appendChild(row);
   }
 }
+
+els.addToolBtn?.addEventListener("click", async () => {
+  const label = prompt("Название ссылки (как будет подписана):");
+  if (!label) return;
+  let url = prompt("Адрес ссылки (например, https://example.com):");
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  try {
+    await apiFetch("/api/tools", { method: "POST", body: JSON.stringify({ label, url }) });
+    loadToolsColumn();
+  } catch (err) {
+    alert("Не удалось добавить ссылку: " + err.message);
+  }
+});
 
 function renderFileColumn(container, items, sourcePath, rootLabel) {
   container.innerHTML = "";
@@ -157,7 +189,7 @@ function renderFileColumn(container, items, sourcePath, rootLabel) {
 }
 
 async function loadColumns() {
-  renderToolsColumn();
+  loadToolsColumn();
   try {
     const db = await apiFetch(`/api/resources?path=${encodeURIComponent(DB_PATH)}`);
     renderFileColumn(els.dbList, db, DB_PATH, "База данных");
