@@ -257,7 +257,7 @@ async function renderFolder(path) {
           <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
         </div>
       `;
-      row.querySelector(".left").addEventListener("click", () => {
+      row.addEventListener("click", () => {
         if (entry.isDir) {
           currentTrail.push({ label: entry.name, path: nextPath });
           renderFolder(nextPath);
