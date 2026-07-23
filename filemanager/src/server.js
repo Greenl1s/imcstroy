@@ -158,6 +158,19 @@ app.get("/api/download", auth.requireAuth, (req, res) => {
   }
 });
 
+// В отличие от /api/download — не заставляет браузер скачивать файл,
+// а отдаёт его "как есть", чтобы браузер сам решил, показать его
+// (например, PDF) или предложить сохранить.
+app.get("/api/view", auth.requireAuth, (req, res) => {
+  try {
+    const abs = filesLib.safeResolve(req.query.path);
+    res.setHeader("Content-Disposition", "inline");
+    res.sendFile(abs);
+  } catch (err) {
+    res.status(400).json({ message: "Не удалось открыть файл: " + err.message });
+  }
+});
+
 /* ---------------- OnlyOffice ---------------- */
 
 app.get("/api/onlyoffice/config", auth.requireAuth, (req, res) => {
