@@ -3,13 +3,14 @@ const cookieParser = require("cookie-parser");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const { ZipArchive } = require("archiver");
 
 const auth = require("./auth");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
 const users = require("./users");
-const { requireColumnAccess, requireToolsAccess } = require("./permissions");
+const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
 app.use(express.json());
@@ -203,6 +204,16 @@ app.delete("/api/resources", auth.requireAuth, requireColumnAccess, async (req, 
   }
 });
 
+// Убирает ".." и пустые сегменты из относительного пути, присланного
+// клиентом при загрузке папки — чтобы нельзя было вылезти за пределы
+// целевой директории через специально сформированный путь.
+function sanitizeRelativePath(relPath) {
+  return relPath
+    .split(/[\\/]+/)
+    .filter((seg) => seg && seg !== "." && seg !== "..")
+    .join("/");
+}
+
 app.post("/api/upload", auth.requireAuth, requireColumnAccess, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
@@ -214,10 +225,18 @@ app.post("/api/upload", auth.requireAuth, requireColumnAccess, upload.single("fi
     // multer/busboy старых версий отдают имя файла в кодировке latin1,
     // из-за чего кириллица превращается в кракозябры — перекодируем обратно в utf8.
     const fixedName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
-    const destPath = path.join(targetDir, fixedName);
 
-    // /tmp и примонтированный том /data — разные файловые системы,
-    // поэтому fs.rename() падает с EXDEV. Копируем и затем удаляем исходник.
+    // При загрузке целой папки браузер присылает относительный путь файла
+    // внутри неё (например "Отчёты/Июль/файл.docx") в поле relativePath —
+    // нужно воссоздать эту структуру подпапок на диске.
+    const rawRelativePath = req.body.relativePath ? sanitizeRelativePath(req.body.relativePath) : "";
+    const destPath = path.join(targetDir, rawRelativePath || fixedName);
+
+    if (destPath !== targetDir && !destPath.startsWith(targetDir + path.sep)) {
+      throw new Error("Недопустимый путь файла");
+    }
+
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
     await fs.promises.copyFile(req.file.path, destPath);
     await fs.promises.unlink(req.file.path);
 
@@ -247,6 +266,57 @@ app.get("/api/view", auth.requireAuth, requireColumnAccess, (req, res) => {
     res.sendFile(abs);
   } catch (err) {
     res.status(400).json({ message: "Не удалось открыть файл: " + err.message });
+  }
+});
+
+// Скачивание нескольких выбранных файлов/папок разом — упаковываем в zip на лету.
+app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
+  try {
+    const paths = Array.isArray(req.body && req.body.paths) ? req.body.paths : [];
+    if (paths.length === 0) {
+      return res.status(400).json({ message: "Не выбрано ни одного элемента" });
+    }
+
+    if (req.user.role !== "admin") {
+      for (const p of paths) {
+        const col = columnForPath(p);
+        const allowed = (col === "db" && req.user.can_db) || (col === "cases" && req.user.can_cases);
+        if (!allowed) {
+          return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
+        }
+      }
+    }
+
+    const absPaths = paths.map((p) => filesLib.safeResolve(p));
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="files.zip"');
+
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      console.error("Ошибка формирования zip:", err);
+      res.destroy();
+    });
+    archive.pipe(res);
+
+    for (const abs of absPaths) {
+      const stat = await fs.promises.stat(abs);
+      const name = path.basename(abs);
+      if (stat.isDirectory()) {
+        archive.directory(abs, name);
+      } else {
+        archive.file(abs, { name });
+      }
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error("Не удалось создать zip-архив:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ message: "Не удалось скачать выбранное: " + err.message });
+    } else {
+      res.end();
+    }
   }
 });
 
