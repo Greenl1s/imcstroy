@@ -349,6 +349,126 @@ button.primary:hover { background: #2569c9; }
   cursor: pointer;
 }
 
+/* Upload status panel */
+.upload-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 320px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.16);
+  z-index: 900;
+  animation: upload-panel-in 0.25s ease;
+}
+
+@keyframes upload-panel-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.upload-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.upload-panel-header button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.upload-panel-header button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.upload-panel-header button:hover { color: var(--text-primary); background: var(--accent-bg); }
+
+.upload-panel-list {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.upload-item { animation: upload-item-in 0.2s ease; }
+
+@keyframes upload-item-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.upload-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.upload-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.upload-item-status {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.upload-item-status.status-done { color: #1d9e75; }
+.upload-item-status.status-error { color: var(--danger); }
+
+.upload-progress-track {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.upload-progress-fill.uploading {
+  background-image: linear-gradient(90deg, var(--accent) 25%, #6aa8f5 50%, var(--accent) 75%);
+  background-size: 200% 100%;
+  animation: upload-stripe 1.2s linear infinite;
+}
+
+.upload-progress-fill.done { background: #1d9e75; }
+.upload-progress-fill.error { background: var(--danger); }
+
+@keyframes upload-stripe {
+  from { background-position: 200% 0; }
+  to { background-position: 0 0; }
+}
+
+.upload-item-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .upload-panel { left: 12px; right: 12px; width: auto; }
+}
+
 @media (max-width: 720px) {
   .app-screen { flex-direction: column; }
   .rail { flex-direction: row; width: 100%; }

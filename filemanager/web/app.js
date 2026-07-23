@@ -34,6 +34,10 @@ const els = {
   usersCloseBtn: document.getElementById("usersCloseBtn"),
   usersList: document.getElementById("usersList"),
   createUserBtn: document.getElementById("createUserBtn"),
+  uploadPanel: document.getElementById("uploadPanel"),
+  uploadPanelTitle: document.getElementById("uploadPanelTitle"),
+  uploadPanelList: document.getElementById("uploadPanelList"),
+  uploadPanelCloseBtn: document.getElementById("uploadPanelCloseBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -525,31 +529,117 @@ els.backBtn.addEventListener("click", () => {
   goToColumns(true);
 });
 
-/* ---------- Upload ---------- */
+/* ---------- Upload (с наглядным прогрессом) ---------- */
 
-els.uploadInput.addEventListener("change", async () => {
+const svgCheck = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.5"><path d="M20 6 9 17l-5-5"/></svg>`;
+const svgError = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.5"><path d="M12 8v5M12 16h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>`;
+
+let activeUploadItems = [];
+
+els.uploadInput.addEventListener("change", () => {
   const files = Array.from(els.uploadInput.files || []);
-  const errors = [];
-  for (const file of files) {
+  els.uploadInput.value = "";
+  if (files.length > 0) uploadFiles(files);
+});
+
+els.uploadPanelCloseBtn.addEventListener("click", () => {
+  els.uploadPanel.classList.add("hidden");
+});
+
+function uploadFiles(files) {
+  const targetPath = currentPath;
+  activeUploadItems = files.map((file, i) => ({
+    id: `${Date.now()}_${i}`,
+    file,
+    name: file.name,
+    progress: 0,
+    status: "uploading", // uploading | done | error
+    error: "",
+  }));
+
+  els.uploadPanel.classList.remove("hidden");
+  renderUploadPanel();
+
+  let remaining = activeUploadItems.length;
+
+  for (const item of activeUploadItems) {
+    const xhr = new XMLHttpRequest();
     const form = new FormData();
-    form.append("file", file);
-    form.append("path", currentPath);
-    try {
-      const res = await fetch("/api/upload", { method: "POST", credentials: "same-origin", body: form });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        errors.push(`${file.name}: ${body.message || "HTTP " + res.status}`);
+    form.append("file", item.file);
+    form.append("path", targetPath);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        item.progress = Math.round((e.loaded / e.total) * 100);
+        renderUploadPanel();
       }
-    } catch (err) {
-      errors.push(`${file.name}: ${err.message}`);
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        item.status = "done";
+        item.progress = 100;
+      } else {
+        item.status = "error";
+        try {
+          item.error = JSON.parse(xhr.responseText).message || "Ошибка загрузки";
+        } catch (e) {
+          item.error = "HTTP " + xhr.status;
+        }
+      }
+      settle();
+    });
+
+    xhr.addEventListener("error", () => {
+      item.status = "error";
+      item.error = "Ошибка сети";
+      settle();
+    });
+
+    xhr.open("POST", "/api/upload");
+    xhr.withCredentials = true;
+    xhr.send(form);
+
+    function settle() {
+      remaining--;
+      renderUploadPanel();
+      if (remaining === 0) {
+        renderFolder(targetPath);
+        if (!activeUploadItems.some((i) => i.status === "error")) {
+          setTimeout(() => {
+            els.uploadPanel.classList.add("hidden");
+          }, 1800);
+        }
+      }
     }
   }
-  els.uploadInput.value = "";
-  renderFolder(currentPath);
-  if (errors.length > 0) {
-    alert("Не удалось загрузить некоторые файлы:\n" + errors.join("\n"));
+}
+
+function renderUploadPanel() {
+  const doneCount = activeUploadItems.filter((i) => i.status === "done").length;
+  els.uploadPanelTitle.textContent = `Загрузка файлов (${doneCount}/${activeUploadItems.length})`;
+
+  els.uploadPanelList.innerHTML = "";
+  for (const item of activeUploadItems) {
+    const row = document.createElement("div");
+    row.className = "upload-item";
+    const statusHtml =
+      item.status === "done" ? `<span class="upload-item-status status-done">${svgCheck}</span>`
+      : item.status === "error" ? `<span class="upload-item-status status-error">${svgError}</span>`
+      : `<span class="upload-item-status">${item.progress}%</span>`;
+    row.innerHTML = `
+      <div class="upload-item-top">
+        <span class="upload-item-name">${item.name}</span>
+        ${statusHtml}
+      </div>
+      <div class="upload-progress-track">
+        <div class="upload-progress-fill ${item.status}" style="width:${item.status === "error" ? 100 : item.progress}%;"></div>
+      </div>
+      ${item.status === "error" ? `<div class="upload-item-error">${item.error}</div>` : ""}
+    `;
+    els.uploadPanelList.appendChild(row);
   }
-});
+}
 
 /* ---------- Open file (PDF / OnlyOffice в новой вкладке, остальное — скачивание) ---------- */
 
