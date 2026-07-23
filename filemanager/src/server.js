@@ -7,6 +7,7 @@ const path = require("path");
 const auth = require("./auth");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
+const tools = require("./tools");
 
 const app = express();
 app.use(express.json());
@@ -15,7 +16,18 @@ app.use(cookieParser());
 const WEB_ROOT = path.join(__dirname, "..", "web");
 app.use(express.static(WEB_ROOT));
 
-const upload = multer({ dest: "/tmp/fm-uploads" });
+// Папка для временных файлов при загрузке. Создаём заранее явно —
+// иначе multer может упасть с ENOENT, если папки ещё нет в контейнере.
+const UPLOAD_TMP_DIR = "/tmp/fm-uploads";
+fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+const upload = multer({ dest: UPLOAD_TMP_DIR });
+
+// Отдельные корневые папки для колонок "База данных" и "Дела",
+// чтобы они не показывали одно и то же содержимое.
+const COLUMN_ROOTS = ["/База данных", "/Дела"];
+for (const rel of COLUMN_ROOTS) {
+  fs.mkdirSync(filesLib.safeResolve(rel), { recursive: true });
+}
 
 /* ---------------- Auth ---------------- */
 
@@ -45,6 +57,42 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.get("/api/auth/me", auth.requireAuth, (req, res) => {
   res.json({ user: { username: req.user.username, role: req.user.role } });
+});
+
+/* ---------------- Инструменты (ссылки) ---------------- */
+
+app.get("/api/tools", auth.requireAuth, async (req, res) => {
+  try {
+    const links = await tools.listLinks();
+    res.json({ links });
+  } catch (err) {
+    console.error("Не удалось получить ссылки:", err);
+    res.status(500).json({ message: "Не удалось получить ссылки" });
+  }
+});
+
+app.post("/api/tools", auth.requireAuth, async (req, res) => {
+  try {
+    const { label, url } = req.body || {};
+    if (!label || !url) {
+      return res.status(400).json({ message: "Укажите название и адрес ссылки" });
+    }
+    const link = await tools.addLink(label, url);
+    res.json({ link });
+  } catch (err) {
+    console.error("Не удалось добавить ссылку:", err);
+    res.status(500).json({ message: "Не удалось добавить ссылку" });
+  }
+});
+
+app.delete("/api/tools/:id", auth.requireAuth, async (req, res) => {
+  try {
+    await tools.removeLink(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось удалить ссылку:", err);
+    res.status(500).json({ message: "Не удалось удалить ссылку" });
+  }
 });
 
 /* ---------------- File browsing ---------------- */
@@ -78,12 +126,16 @@ app.delete("/api/resources", auth.requireAuth, async (req, res) => {
 
 app.post("/api/upload", auth.requireAuth, upload.single("file"), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Файл не получен" });
+    }
     const targetDir = filesLib.safeResolve(req.body.path || "/");
-    const destPath = path.join(targetDir, req.file.originalname);
     await fs.promises.mkdir(targetDir, { recursive: true });
+    const destPath = path.join(targetDir, req.file.originalname);
     await fs.promises.rename(req.file.path, destPath);
     res.json({ ok: true });
   } catch (err) {
+    console.error("Не удалось загрузить файл:", err);
     res.status(400).json({ message: "Не удалось загрузить файл: " + err.message });
   }
 });
