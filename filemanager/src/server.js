@@ -195,6 +195,58 @@ app.post("/api/folder", auth.requireAuth, requireColumnAccess, async (req, res) 
   }
 });
 
+app.get("/api/search", auth.requireAuth, requireColumnAccess, async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    if (!q) {
+      return res.json({ results: [] });
+    }
+    const results = await filesLib.searchTree(req.query.path || "/", q);
+    res.json({ results });
+  } catch (err) {
+    console.error("Ошибка поиска:", err);
+    res.status(400).json({ message: "Не удалось выполнить поиск: " + err.message });
+  }
+});
+
+const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
+const FILE_TEMPLATES = {
+  docx: { file: "empty.docx", defaultName: "Новый документ.docx" },
+  xlsx: { file: "empty.xlsx", defaultName: "Новая таблица.xlsx" },
+};
+
+app.post("/api/create-file", auth.requireAuth, requireColumnAccess, async (req, res) => {
+  try {
+    const { type } = req.body || {};
+    let { name } = req.body || {};
+    const template = FILE_TEMPLATES[type];
+    if (!template) {
+      return res.status(400).json({ message: "Неизвестный тип документа" });
+    }
+    const ext = "." + type;
+    name = (name || "").trim() || template.defaultName;
+    // без слэшей — это просто имя файла, не путь
+    name = name.replace(/[\\/]/g, "");
+    if (!name.toLowerCase().endsWith(ext)) {
+      name += ext;
+    }
+
+    const targetDir = filesLib.safeResolve(req.body.path || "/");
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    const destPath = path.join(targetDir, name);
+
+    if (fs.existsSync(destPath)) {
+      return res.status(400).json({ message: "Файл с таким именем уже существует" });
+    }
+
+    await fs.promises.copyFile(path.join(TEMPLATES_DIR, template.file), destPath);
+    res.json({ ok: true, name });
+  } catch (err) {
+    console.error("Не удалось создать документ:", err);
+    res.status(500).json({ message: "Не удалось создать документ: " + err.message });
+  }
+});
+
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess, async (req, res) => {
   try {
     await filesLib.removeEntry(req.query.path);
