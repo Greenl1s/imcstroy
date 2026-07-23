@@ -1,0 +1,251 @@
+:root {
+  --bg-page: #eceae3;
+  --bg-card: #ffffff;
+  --border: #d9d7cf;
+  --border-strong: #c3c1b8;
+  --text-primary: #2c2c2a;
+  --text-secondary: #6b6a64;
+  --text-muted: #9a988f;
+  --accent: #2f80ed;
+  --accent-bg: #e6f0fd;
+  --radius: 10px;
+  --danger: #d84c3e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+.hidden { display: none !important; }
+
+/* Login screen */
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.login-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-panel h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+
+.login-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.login-panel input {
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.login-panel input:focus { outline: none; border-color: var(--accent); }
+
+button.primary {
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+button.primary:hover { background: #2569c9; }
+
+.error-text { color: var(--danger); font-size: 13px; margin: 0; min-height: 16px; }
+
+/* App shell */
+.app-screen { display: flex; gap: 12px; padding: 16px; align-items: flex-start; }
+
+.rail {
+  flex: 0 0 56px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.rail-btn {
+  width: 36px; height: 36px;
+  border: none; background: transparent;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.rail-btn:hover { background: var(--accent-bg); color: var(--accent); }
+
+.rail-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Columns view */
+.columns-view { flex: 1; display: flex; gap: 12px; flex-wrap: wrap; }
+
+.col {
+  flex: 1; min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 14px; font-weight: 600; margin-bottom: 14px;
+}
+
+.add-btn {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px; line-height: 1;
+  cursor: pointer;
+}
+
+.add-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.col-body { display: flex; flex-direction: column; gap: 10px; }
+
+.row-item {
+  height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  background: var(--bg-card);
+}
+
+.row-item:hover { border-color: var(--accent); color: var(--accent); }
+
+.row-item .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+.empty-hint { font-size: 12px; color: var(--text-muted); padding: 8px 4px; }
+
+/* Folder (single big panel) view */
+.folder-view {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.folder-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+
+.folder-actions { display: flex; align-items: center; gap: 8px; }
+
+.breadcrumbs { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.breadcrumbs .crumb { cursor: pointer; }
+.breadcrumbs .crumb:hover { color: var(--accent); }
+.breadcrumbs .crumb.current { color: var(--text-primary); font-weight: 600; cursor: default; }
+
+.upload-btn, .back-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.upload-btn:hover, .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.back-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+.folder-body { display: flex; flex-direction: column; }
+
+.file-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.file-row:last-child { border-bottom: none; }
+.file-row:hover { background: var(--accent-bg); }
+
+.file-row .left { display: flex; align-items: center; gap: 10px; }
+
+.file-row .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: var(--text-secondary); stroke-width: 1.8; }
+
+.file-row .right { display: flex; align-items: center; gap: 10px; }
+
+.file-row .size { color: var(--text-muted); font-size: 12px; }
+
+.file-row .delete-btn {
+  width: 26px; height: 26px;
+  border: none; background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-row .delete-btn:hover { color: var(--danger); background: #fbeceb; }
+
+/* OnlyOffice overlay */
+.office-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg-page);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.office-bar {
+  height: 48px;
+  flex: 0 0 48px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+#officeEditorHolder { flex: 1; }
+
+@media (max-width: 720px) {
+  .app-screen { flex-direction: column; }
+  .rail { flex-direction: row; width: 100%; }
+  .columns-view { width: 100%; }
+}

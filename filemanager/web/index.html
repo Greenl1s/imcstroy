@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Файлы</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-panel">
+    <h1>Вход</h1>
+    <label>Логин
+      <input id="loginUsername" autocomplete="username" required>
+    </label>
+    <label>Пароль
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+    </label>
+    <button class="primary" type="submit">Войти</button>
+    <p id="loginError" class="error-text"></p>
+  </form>
+</div>
+
+<div id="appScreen" class="app-screen hidden">
+
+  <div class="rail">
+    <button class="rail-btn" id="logoutBtn" title="Выйти" aria-label="Выйти">
+      <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
+    </button>
+  </div>
+
+  <div id="columnsView" class="columns-view">
+
+    <div class="col" data-col="tools">
+      <div class="col-header"><span>Инструменты</span></div>
+      <div class="col-body" id="toolsList"></div>
+    </div>
+
+    <div class="col" data-col="db">
+      <div class="col-header">
+        <span>База данных</span>
+        <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
+      </div>
+      <div class="col-body" id="dbList"></div>
+    </div>
+
+    <div class="col" data-col="cases">
+      <div class="col-header">
+        <span>Дела</span>
+        <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
+      </div>
+      <div class="col-body" id="casesList"></div>
+    </div>
+
+  </div>
+
+  <div id="folderView" class="folder-view hidden">
+    <div class="folder-header">
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="folder-actions">
+        <label class="upload-btn">
+          <input type="file" id="uploadInput" multiple hidden>
+          Загрузить
+        </label>
+        <button class="back-btn" id="backBtn">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Назад к колонкам
+        </button>
+      </div>
+    </div>
+    <div class="folder-body" id="folderList"></div>
+  </div>
+
+</div>
+
+<div id="officeOverlay" class="office-overlay hidden">
+  <div class="office-bar">
+    <span id="officeTitle"></span>
+    <button class="back-btn" id="officeCloseBtn">
+      <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      Закрыть
+    </button>
+  </div>
+  <div id="officeEditorHolder"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
