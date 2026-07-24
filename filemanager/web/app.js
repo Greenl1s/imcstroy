@@ -67,6 +67,7 @@ const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1
 const svgFile = `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
 const svgLink = `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`;
 const svgTrash = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>`;
+const svgDownload = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
 
 function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return "";
@@ -84,6 +85,7 @@ function extOf(name) {
 }
 
 const OFFICE_EXTS = new Set(["doc", "docx", "odt", "rtf", "xls", "xlsx", "ods", "csv", "ppt", "pptx", "odp"]);
+const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"]);
 
 function joinPath(base, name) {
   return (base.endsWith("/") ? base : base + "/") + name;
@@ -452,6 +454,7 @@ function renderColumnList(key) {
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
+      ${!entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
       <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
     `;
     row.addEventListener("click", () => {
@@ -462,6 +465,12 @@ function renderColumnList(key) {
         openFile(entry.fullPath, entry.name);
       }
     });
+    if (!entry.isDir) {
+      row.querySelector(".download-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        downloadFile(entry.fullPath);
+      });
+    }
     row.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (!confirm(`Удалить «${entry.name}»?`)) return;
@@ -677,6 +686,7 @@ function renderFolderRows() {
       <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
+        ${selectMode ? "" : !entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
     `;
@@ -692,6 +702,12 @@ function renderFolderRows() {
         openFile(entry.fullPath, entry.name);
       }
     });
+    if (!selectMode && !entry.isDir) {
+      row.querySelector(".download-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        downloadFile(entry.fullPath);
+      });
+    }
     if (!selectMode) {
       row.querySelector(".delete-btn").addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -988,7 +1004,7 @@ function renderUploadPanel() {
 
 function openFile(relPath, fileName) {
   const ext = extOf(fileName);
-  if (ext === "pdf") {
+  if (ext === "pdf" || IMAGE_EXTS.has(ext)) {
     window.open(`/api/view?path=${encodeURIComponent(relPath)}`, "_blank");
     return;
   }
@@ -996,6 +1012,10 @@ function openFile(relPath, fileName) {
     window.open(`/office.html?path=${encodeURIComponent(relPath)}`, "_blank");
     return;
   }
+  window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
+}
+
+function downloadFile(relPath) {
   window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
 }
 
