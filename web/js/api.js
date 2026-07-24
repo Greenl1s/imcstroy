@@ -106,6 +106,10 @@ export const api = {
     request(`/instruments/${id}/photo`, { method: 'PUT', body: { data_url: dataUrl } }),
   deletePhoto: (id) => request(`/instruments/${id}/photo`, { method: 'DELETE' }),
 
+  /** Привязать фото прибора к файлу в files.imcstroy.ru вместо загрузки с компьютера. */
+  linkPhoto: (id, path) =>
+    request(`/instruments/${id}/photo/link`, { method: 'PUT', body: { path } }),
+
   /**
    * Картинку нельзя вставить в <img src>, потому что к запросу нужно
    * приложить токен. Поэтому скачиваем её и делаем локальную ссылку.
@@ -118,16 +122,28 @@ export const api = {
     return URL.createObjectURL(await response.blob());
   },
 
-  // ---------- Фото документа (замена ссылки на документ) ----------
+  // ---------- Документ (фото поверки, либо любой файл, привязанный из files.imcstroy.ru) ----------
   uploadDocument: (id, dataUrl) =>
     request(`/instruments/${id}/document`, { method: 'PUT', body: { data_url: dataUrl } }),
   deleteDocument: (id) => request(`/instruments/${id}/document`, { method: 'DELETE' }),
 
+  /** Привязать документ к файлу в files.imcstroy.ru вместо загрузки с компьютера. */
+  linkDocument: (id, path) =>
+    request(`/instruments/${id}/document/link`, { method: 'PUT', body: { path } }),
+
+  /**
+   * Раньше документ был всегда картинкой. Теперь, если он привязан из
+   * файлового менеджера, это может быть PDF, docx и что угодно ещё —
+   * поэтому возвращаем ещё и content-type, чтобы вызывающий код решил,
+   * показывать ли <img> или просто дать ссылку на открытие/скачивание.
+   */
   async documentUrl(id) {
     const response = await fetch(`${BASE}/instruments/${id}/document`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     if (!response.ok) return null;
-    return URL.createObjectURL(await response.blob());
+    const contentType = response.headers.get('content-type') || '';
+    const url = URL.createObjectURL(await response.blob());
+    return { url, contentType };
   }
 };
