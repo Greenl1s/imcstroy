@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query, transaction } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 import { logEvent } from '../history.js';
+import { fetchLinkedFile } from '../fileLink.js';
 
 export const instruments = Router();
 instruments.use(requireAuth);
@@ -74,7 +75,31 @@ instruments.get('/:id/history', async (req, res) => {
 
 // ---------- Фото ----------
 
+/**
+ * Если у прибора привязан файл из файлового менеджера (photo_link_path) —
+ * забираем его оттуда по внутренней докер-сети и отдаём как обычно.
+ * Иначе — как раньше, байты из instrument_photos.
+ */
 instruments.get('/:id/photo', async (req, res) => {
+  const { rows: instRows } = await query(
+    'SELECT photo_link_path FROM instruments WHERE id = $1',
+    [req.params.id]
+  );
+  if (!instRows.length) return res.status(404).end();
+
+  const linkPath = instRows[0].photo_link_path;
+  if (linkPath) {
+    try {
+      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      res.set('Content-Type', contentType);
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.send(buffer);
+    } catch (err) {
+      console.error('Не удалось получить привязанное фото из файлового менеджера:', err);
+      return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
+    }
+  }
+
   const { rows } = await query(
     'SELECT mime_type, bytes FROM instrument_photos WHERE instrument_id = $1',
     [req.params.id]
@@ -102,17 +127,51 @@ instruments.put('/:id/photo', requireAdmin, async (req, res) => {
                    size_bytes = EXCLUDED.size_bytes, uploaded_at = now()`,
     [req.params.id, match[1], bytes, bytes.length]
   );
+  // Загрузка с компьютера отменяет ранее привязанный файл из файлового менеджера.
+  await query('UPDATE instruments SET photo_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+/** Привязка фото из файлового менеджера вместо загрузки с компьютера. */
+instruments.put('/:id/photo/link', requireAdmin, async (req, res) => {
+  const linkPath = req.body?.path;
+  if (!linkPath || typeof linkPath !== 'string') {
+    return res.status(400).json({ error: 'Не указан путь к файлу' });
+  }
+  await query('UPDATE instruments SET photo_link_path = $2 WHERE id = $1', [req.params.id, linkPath]);
+  // Привязка отменяет ранее загруженное с компьютера фото.
+  await query('DELETE FROM instrument_photos WHERE instrument_id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 
 instruments.delete('/:id/photo', requireAdmin, async (req, res) => {
   await query('DELETE FROM instrument_photos WHERE instrument_id = $1', [req.params.id]);
+  await query('UPDATE instruments SET photo_link_path = NULL WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 
 // ---------- Фото документа (замена ссылки на документ) ----------
 
 instruments.get('/:id/document', async (req, res) => {
+  const { rows: instRows } = await query(
+    'SELECT document_link_path FROM instruments WHERE id = $1',
+    [req.params.id]
+  );
+  if (!instRows.length) return res.status(404).end();
+
+  const linkPath = instRows[0].document_link_path;
+  if (linkPath) {
+    try {
+      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      res.set('Content-Type', contentType);
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.send(buffer);
+    } catch (err) {
+      console.error('Не удалось получить привязанный документ из файлового менеджера:', err);
+      return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
+    }
+  }
+
   const { rows } = await query(
     'SELECT mime_type, bytes FROM instrument_documents WHERE instrument_id = $1',
     [req.params.id]
@@ -140,11 +199,24 @@ instruments.put('/:id/document', requireAdmin, async (req, res) => {
                    size_bytes = EXCLUDED.size_bytes, uploaded_at = now()`,
     [req.params.id, match[1], bytes, bytes.length]
   );
+  await query('UPDATE instruments SET document_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+/** Привязка документа из файлового менеджера вместо загрузки с компьютера. */
+instruments.put('/:id/document/link', requireAdmin, async (req, res) => {
+  const linkPath = req.body?.path;
+  if (!linkPath || typeof linkPath !== 'string') {
+    return res.status(400).json({ error: 'Не указан путь к файлу' });
+  }
+  await query('UPDATE instruments SET document_link_path = $2 WHERE id = $1', [req.params.id, linkPath]);
+  await query('DELETE FROM instrument_documents WHERE instrument_id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 
 instruments.delete('/:id/document', requireAdmin, async (req, res) => {
   await query('DELETE FROM instrument_documents WHERE instrument_id = $1', [req.params.id]);
+  await query('UPDATE instruments SET document_link_path = NULL WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 
