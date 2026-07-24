@@ -7,6 +7,26 @@
 const DB_PATH = "/База данных";
 const CASES_PATH = "/Дела";
 
+// Режим "выбора файла" для других наших сайтов (например, "Учёт приборов").
+// Открывается как всплывающее окно с адресом ?picker=1&origin=<адрес сайта>.
+// В этом режиме клик по файлу не открывает его, а отправляет выбор обратно
+// в окно, которое открыло этот попап, и закрывает попап.
+const pickerParams = new URLSearchParams(location.search);
+const PICKER_MODE = pickerParams.get("picker") === "1";
+const PICKER_ORIGIN = pickerParams.get("origin") || "";
+
+if (PICKER_MODE) {
+  const banner = document.createElement("div");
+  banner.textContent = "Режим выбора файла — кликните по файлу, чтобы выбрать его";
+  banner.style.cssText =
+    "position:fixed;top:0;left:0;right:0;background:var(--accent);color:#fff;" +
+    "text-align:center;padding:8px 12px;font-size:13px;z-index:2000;";
+  document.addEventListener("DOMContentLoaded", () => {
+    document.body.appendChild(banner);
+    document.body.style.paddingTop = "36px";
+  });
+}
+
 /* ============================================================
    Ниже — логика
    ============================================================ */
@@ -1003,6 +1023,16 @@ function renderUploadPanel() {
 /* ---------- Open file (PDF / OnlyOffice в новой вкладке, остальное — скачивание) ---------- */
 
 function openFile(relPath, fileName) {
+  if (PICKER_MODE) {
+    if (window.opener && PICKER_ORIGIN) {
+      window.opener.postMessage(
+        { type: "filemanager:file-selected", path: relPath, name: fileName },
+        PICKER_ORIGIN
+      );
+    }
+    window.close();
+    return;
+  }
   const ext = extOf(fileName);
   if (ext === "pdf" || IMAGE_EXTS.has(ext)) {
     window.open(`/api/view?path=${encodeURIComponent(relPath)}`, "_blank");
