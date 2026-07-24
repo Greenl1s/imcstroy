@@ -7,6 +7,9 @@ import {
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
+// Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
+const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
+
 /** Клиентская фильтрация уже загруженного списка. */
 export function filteredInstruments() {
   const q = state.search.trim().toLowerCase();
@@ -231,11 +234,43 @@ function bindCardActions(item, goList) {
   });
 }
 
+// ---------- Выбор файла из files.imcstroy.ru ----------
+
+/**
+ * Открывает files.imcstroy.ru во всплывающем окне в режиме выбора файла.
+ * Когда пользователь кликает по файлу, окно шлёт нам сообщение и закрывается.
+ * onPicked(path, name) вызывается ровно один раз с выбранным файлом.
+ */
+function openFilemanagerPicker(onPicked) {
+  const origin = encodeURIComponent(location.origin);
+  const popup = window.open(
+    `${FILEMANAGER_ORIGIN}/?picker=1&origin=${origin}`,
+    'filemanager-picker',
+    'width=1100,height=720'
+  );
+  if (!popup) {
+    toast('Браузер заблокировал всплывающее окно — разрешите всплывающие окна для этого сайта', true);
+    return;
+  }
+  const handler = (event) => {
+    if (event.origin !== FILEMANAGER_ORIGIN) return;
+    if (!event.data || event.data.type !== 'filemanager:file-selected') return;
+    window.removeEventListener('message', handler);
+    onPicked(event.data.path, event.data.name);
+  };
+  window.addEventListener('message', handler);
+}
+
 // ---------- Формы ----------
 
 export function showInstrumentForm(item = null) {
   const isEdit = Boolean(item);
   const v = item || { check_type: 'verification', comment: '' };
+
+  // Путь к файлу, выбранному в files.imcstroy.ru (если выбрали) —
+  // живёт только пока открыта форма, отправляется на сервер при сохранении.
+  let pickedPhotoPath = null;
+  let pickedDocumentPath = null;
 
   openModal(isEdit ? 'Редактировать прибор' : 'Добавить прибор', `
     <form id="instrumentForm" class="form-grid">
@@ -250,9 +285,17 @@ export function showInstrumentForm(item = null) {
       <label>Фото прибора (до 5 МБ)
         <input type="file" name="photo" accept="image/*">
       </label>
+      <div class="actions" style="margin-top:-8px;">
+        <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
+        <span class="row-subtitle" data-photo-status></span>
+      </div>
       <label>Фото документа поверки/калибровки (до 5 МБ)
         <input type="file" name="document" accept="image/*">
       </label>
+      <div class="actions" style="margin-top:-8px;">
+        <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
+        <span class="row-subtitle" data-document-status></span>
+      </div>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
         ${isEdit && v.has_document ? '<button type="button" class="danger" data-remove-document>Удалить документ</button>' : ''}
@@ -261,6 +304,22 @@ export function showInstrumentForm(item = null) {
     </form>`);
 
   const form = document.getElementById('instrumentForm');
+
+  form.querySelector('[data-pick-photo]').onclick = () => {
+    openFilemanagerPicker((path, name) => {
+      pickedPhotoPath = path;
+      form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
+      form.querySelector('input[name="photo"]').value = '';
+    });
+  };
+
+  form.querySelector('[data-pick-document]').onclick = () => {
+    openFilemanagerPicker((path, name) => {
+      pickedDocumentPath = path;
+      form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
+      form.querySelector('input[name="document"]').value = '';
+    });
+  };
 
   const removePhoto = form.querySelector('[data-remove-photo]');
   if (removePhoto) {
@@ -306,12 +365,19 @@ export function showInstrumentForm(item = null) {
       const saved = isEdit
         ? await api.updateInstrument(item.id, data)
         : await api.createInstrument(data);
+
       if (photoFile) {
         await api.uploadPhoto(saved.id, await readFileAsDataUrl(photoFile));
+      } else if (pickedPhotoPath) {
+        await api.linkPhoto(saved.id, pickedPhotoPath);
       }
+
       if (documentFile) {
         await api.uploadDocument(saved.id, await readFileAsDataUrl(documentFile));
+      } else if (pickedDocumentPath) {
+        await api.linkDocument(saved.id, pickedDocumentPath);
       }
+
       return saved;
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
 
@@ -456,18 +522,38 @@ function showQr(item) {
   };
 }
 
+/**
+ * Раньше документ был всегда картинкой. Теперь, если он привязан из
+ * files.imcstroy.ru, это может быть PDF, docx и что угодно ещё —
+ * показываем превью только для картинок, иначе даём кнопку "Открыть".
+ */
 async function showDocument(item) {
   openModal('Документ', '<p class="qr-caption">Загрузка...</p>');
 
-  const url = await api.documentUrl(item.id);
-  if (!url) {
+  const result = await api.documentUrl(item.id);
+  if (!result) {
     return openModal('Документ', '<p class="qr-caption">Не удалось загрузить документ</p>');
   }
 
+  const { url, contentType } = result;
+  const isImage = contentType.startsWith('image/');
+
+  const preview = isImage
+    ? `<div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>`
+    : `<p class="qr-caption">Файл: ${escapeHtml(contentType || 'неизвестный тип')}</p>`;
+
   openModal('Документ', `
-    <div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>
+    ${preview}
     <p class="qr-caption">${escapeHtml(item.name)}</p>
-    <div class="modal-actions"><button class="primary" data-download-document>Скачать</button></div>`);
+    <div class="modal-actions">
+      ${isImage ? '' : '<button class="secondary" data-open-document>Открыть в новой вкладке</button>'}
+      <button class="primary" data-download-document>Скачать</button>
+    </div>`);
+
+  const openBtn = document.querySelector('[data-open-document]');
+  if (openBtn) {
+    openBtn.onclick = () => window.open(url, '_blank');
+  }
 
   document.querySelector('[data-download-document]').onclick = () => {
     const link = document.createElement('a');
