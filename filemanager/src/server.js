@@ -10,6 +10,7 @@ const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
 const users = require("./users");
+const fileLink = require("./fileLink");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -395,6 +396,21 @@ app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess, (req, r
 app.get("/internal/raw", (req, res) => {
   try {
     onlyoffice.verifyInternalToken(req.query.token, req.query.path);
+    const abs = filesLib.safeResolve(req.query.path);
+    res.sendFile(abs);
+  } catch (err) {
+    res.status(403).json({ message: "Недействительный токен" });
+  }
+});
+
+// То же самое, но для ДРУГИХ наших сервисов (например, "Учёт приборов"),
+// которым нужно один раз "привязать" файл к своей записи и потом показывать
+// его сколько угодно раз, без входа пользователя в файловый менеджер.
+// Токен не истекает — в отличие от /internal/raw, который живёт только
+// на время одной сессии редактирования в OnlyOffice.
+app.get("/internal/linked-file", (req, res) => {
+  try {
+    fileLink.verifyFileLinkToken(req.query.token, req.query.path);
     const abs = filesLib.safeResolve(req.query.path);
     res.sendFile(abs);
   } catch (err) {
