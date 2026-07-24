@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
 import {
-  escapeAttr, escapeHtml, formData, today, displayNo, readFileAsDataUrl,
+  escapeAttr, escapeHtml, formData, today, displayNo,
   verificationBadge, verificationText, verificationState,
   statusBadge, statusText, checkTypeText
 } from './utils.js';
@@ -282,19 +282,19 @@ export function showInstrumentForm(item = null) {
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
       ${input('comment', 'Комментарий', v.comment || '')}
-      <label>Фото прибора (до 5 МБ)
-        <input type="file" name="photo" accept="image/*">
-      </label>
-      <div class="actions" style="margin-top:-8px;">
-        <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
-        <span class="row-subtitle" data-photo-status></span>
+      <div class="form-field-group">
+        <span class="row-subtitle">Фото прибора</span>
+        <div class="actions" style="margin-top:4px;">
+          <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
+          <span class="row-subtitle" data-photo-status></span>
+        </div>
       </div>
-      <label>Фото документа поверки/калибровки (до 5 МБ)
-        <input type="file" name="document" accept="image/*">
-      </label>
-      <div class="actions" style="margin-top:-8px;">
-        <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
-        <span class="row-subtitle" data-document-status></span>
+      <div class="form-field-group">
+        <span class="row-subtitle">Фото документа поверки/калибровки</span>
+        <div class="actions" style="margin-top:4px;">
+          <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
+          <span class="row-subtitle" data-document-status></span>
+        </div>
       </div>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
@@ -309,7 +309,6 @@ export function showInstrumentForm(item = null) {
     openFilemanagerPicker((path, name) => {
       pickedPhotoPath = path;
       form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
-      form.querySelector('input[name="photo"]').value = '';
     });
   };
 
@@ -317,7 +316,6 @@ export function showInstrumentForm(item = null) {
     openFilemanagerPicker((path, name) => {
       pickedDocumentPath = path;
       form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
-      form.querySelector('input[name="document"]').value = '';
     });
   };
 
@@ -349,32 +347,16 @@ export function showInstrumentForm(item = null) {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     const data = formData(form);
-    const photoFile = form.querySelector('input[name="photo"]').files[0];
-    const documentFile = form.querySelector('input[name="document"]').files[0];
-    delete data.photo;
-    delete data.document;
-
-    if (photoFile && photoFile.size > 5 * 1024 * 1024) {
-      return toast('Файл фото прибора больше 5 МБ', true);
-    }
-    if (documentFile && documentFile.size > 5 * 1024 * 1024) {
-      return toast('Файл фото документа больше 5 МБ', true);
-    }
 
     const result = await run(async () => {
       const saved = isEdit
         ? await api.updateInstrument(item.id, data)
         : await api.createInstrument(data);
 
-      if (photoFile) {
-        await api.uploadPhoto(saved.id, await readFileAsDataUrl(photoFile));
-      } else if (pickedPhotoPath) {
+      if (pickedPhotoPath) {
         await api.linkPhoto(saved.id, pickedPhotoPath);
       }
-
-      if (documentFile) {
-        await api.uploadDocument(saved.id, await readFileAsDataUrl(documentFile));
-      } else if (pickedDocumentPath) {
+      if (pickedDocumentPath) {
         await api.linkDocument(saved.id, pickedDocumentPath);
       }
 
