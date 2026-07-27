@@ -6,7 +6,7 @@ import { query, waitForDb } from './db.js';
 import { hashPassword } from './auth.js';
 import { auth } from './routes/auth.js';
 import { users } from './routes/users.js';
-import { instruments } from './routes/instruments.js';
+import { instruments, EDITABLE } from './routes/instruments.js';
 import { history } from './routes/history.js';
 
 const app = express();
@@ -74,4 +74,10 @@ async function ensureAdmin() {
 
 await waitForDb();
 await ensureAdmin();
+
+// Однозначное доказательство, какая версия кода реально запущена —
+// смотри 'docker compose logs api' сразу после перезапуска. Если тут
+// нет "control_type" — сервер всё ещё работает на старом коде.
+console.log('[api] редактируемые поля прибора:', EDITABLE.join(', '));
+
 app.listen(PORT, () => console.log(`[api] слушаю порт ${PORT}`));
