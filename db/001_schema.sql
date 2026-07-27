@@ -1,4 +1,3 @@
-
 -- ============================================================
 --  Учёт приборов — схема базы данных
 --  PostgreSQL 16+
@@ -21,6 +20,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- быстрый поиск по по
 CREATE TYPE user_role         AS ENUM ('admin', 'employee');
 CREATE TYPE instrument_status AS ENUM ('free', 'busy', 'booked', 'retired');
 CREATE TYPE check_type        AS ENUM ('verification', 'calibration'); -- поверка / калибровка
+CREATE TYPE control_type      AS ENUM ('vik', 'uzk', 'elk', 'tk', 'ak', 'kbt', 'rgk', 'gdz'); -- вид контроля
 
 -- Что именно произошло с прибором (для журнала)
 CREATE TYPE history_action AS ENUM (
@@ -58,6 +58,7 @@ CREATE TABLE instruments (
   serial_number     text,
   model             text,
   check_type        check_type        NOT NULL DEFAULT 'verification',
+  control_type      control_type,                   -- вид контроля; NULL = не указано
   verification_date date,                        -- когда поверяли
   valid_until       date,                        -- до какого числа действует
   comment           text              NOT NULL DEFAULT '',
@@ -101,6 +102,7 @@ CREATE UNIQUE INDEX instruments_inventory_no_key
 
 CREATE INDEX instruments_status_idx      ON instruments (status);
 CREATE INDEX instruments_valid_until_idx ON instruments (valid_until);
+CREATE INDEX instruments_control_type_idx ON instruments (control_type);
 CREATE INDEX instruments_taken_by_idx    ON instruments (taken_by)  WHERE taken_by  IS NOT NULL;
 CREATE INDEX instruments_booked_by_idx   ON instruments (booked_by) WHERE booked_by IS NOT NULL;
 
