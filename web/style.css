@@ -153,7 +153,7 @@ label { display: grid; gap: 6px; font-weight: 500; font-size: 14px; }
 .form-grid { display: grid; gap: 14px; }
 
 /* ---------- Список ---------- */
-:root { --col-width: 168px; --col-gap: 10px; }
+:root { --col-width: 144px; --col-gap: 10px; }
 
 .list { display: grid; gap: 10px; }
 .row {
@@ -259,7 +259,7 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #6b342c; }
    всё внутри своей ширины, без выпирающего текста. */
 .filters-row { display: flex; gap: var(--col-gap, 10px); flex-shrink: 0; }
 .filter-chip {
-  width: var(--col-width, 168px);
+  width: var(--col-width, 144px);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px; padding: 8px 10px; border-radius: var(--radius);
   background: var(--badge-bg); border: 1px solid var(--line);
@@ -321,6 +321,15 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
 .qr-box img, .qr-box canvas { background: #fff; padding: 8px; border-radius: var(--radius); }
 .document-photo { max-width: 100%; max-height: 70vh; object-fit: contain; }
 .qr-caption { text-align: center; color: var(--muted); margin-top: 8px; font-family: var(--font-mono); font-size: 13px; }
+
+/* Промежуточная точка: три фильтра-чипа + кнопки могут не поместиться
+   в одну строку на нешироких десктопных окнах, ещё не дошедших до
+   мобильной раскладки. Даём им перенестись, не трогая остальную вёрстку. */
+@media (max-width: 900px) {
+  .toolbar-bottom { flex-wrap: wrap; row-gap: 10px; }
+  .toolbar-buttons { flex-wrap: wrap; }
+  .filters-row { flex-wrap: wrap; }
+}
 
 /* ---------- Мобильные экраны ---------- */
 @media (max-width: 720px) {
