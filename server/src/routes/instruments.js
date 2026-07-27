@@ -150,7 +150,7 @@ instruments.delete('/:id/document', requireAdmin, async (req, res) => {
 
 // ---------- Создание / изменение / удаление ----------
 
-const EDITABLE = [
+export const EDITABLE = [
   'inventory_no', 'name', 'serial_number', 'model', 'check_type', 'control_type',
   'verification_date', 'valid_until', 'comment'
 ];
@@ -189,7 +189,12 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
   const updates = EDITABLE.filter((key) => key in (req.body || {}));
   if (!updates.length) return res.status(400).json({ error: 'Нечего обновлять' });
 
-  const set = updates.map((key, i) => `${key} = $${i + 2}`).join(', ');
+  // Для колонок-перечислений (enum) явно указываем базе, как трактовать
+  // значение — иначе она не всегда правильно угадывает тип сама.
+  const ENUM_CASTS = { check_type: '::check_type', control_type: '::control_type' };
+  const set = updates
+    .map((key, i) => `${key} = $${i + 2}${ENUM_CASTS[key] || ''}`)
+    .join(', ');
   const params = [req.params.id, ...updates.map((key) => toDbValue(key, req.body[key]))];
 
   try {
