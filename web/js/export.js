@@ -1,15 +1,15 @@
 import { state } from './state.js';
-import { checkTypeText, today } from './utils.js';
+import { checkTypeText, today, controlTypeFull } from './utils.js';
 import { toast } from './ui.js';
 
 const HEADERS = [
-  '№ п/п', 'Наименование', 'Серийный номер', 'Модель',
+  '№ п/п', 'Наименование', 'Серийный номер', 'Модель', 'Классификация',
   'Тип документа (Поверка/калибровка)', 'Дата поверки', 'Действительно до',
   'Документ'
 ];
 
 const COLUMN_WIDTHS = [
-  { wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 22 },
+  { wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 30 },
   { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
 ];
 
@@ -19,6 +19,7 @@ function toRows(items) {
     item.name || '',
     item.serial_number || '',
     item.model || '',
+    controlTypeFull(item.control_type),
     checkTypeText(item.check_type),
     item.verification_date || '',
     item.valid_until || '',

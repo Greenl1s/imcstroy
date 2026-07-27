@@ -1,14 +1,12 @@
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
 import {
-  escapeAttr, escapeHtml, formData, today, displayNo,
+  escapeAttr, escapeHtml, formData, today, displayNo, readFileAsDataUrl,
   verificationBadge, verificationText, verificationState,
-  statusBadge, statusText, checkTypeText
+  statusBadge, statusText, checkTypeText,
+  CONTROL_TYPES, controlTypeShort, controlTypeFull
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
-
-// Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
-const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
 
 /** Клиентская фильтрация уже загруженного списка. */
 export function filteredInstruments() {
@@ -23,7 +21,10 @@ export function filteredInstruments() {
 
     const matchesStatus = state.condition === 'all' || i.status === state.condition;
 
-    return matchesSearch && matchesVerification && matchesStatus;
+    const matchesControlType = state.controlType === 'all' ||
+      (state.controlType === 'none' ? !i.control_type : i.control_type === state.controlType);
+
+    return matchesSearch && matchesVerification && matchesStatus && matchesControlType;
   });
 }
 
@@ -51,6 +52,9 @@ export function renderList(openCard) {
             </div>
             <div class="row-status-col">
               <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
+            </div>
+            <div class="row-status-col">
+              <span class="badge muted" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
             </div>
           </div>
         </a>
@@ -161,6 +165,7 @@ export async function renderCard(id, goList) {
         ${field('Серийный номер', item.serial_number)}
         ${field('Модель', item.model)}
         ${field('Тип', checkTypeText(item.check_type))}
+        ${field('Классификация', controlTypeFull(item.control_type))}
         ${field('Дата поверки/калибровки', item.verification_date)}
         ${field('Действительно до', item.valid_until)}
       </div>
@@ -234,43 +239,11 @@ function bindCardActions(item, goList) {
   });
 }
 
-// ---------- Выбор файла из files.imcstroy.ru ----------
-
-/**
- * Открывает files.imcstroy.ru во всплывающем окне в режиме выбора файла.
- * Когда пользователь кликает по файлу, окно шлёт нам сообщение и закрывается.
- * onPicked(path, name) вызывается ровно один раз с выбранным файлом.
- */
-function openFilemanagerPicker(onPicked) {
-  const origin = encodeURIComponent(location.origin);
-  const popup = window.open(
-    `${FILEMANAGER_ORIGIN}/?picker=1&origin=${origin}`,
-    'filemanager-picker',
-    'width=1100,height=720'
-  );
-  if (!popup) {
-    toast('Браузер заблокировал всплывающее окно — разрешите всплывающие окна для этого сайта', true);
-    return;
-  }
-  const handler = (event) => {
-    if (event.origin !== FILEMANAGER_ORIGIN) return;
-    if (!event.data || event.data.type !== 'filemanager:file-selected') return;
-    window.removeEventListener('message', handler);
-    onPicked(event.data.path, event.data.name);
-  };
-  window.addEventListener('message', handler);
-}
-
 // ---------- Формы ----------
 
 export function showInstrumentForm(item = null) {
   const isEdit = Boolean(item);
   const v = item || { check_type: 'verification', comment: '' };
-
-  // Путь к файлу, выбранному в files.imcstroy.ru (если выбрали) —
-  // живёт только пока открыта форма, отправляется на сервер при сохранении.
-  let pickedPhotoPath = null;
-  let pickedDocumentPath = null;
 
   openModal(isEdit ? 'Редактировать прибор' : 'Добавить прибор', `
     <form id="instrumentForm" class="form-grid">
@@ -279,23 +252,17 @@ export function showInstrumentForm(item = null) {
       ${input('serial_number', 'Серийный номер', v.serial_number || '')}
       ${input('model', 'Модель', v.model || '')}
       ${select('check_type', 'Тип', v.check_type, [['verification', 'Поверка'], ['calibration', 'Калибровка']])}
+      ${select('control_type', 'Классификация', v.control_type || '',
+        [['', 'Не указано'], ...CONTROL_TYPES.map(([code, full, short]) => [code, `${full} (${short})`])])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
       ${input('comment', 'Комментарий', v.comment || '')}
-      <div class="form-field-group">
-        <span class="row-subtitle">Фото прибора</span>
-        <div class="actions" style="margin-top:4px;">
-          <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
-          <span class="row-subtitle" data-photo-status></span>
-        </div>
-      </div>
-      <div class="form-field-group">
-        <span class="row-subtitle">Фото документа поверки/калибровки</span>
-        <div class="actions" style="margin-top:4px;">
-          <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
-          <span class="row-subtitle" data-document-status></span>
-        </div>
-      </div>
+      <label>Фото прибора (до 5 МБ)
+        <input type="file" name="photo" accept="image/*">
+      </label>
+      <label>Фото документа поверки/калибровки (до 5 МБ)
+        <input type="file" name="document" accept="image/*">
+      </label>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
         ${isEdit && v.has_document ? '<button type="button" class="danger" data-remove-document>Удалить документ</button>' : ''}
@@ -304,20 +271,6 @@ export function showInstrumentForm(item = null) {
     </form>`);
 
   const form = document.getElementById('instrumentForm');
-
-  form.querySelector('[data-pick-photo]').onclick = () => {
-    openFilemanagerPicker((path, name) => {
-      pickedPhotoPath = path;
-      form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
-    });
-  };
-
-  form.querySelector('[data-pick-document]').onclick = () => {
-    openFilemanagerPicker((path, name) => {
-      pickedDocumentPath = path;
-      form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
-    });
-  };
 
   const removePhoto = form.querySelector('[data-remove-photo]');
   if (removePhoto) {
@@ -347,19 +300,28 @@ export function showInstrumentForm(item = null) {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     const data = formData(form);
+    const photoFile = form.querySelector('input[name="photo"]').files[0];
+    const documentFile = form.querySelector('input[name="document"]').files[0];
+    delete data.photo;
+    delete data.document;
+
+    if (photoFile && photoFile.size > 5 * 1024 * 1024) {
+      return toast('Файл фото прибора больше 5 МБ', true);
+    }
+    if (documentFile && documentFile.size > 5 * 1024 * 1024) {
+      return toast('Файл фото документа больше 5 МБ', true);
+    }
 
     const result = await run(async () => {
       const saved = isEdit
         ? await api.updateInstrument(item.id, data)
         : await api.createInstrument(data);
-
-      if (pickedPhotoPath) {
-        await api.linkPhoto(saved.id, pickedPhotoPath);
+      if (photoFile) {
+        await api.uploadPhoto(saved.id, await readFileAsDataUrl(photoFile));
       }
-      if (pickedDocumentPath) {
-        await api.linkDocument(saved.id, pickedDocumentPath);
+      if (documentFile) {
+        await api.uploadDocument(saved.id, await readFileAsDataUrl(documentFile));
       }
-
       return saved;
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
 
@@ -504,38 +466,18 @@ function showQr(item) {
   };
 }
 
-/**
- * Раньше документ был всегда картинкой. Теперь, если он привязан из
- * files.imcstroy.ru, это может быть PDF, docx и что угодно ещё —
- * показываем превью только для картинок, иначе даём кнопку "Открыть".
- */
 async function showDocument(item) {
   openModal('Документ', '<p class="qr-caption">Загрузка...</p>');
 
-  const result = await api.documentUrl(item.id);
-  if (!result) {
+  const url = await api.documentUrl(item.id);
+  if (!url) {
     return openModal('Документ', '<p class="qr-caption">Не удалось загрузить документ</p>');
   }
 
-  const { url, contentType } = result;
-  const isImage = contentType.startsWith('image/');
-
-  const preview = isImage
-    ? `<div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>`
-    : `<p class="qr-caption">Файл: ${escapeHtml(contentType || 'неизвестный тип')}</p>`;
-
   openModal('Документ', `
-    ${preview}
+    <div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>
     <p class="qr-caption">${escapeHtml(item.name)}</p>
-    <div class="modal-actions">
-      ${isImage ? '' : '<button class="secondary" data-open-document>Открыть в новой вкладке</button>'}
-      <button class="primary" data-download-document>Скачать</button>
-    </div>`);
-
-  const openBtn = document.querySelector('[data-open-document]');
-  if (openBtn) {
-    openBtn.onclick = () => window.open(url, '_blank');
-  }
+    <div class="modal-actions"><button class="primary" data-download-document>Скачать</button></div>`);
 
   document.querySelector('[data-download-document]').onclick = () => {
     const link = document.createElement('a');
@@ -552,6 +494,7 @@ async function copyInfo(item) {
     `Серийный номер: ${item.serial_number || '—'}`,
     `Модель: ${item.model || '—'}`,
     `Тип: ${checkTypeText(item.check_type)}`,
+    `Классификация: ${controlTypeFull(item.control_type)}`,
     `Действительно до: ${item.valid_until || '—'}`
   ].join('\n');
 

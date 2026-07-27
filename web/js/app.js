@@ -60,6 +60,7 @@ function bindEvents() {
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
   document.getElementById('conditionFilter').onchange = (e) => setFilter('condition', e.target.value);
+  document.getElementById('controlTypeFilter').onchange = (e) => setFilter('controlType', e.target.value);
 
   document.getElementById('massToggleBtn').onclick = () => setMassMode(!state.massMode);
   document.getElementById('massRetireBtn').onclick = (e) => bulk(e.currentTarget, 'retire');

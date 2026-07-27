@@ -9,7 +9,7 @@ export const state = {
   search: '',
   verification: 'all',
   condition: 'all',
-  userFilter: 'all',
+  controlType: 'all',
   massMode: false
 };
 

@@ -51,3 +51,24 @@ export function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
+
+/** Классификация приборов по видам контроля. Код — то, что хранится в базе. */
+export const CONTROL_TYPES = [
+  ['vik', 'Визуально-измерительный контроль', 'ВИК'],
+  ['uzk', 'Ультразвуковой контроль', 'УЗК'],
+  ['elk', 'Электрический контроль', 'ЭЛК'],
+  ['tk',  'Тепловой контроль', 'ТК'],
+  ['ak',  'Акустический контроль', 'АК'],
+  ['kbt', 'Контроль бетона', 'КБТ'],
+  ['rgk', 'Радиографический контроль', 'РГК'],
+  ['gdz', 'Геодезическое оборудование', 'ГДЗ']
+];
+
+const CONTROL_TYPE_SHORT = Object.fromEntries(CONTROL_TYPES.map(([code, , short]) => [code, short]));
+const CONTROL_TYPE_FULL = Object.fromEntries(CONTROL_TYPES.map(([code, full]) => [code, full]));
+
+/** Короткая подпись для бейджа (ВИК, УЗК...), «Не указано» — если код пустой. */
+export const controlTypeShort = (code) => CONTROL_TYPE_SHORT[code] || 'Не указано';
+
+/** Полное название — для всплывающей подсказки при наведении. */
+export const controlTypeFull = (code) => CONTROL_TYPE_FULL[code] || 'Классификация не указана';
