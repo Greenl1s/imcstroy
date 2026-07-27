@@ -178,10 +178,35 @@ CREATE TRIGGER users_touch BEFORE UPDATE ON users
 
 -- ---------- Защита журнала от изменений ----------
 -- Даже если кто-то из разработчиков случайно напишет UPDATE history,
--- база не даст этого сделать.
+-- база не даст этого сделать. Единственное исключение — когда удаляют
+-- сам прибор или пользователя: внешний ключ (ON DELETE SET NULL)
+-- аккуратно обнуляет ссылку в старых записях истории, а не удаляет их.
+-- Формально это тоже "изменение строки", поэтому его нужно явно разрешить,
+-- иначе удаление прибора с историей будет падать с этой же ошибкой.
 
 CREATE OR REPLACE FUNCTION history_is_append_only() RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'История доступна только для добавления записей';
+  END IF;
+
+  -- Разрешаем ровно один случай: instrument_id и/или actor_id обнулились,
+  -- а всё остальное содержимое строки осталось прежним.
+  IF TG_OP = 'UPDATE'
+     AND NEW.instrument_name IS NOT DISTINCT FROM OLD.instrument_name
+     AND NEW.action          IS NOT DISTINCT FROM OLD.action
+     AND NEW.actor_name      IS NOT DISTINCT FROM OLD.actor_name
+     AND NEW.target_name     IS NOT DISTINCT FROM OLD.target_name
+     AND NEW.place           IS NOT DISTINCT FROM OLD.place
+     AND NEW.extra           IS NOT DISTINCT FROM OLD.extra
+     AND NEW.note            IS NOT DISTINCT FROM OLD.note
+     AND NEW.created_at      IS NOT DISTINCT FROM OLD.created_at
+     AND (NEW.instrument_id IS NOT DISTINCT FROM OLD.instrument_id OR NEW.instrument_id IS NULL)
+     AND (NEW.actor_id      IS NOT DISTINCT FROM OLD.actor_id      OR NEW.actor_id      IS NULL)
+  THEN
+    RETURN NEW;
+  END IF;
+
   RAISE EXCEPTION 'История доступна только для добавления записей';
 END;
 $$ LANGUAGE plpgsql;
