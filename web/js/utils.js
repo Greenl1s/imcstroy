@@ -72,3 +72,15 @@ export const controlTypeShort = (code) => CONTROL_TYPE_SHORT[code] || 'Не ук
 
 /** Полное название — для всплывающей подсказки при наведении. */
 export const controlTypeFull = (code) => CONTROL_TYPE_FULL[code] || 'Классификация не указана';
+
+/**
+ * CSS-класс цвета бейджа. Три цветовые семьи, каждая — темнее внутри себя:
+ *   голубая:              ВИК (светлее) → УЗК → КБТ (темнее)
+ *   сине-зелёная (бирюза): ЭЛК (светлее) → РГК (темнее)
+ *   оранжево-коричневая:  ТК (светлее) → ГДЗ (темнее)
+ * «Не указано» остаётся нейтральным серым (класс muted), как и раньше.
+ */
+export const controlTypeBadge = (code) =>
+  ({ vik: 'ctrl-vik', uzk: 'ctrl-uzk', kbt: 'ctrl-kbt',
+     elk: 'ctrl-elk', rgk: 'ctrl-rgk',
+     tk: 'ctrl-tk', gdz: 'ctrl-gdz' }[code] || 'muted');

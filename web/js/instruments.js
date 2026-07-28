@@ -4,7 +4,7 @@ import {
   escapeAttr, escapeHtml, formData, today, displayNo, readFileAsDataUrl,
   verificationBadge, verificationText, verificationState,
   statusBadge, statusText, checkTypeText,
-  CONTROL_TYPES, controlTypeShort, controlTypeFull
+  CONTROL_TYPES, controlTypeShort, controlTypeFull, controlTypeBadge
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
@@ -54,7 +54,7 @@ export function renderList(openCard) {
               <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
             </div>
             <div class="row-status-col">
-              <span class="badge muted" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
+              <span class="badge ${controlTypeBadge(item.control_type)}" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
             </div>
           </div>
         </a>
