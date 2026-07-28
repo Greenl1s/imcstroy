@@ -46,9 +46,12 @@
     <div class="col" data-col="db">
       <div class="col-header">
         <span>База данных</span>
-        <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
+        <div style="display:flex; gap:6px;">
+          <button class="add-btn" id="selectDbBtn" title="Выбрать" aria-label="Выбрать">☑</button>
+          <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
+        </div>
       </div>
-      <div class="col-toolbar">
+      <div class="col-toolbar" id="dbToolbar">
         <input type="text" class="col-search-input" id="dbSearchInput" placeholder="Поиск...">
         <select class="col-sort-select" id="dbSortSelect">
           <option value="name-asc">Имя А-Я</option>
@@ -57,15 +60,26 @@
           <option value="size-desc">Размер ↓</option>
         </select>
       </div>
+      <div class="selection-bar hidden" id="dbSelectionBar" style="margin-bottom:10px;">
+        <span id="dbSelectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="dbDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="dbDeleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="dbCancelSelectBtn" type="button">Отмена</button>
+        </div>
+      </div>
       <div class="col-body" id="dbList"></div>
     </div>
 
     <div class="col" data-col="cases">
       <div class="col-header">
         <span>Дела</span>
-        <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
+        <div style="display:flex; gap:6px;">
+          <button class="add-btn" id="selectCasesBtn" title="Выбрать" aria-label="Выбрать">☑</button>
+          <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
+        </div>
       </div>
-      <div class="col-toolbar">
+      <div class="col-toolbar" id="casesToolbar">
         <input type="text" class="col-search-input" id="casesSearchInput" placeholder="Поиск...">
         <select class="col-sort-select" id="casesSortSelect">
           <option value="name-asc">Имя А-Я</option>
@@ -73,6 +87,14 @@
           <option value="size-asc">Размер ↑</option>
           <option value="size-desc">Размер ↓</option>
         </select>
+      </div>
+      <div class="selection-bar hidden" id="casesSelectionBar" style="margin-bottom:10px;">
+        <span id="casesSelectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="casesDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="casesDeleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="casesCancelSelectBtn" type="button">Отмена</button>
+        </div>
       </div>
       <div class="col-body" id="casesList"></div>
     </div>
@@ -215,6 +237,31 @@
     </button>
   </div>
   <div id="uploadPanelList" class="upload-panel-list"></div>
+</div>
+
+<div id="downloadChoiceOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:360px;">
+    <div class="modal-header">
+      <span>Как скачать?</span>
+      <button class="back-btn" id="downloadChoiceCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div class="upload-choice" style="flex-direction:column;">
+      <button class="upload-choice-btn" id="downloadAsZipBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+        Скачать как ZIP-архив
+      </button>
+      <button class="upload-choice-btn" id="downloadAsFolderBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        Скачать как обычную папку
+      </button>
+      <p id="downloadFolderHint" class="empty-hint hidden" style="text-align:center;">
+        Ваш браузер не поддерживает сохранение папки напрямую — доступен только ZIP
+      </p>
+    </div>
+  </div>
 </div>
 
 <script src="/app.js"></script>

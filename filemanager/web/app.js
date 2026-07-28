@@ -88,6 +88,25 @@ const els = {
   folderPermUserSelect: document.getElementById("folderPermUserSelect"),
   folderPermAccessSelect: document.getElementById("folderPermAccessSelect"),
   folderPermAddBtn: document.getElementById("folderPermAddBtn"),
+  downloadChoiceOverlay: document.getElementById("downloadChoiceOverlay"),
+  downloadChoiceCloseBtn: document.getElementById("downloadChoiceCloseBtn"),
+  downloadAsZipBtn: document.getElementById("downloadAsZipBtn"),
+  downloadAsFolderBtn: document.getElementById("downloadAsFolderBtn"),
+  downloadFolderHint: document.getElementById("downloadFolderHint"),
+  selectDbBtn: document.getElementById("selectDbBtn"),
+  dbToolbar: document.getElementById("dbToolbar"),
+  dbSelectionBar: document.getElementById("dbSelectionBar"),
+  dbSelectionCount: document.getElementById("dbSelectionCount"),
+  dbDownloadSelectedBtn: document.getElementById("dbDownloadSelectedBtn"),
+  dbDeleteSelectedBtn: document.getElementById("dbDeleteSelectedBtn"),
+  dbCancelSelectBtn: document.getElementById("dbCancelSelectBtn"),
+  selectCasesBtn: document.getElementById("selectCasesBtn"),
+  casesToolbar: document.getElementById("casesToolbar"),
+  casesSelectionBar: document.getElementById("casesSelectionBar"),
+  casesSelectionCount: document.getElementById("casesSelectionCount"),
+  casesDownloadSelectedBtn: document.getElementById("casesDownloadSelectedBtn"),
+  casesDeleteSelectedBtn: document.getElementById("casesDeleteSelectedBtn"),
+  casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -526,6 +545,94 @@ const columnState = {
   cases: { rootPath: CASES_PATH, rootLabel: "Дела", entries: [], searching: false },
 };
 
+const columnSelectState = {
+  db: { active: false, selected: new Set() },
+  cases: { active: false, selected: new Set() },
+};
+
+function colSelectRefs(key) {
+  return key === "db"
+    ? {
+        toolbar: els.dbToolbar, bar: els.dbSelectionBar, count: els.dbSelectionCount,
+        downloadBtn: els.dbDownloadSelectedBtn, deleteBtn: els.dbDeleteSelectedBtn, cancelBtn: els.dbCancelSelectBtn,
+      }
+    : {
+        toolbar: els.casesToolbar, bar: els.casesSelectionBar, count: els.casesSelectionCount,
+        downloadBtn: els.casesDownloadSelectedBtn, deleteBtn: els.casesDeleteSelectedBtn, cancelBtn: els.casesCancelSelectBtn,
+      };
+}
+
+function enterColumnSelectMode(key) {
+  const st = columnSelectState[key];
+  st.active = true;
+  st.selected = new Set();
+  const refs = colSelectRefs(key);
+  refs.toolbar.classList.add("hidden");
+  refs.bar.classList.remove("hidden");
+  updateColumnSelectionBar(key);
+  renderColumnList(key);
+}
+
+function exitColumnSelectMode(key) {
+  const st = columnSelectState[key];
+  st.active = false;
+  st.selected = new Set();
+  const refs = colSelectRefs(key);
+  refs.bar.classList.add("hidden");
+  refs.toolbar.classList.remove("hidden");
+  renderColumnList(key);
+}
+
+function updateColumnSelectionBar(key) {
+  colSelectRefs(key).count.textContent = `Выбрано: ${columnSelectState[key].selected.size}`;
+}
+
+function toggleColumnSelect(key, fullPath) {
+  const st = columnSelectState[key];
+  if (st.selected.has(fullPath)) st.selected.delete(fullPath);
+  else st.selected.add(fullPath);
+  updateColumnSelectionBar(key);
+  renderColumnList(key);
+}
+
+async function deleteColumnSelected(key) {
+  const st = columnSelectState[key];
+  if (st.selected.size === 0) return;
+  if (!confirm(`Удалить выбранное (${st.selected.size})? Это действие необратимо.`)) return;
+  const paths = [...st.selected];
+  try {
+    const results = await Promise.allSettled(
+      paths.map((p) => apiFetch(`/api/resources?path=${encodeURIComponent(p)}`, { method: "DELETE" }))
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    exitColumnSelectMode(key);
+    await loadColumnList(key);
+    if (failed.length > 0) alert(`Не удалось удалить ${failed.length} из ${paths.length} элементов`);
+  } catch (err) {
+    alert("Не удалось удалить выбранное: " + err.message);
+  }
+}
+
+function downloadColumnSelected(key) {
+  const st = columnSelectState[key];
+  if (st.selected.size === 0) return;
+  const state = columnState[key];
+  const items = [...st.selected].map((p) => {
+    const found = state.entries.find((e) => e.fullPath === p);
+    return { path: p, isDir: found ? found.isDir : false };
+  });
+  requestDownload(items);
+}
+
+els.selectDbBtn.addEventListener("click", () => enterColumnSelectMode("db"));
+els.selectCasesBtn.addEventListener("click", () => enterColumnSelectMode("cases"));
+els.dbCancelSelectBtn.addEventListener("click", () => exitColumnSelectMode("db"));
+els.casesCancelSelectBtn.addEventListener("click", () => exitColumnSelectMode("cases"));
+els.dbDeleteSelectedBtn.addEventListener("click", () => deleteColumnSelected("db"));
+els.casesDeleteSelectedBtn.addEventListener("click", () => deleteColumnSelected("cases"));
+els.dbDownloadSelectedBtn.addEventListener("click", () => downloadColumnSelected("db"));
+els.casesDownloadSelectedBtn.addEventListener("click", () => downloadColumnSelected("cases"));
+
 function colRefs(key) {
   return key === "db"
     ? { container: els.dbList, sortSelect: els.dbSortSelect, searchInput: els.dbSearchInput }
@@ -551,6 +658,7 @@ async function loadColumnList(key) {
 function renderColumnList(key) {
   const state = columnState[key];
   const { container, sortSelect } = colRefs(key);
+  const selState = columnSelectState[key];
   const sorted = sortEntries(state.entries, sortSelect.value);
   container.innerHTML = "";
   if (sorted.length === 0) {
@@ -561,19 +669,27 @@ function renderColumnList(key) {
     const row = document.createElement("div");
     row.className = "row-item";
     row.style.justifyContent = "space-between";
+    if (selState.active && selState.selected.has(entry.fullPath)) {
+      row.style.background = "var(--accent-bg)";
+    }
     const pathHint = state.searching
       ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
       : "";
     const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
     row.innerHTML = `
+      ${selState.active ? `<input type="checkbox" class="select-checkbox" ${selState.selected.has(entry.fullPath) ? "checked" : ""}>` : ""}
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
-      ${!entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
-      ${canManagePerms ? `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>` : ""}
-      <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
+      ${selState.active ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
+      ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
+      ${selState.active ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
     `;
     row.addEventListener("click", () => {
+      if (selState.active) {
+        toggleColumnSelect(key, entry.fullPath);
+        return;
+      }
       if (entry.isDir) {
         const trail = buildTrailExtending([{ label: state.rootLabel, path: state.rootPath }], state.rootPath, entry.fullPath);
         goToFolder(entry.fullPath, trail, true);
@@ -581,32 +697,32 @@ function renderColumnList(key) {
         openFile(entry.fullPath, entry.name);
       }
     });
-    if (!entry.isDir) {
+    if (!selState.active) {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
-        downloadFile(entry.fullPath);
+        requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
       });
-    }
-    if (canManagePerms) {
-      row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
-        e.stopPropagation();
-        openFolderPermissions(entry.fullPath, entry.name);
-      });
-    }
-    row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!confirm(`Удалить «${entry.name}»?`)) return;
-      try {
-        await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
-        if (state.searching) {
-          searchColumn(key, colRefs(key).searchInput.value.trim());
-        } else {
-          loadColumnList(key);
-        }
-      } catch (err) {
-        alert("Не удалось удалить: " + err.message);
+      if (canManagePerms) {
+        row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
+          e.stopPropagation();
+          openFolderPermissions(entry.fullPath, entry.name);
+        });
       }
-    });
+      row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Удалить «${entry.name}»?`)) return;
+        try {
+          await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
+          if (state.searching) {
+            searchColumn(key, colRefs(key).searchInput.value.trim());
+          } else {
+            loadColumnList(key);
+          }
+        } catch (err) {
+          alert("Не удалось удалить: " + err.message);
+        }
+      });
+    }
     container.appendChild(row);
   }
 }
@@ -810,7 +926,7 @@ function renderFolderRows() {
       <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
-        ${selectMode ? "" : !entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
+        ${selectMode ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
@@ -827,10 +943,10 @@ function renderFolderRows() {
         openFile(entry.fullPath, entry.name);
       }
     });
-    if (!selectMode && !entry.isDir) {
+    if (!selectMode) {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
-        downloadFile(entry.fullPath);
+        requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
       });
     }
     if (!selectMode && canManagePerms) {
@@ -964,32 +1080,14 @@ els.deleteSelectedBtn.addEventListener("click", async () => {
   }
 });
 
-els.downloadSelectedBtn.addEventListener("click", async () => {
+els.downloadSelectedBtn.addEventListener("click", () => {
   if (selectedPaths.size === 0) return;
-  const paths = [...selectedPaths];
-  try {
-    const res = await fetch("/api/download-zip", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || "HTTP " + res.status);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "files.zip";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    alert("Не удалось скачать выбранное: " + err.message);
-  }
+  const source = folderSearching ? folderSearchResults : currentFolderEntries;
+  const items = [...selectedPaths].map((p) => {
+    const found = source.find((e) => e.fullPath === p);
+    return { path: p, isDir: found ? found.isDir : false };
+  });
+  requestDownload(items);
 });
 
 /* ---------- Upload (с наглядным прогрессом) ---------- */
@@ -1158,6 +1256,123 @@ function openFile(relPath, fileName) {
 
 function downloadFile(relPath) {
   window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
+}
+
+/* ---------- Скачивание: выбор ZIP / обычная папка ---------- */
+
+function supportsDirectoryPicker() {
+  return typeof window.showDirectoryPicker === "function";
+}
+
+let pendingDownloadItems = [];
+
+// items: [{ path, isDir }]. Один файл — скачиваем сразу, без вопросов.
+// Иначе (папка и/или несколько элементов) — спрашиваем, как скачать.
+function requestDownload(items) {
+  if (!items || items.length === 0) return;
+  if (items.length === 1 && !items[0].isDir) {
+    downloadFile(items[0].path);
+    return;
+  }
+  pendingDownloadItems = items;
+  const supported = supportsDirectoryPicker();
+  els.downloadAsFolderBtn.classList.toggle("hidden", !supported);
+  els.downloadFolderHint.classList.toggle("hidden", supported);
+  els.downloadChoiceOverlay.classList.remove("hidden");
+}
+
+els.downloadChoiceCloseBtn.addEventListener("click", () => {
+  els.downloadChoiceOverlay.classList.add("hidden");
+});
+
+els.downloadAsZipBtn.addEventListener("click", async () => {
+  els.downloadChoiceOverlay.classList.add("hidden");
+  await performZipDownload(pendingDownloadItems.map((i) => i.path));
+});
+
+els.downloadAsFolderBtn.addEventListener("click", async () => {
+  els.downloadChoiceOverlay.classList.add("hidden");
+  await performFolderDownload(pendingDownloadItems);
+});
+
+async function performZipDownload(paths) {
+  try {
+    const res = await fetch("/api/download-zip", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || "HTTP " + res.status);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "files.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert("Не удалось скачать: " + err.message);
+  }
+}
+
+async function performFolderDownload(items) {
+  if (!supportsDirectoryPicker()) {
+    alert("Ваш браузер не поддерживает сохранение папки напрямую. Используйте «Скачать как ZIP».");
+    return;
+  }
+  let rootHandle;
+  try {
+    rootHandle = await window.showDirectoryPicker();
+  } catch (err) {
+    return; // пользователь отменил выбор папки на компьютере
+  }
+  try {
+    for (const item of items) {
+      if (item.isDir) {
+        const { tree } = await apiFetch(`/api/tree?path=${encodeURIComponent(item.path)}`);
+        await writeTreeToHandle(tree, rootHandle, item.path);
+      } else {
+        await writeFileToHandle(item.path, rootHandle);
+      }
+    }
+    alert("Готово! Файлы сохранены в выбранную папку.");
+  } catch (err) {
+    alert("Не удалось сохранить: " + err.message);
+  }
+}
+
+async function writeTreeToHandle(node, parentHandle, currentPath) {
+  if (node.isDir) {
+    const dirHandle = await parentHandle.getDirectoryHandle(node.name, { create: true });
+    for (const child of node.children || []) {
+      await writeTreeToHandle(child, dirHandle, joinPath(currentPath, child.name));
+    }
+  } else {
+    const fileHandle = await parentHandle.getFileHandle(node.name, { create: true });
+    const writable = await fileHandle.createWritable();
+    const res = await fetch(`/api/download?path=${encodeURIComponent(currentPath)}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Не удалось скачать ${node.name}`);
+    const blob = await res.blob();
+    await writable.write(blob);
+    await writable.close();
+  }
+}
+
+async function writeFileToHandle(relPath, parentHandle) {
+  const name = relPath.split("/").filter(Boolean).pop();
+  const fileHandle = await parentHandle.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  const res = await fetch(`/api/download?path=${encodeURIComponent(relPath)}`, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`Не удалось скачать ${name}`);
+  const blob = await res.blob();
+  await writable.write(blob);
+  await writable.close();
 }
 
 /* ---------- Init ---------- */
