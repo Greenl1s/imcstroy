@@ -278,6 +278,42 @@ app.get("/api/search", auth.requireAuth, requireColumnAccess(), async (req, res)
   }
 });
 
+// Рекурсивно фильтрует дерево, оставляя только то, что пользователю доступно
+// (используется для скачивания "как обычную папку" — там нужно точно знать,
+// что реально можно скачать, ещё до начала записи на диск пользователя).
+function filterTreeForUser(node, fullPath, rules) {
+  if (!node.isDir) {
+    return folderAccess.resolveAccess(rules, fullPath) ? node : null;
+  }
+  if (!folderAccess.canList(rules, fullPath)) return null;
+  const filteredChildren = [];
+  for (const child of node.children || []) {
+    const childPath = joinRelPath(fullPath, child.name);
+    const filtered = filterTreeForUser(child, childPath, rules);
+    if (filtered) filteredChildren.push(filtered);
+  }
+  return { ...node, children: filteredChildren };
+}
+
+// Отдаёт полную структуру папки (вложенные подпапки и файлы) одним запросом —
+// нужно фронтенду, чтобы воссоздать ту же структуру на диске пользователя
+// при скачивании "как обычную папку" через File System Access API.
+app.get("/api/tree", auth.requireAuth, requireColumnAccess(), async (req, res) => {
+  try {
+    let tree = await filesLib.buildTree(req.query.path);
+    if (req.user.role !== "admin" && columnForPath(req.query.path) === "cases") {
+      tree = filterTreeForUser(tree, req.query.path, req.folderRules);
+      if (!tree) {
+        return res.status(403).json({ message: "Нет доступа к этой папке" });
+      }
+    }
+    res.json({ tree });
+  } catch (err) {
+    console.error("Не удалось построить дерево папки:", err);
+    res.status(400).json({ message: "Не удалось прочитать структуру: " + err.message });
+  }
+});
+
 const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
 const FILE_TEMPLATES = {
   docx: { file: "empty.docx", defaultName: "Новый документ.docx" },

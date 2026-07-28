@@ -91,4 +91,30 @@ function absolutePathFor(relPath) {
   return safeResolve(relPath);
 }
 
-module.exports = { DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, searchTree, absolutePathFor };
+// Строит полное дерево папки (вложенные подпапки и файлы), рекурсивно.
+// Используется для скачивания "как обычную папку" через File System Access API
+// в браузере — там нужно заранее знать всю структуру, чтобы воссоздать её
+// на диске пользователя.
+async function buildTree(relPath) {
+  const abs = safeResolve(relPath);
+  const stat = await fsp.stat(abs);
+
+  if (!stat.isDirectory()) {
+    return { name: path.basename(abs), isDir: false };
+  }
+
+  const entries = await fsp.readdir(abs, { withFileTypes: true });
+  const children = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const childRel = relPath.endsWith("/") ? relPath + entry.name : relPath + "/" + entry.name;
+    if (entry.isDirectory()) {
+      children.push(await buildTree(childRel));
+    } else {
+      children.push({ name: entry.name, isDir: false });
+    }
+  }
+  return { name: path.basename(abs), isDir: true, children };
+}
+
+module.exports = { DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, searchTree, buildTree, absolutePathFor };
