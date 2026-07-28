@@ -570,7 +570,7 @@ function renderColumnList(key) {
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
       ${!entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
-      ${canManagePerms ? `<button class="delete-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>` : ""}
+      ${canManagePerms ? `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>` : ""}
       <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
     `;
     row.addEventListener("click", () => {
@@ -593,7 +593,7 @@ function renderColumnList(key) {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
-    row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+    row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
       e.stopPropagation();
       if (!confirm(`Удалить «${entry.name}»?`)) return;
       try {
@@ -811,7 +811,7 @@ function renderFolderRows() {
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode ? "" : !entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
-        ${selectMode || !canManagePerms ? "" : `<button class="delete-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
+        ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
     `;
@@ -840,7 +840,7 @@ function renderFolderRows() {
       });
     }
     if (!selectMode) {
-      row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+      row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
         e.stopPropagation();
         if (!confirm(`Удалить «${entry.name}»?`)) return;
         try {
