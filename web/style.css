@@ -213,6 +213,25 @@ body.dark-theme .ok    { background: #12442b; color: #7fd6a3; }
 body.dark-theme .warn  { background: #4a3115; color: #f0b96b; }
 body.dark-theme .bad   { background: #4a201c; color: #f0928a; }
 
+/* ---------- Классификация приборов ---------- */
+/* Три цветовые семьи, каждая — темнее внутри себя:
+   голубая: ВИК → УЗК → КБТ; бирюзовая: ЭЛК → РГК; медно-коричневая: ТК → ГДЗ. */
+.badge.ctrl-vik { background: #dbeaf7; color: #155e91; }
+.badge.ctrl-uzk { background: #c7dcef; color: #0f4d7a; }
+.badge.ctrl-kbt { background: #b3cee6; color: #0a3c60; }
+.badge.ctrl-elk { background: #d7f0ea; color: #0f6b58; }
+.badge.ctrl-rgk { background: #bfe4da; color: #0a5445; }
+.badge.ctrl-tk  { background: #f3ddc4; color: #8a5320; }
+.badge.ctrl-gdz { background: #e6c8a3; color: #6d3f16; }
+
+body.dark-theme .badge.ctrl-vik { background: #123249; color: #7db8e3; }
+body.dark-theme .badge.ctrl-uzk { background: #0f2a3d; color: #63a3d1; }
+body.dark-theme .badge.ctrl-kbt { background: #0a2030; color: #4a8ebd; }
+body.dark-theme .badge.ctrl-elk { background: #0f2e27; color: #5cc4a8; }
+body.dark-theme .badge.ctrl-rgk { background: #0a221c; color: #3fa78c; }
+body.dark-theme .badge.ctrl-tk  { background: #3a2712; color: #d29a5c; }
+body.dark-theme .badge.ctrl-gdz { background: #2b1c0d; color: #b57f42; }
+
 /* ---------- Карточка ---------- */
 .card { padding: 24px; }
 .card h1 { font-weight: 600; font-size: 26px; letter-spacing: -0.01em; }
