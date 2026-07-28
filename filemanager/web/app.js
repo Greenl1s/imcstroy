@@ -81,6 +81,13 @@ const els = {
   addFolderOption: document.getElementById("addFolderOption"),
   addDocxOption: document.getElementById("addDocxOption"),
   addXlsxOption: document.getElementById("addXlsxOption"),
+  folderPermOverlay: document.getElementById("folderPermOverlay"),
+  folderPermTitle: document.getElementById("folderPermTitle"),
+  folderPermCloseBtn: document.getElementById("folderPermCloseBtn"),
+  folderPermList: document.getElementById("folderPermList"),
+  folderPermUserSelect: document.getElementById("folderPermUserSelect"),
+  folderPermAccessSelect: document.getElementById("folderPermAccessSelect"),
+  folderPermAddBtn: document.getElementById("folderPermAddBtn"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -88,6 +95,7 @@ const svgFile = `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 
 const svgLink = `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`;
 const svgTrash = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>`;
 const svgDownload = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
+const svgDots = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;stroke:none"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return "";
@@ -369,6 +377,92 @@ els.createUserBtn.addEventListener("click", async () => {
   }
 });
 
+/* ---------- Доступ к папкам/файлам в "Дела" (только для админа) ---------- */
+
+let folderPermPath = null;
+let folderPermUsersCache = [];
+
+async function openFolderPermissions(fullPath, name) {
+  folderPermPath = fullPath;
+  els.folderPermTitle.textContent = `Доступ: ${name}`;
+  els.folderPermOverlay.classList.remove("hidden");
+  await loadFolderPermUsersList();
+  await loadFolderPermRules();
+}
+
+async function loadFolderPermUsersList() {
+  try {
+    const { users } = await apiFetch("/api/users");
+    folderPermUsersCache = users;
+    els.folderPermUserSelect.innerHTML = users
+      .map((u) => `<option value="${u.id}">${u.username}</option>`)
+      .join("");
+  } catch (err) {
+    els.folderPermUserSelect.innerHTML = "";
+  }
+}
+
+async function loadFolderPermRules() {
+  els.folderPermList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const { permissions } = await apiFetch(`/api/folder-permissions?path=${encodeURIComponent(folderPermPath)}`);
+    renderFolderPermRules(permissions);
+  } catch (err) {
+    els.folderPermList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+  }
+}
+
+const FOLDER_ACCESS_LABEL = { read: "Читать", write: "Редактировать", none: "Запрещено" };
+
+function renderFolderPermRules(list) {
+  els.folderPermList.innerHTML = "";
+  if (!list || list.length === 0) {
+    els.folderPermList.innerHTML = '<div class="empty-hint">Доступ никому явно не выдан</div>';
+    return;
+  }
+  for (const perm of list) {
+    const row = document.createElement("div");
+    row.className = "user-row";
+    row.innerHTML = `
+      <span class="user-name">${perm.username}</span>
+      <span class="role-badge">${FOLDER_ACCESS_LABEL[perm.access] || perm.access}</span>
+      <button class="delete-btn" title="Убрать правило" aria-label="Убрать правило">${svgTrash}</button>
+    `;
+    row.querySelector(".delete-btn").addEventListener("click", async () => {
+      if (!confirm(`Убрать это правило доступа для «${perm.username}»?`)) return;
+      try {
+        await apiFetch(`/api/folder-permissions/${perm.id}`, { method: "DELETE" });
+        loadFolderPermRules();
+      } catch (err) {
+        alert("Не удалось убрать правило: " + err.message);
+      }
+    });
+    els.folderPermList.appendChild(row);
+  }
+}
+
+els.folderPermAddBtn.addEventListener("click", async () => {
+  const userId = els.folderPermUserSelect.value;
+  const access = els.folderPermAccessSelect.value;
+  if (!userId) {
+    alert("Нет доступных пользователей");
+    return;
+  }
+  try {
+    await apiFetch("/api/folder-permissions", {
+      method: "POST",
+      body: JSON.stringify({ path: folderPermPath, userId: Number(userId), access }),
+    });
+    loadFolderPermRules();
+  } catch (err) {
+    alert("Не удалось сохранить: " + err.message);
+  }
+});
+
+els.folderPermCloseBtn.addEventListener("click", () => {
+  els.folderPermOverlay.classList.add("hidden");
+});
+
 /* ---------- Columns ---------- */
 
 async function loadToolsColumn() {
@@ -470,11 +564,13 @@ function renderColumnList(key) {
     const pathHint = state.searching
       ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
       : "";
+    const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
     row.innerHTML = `
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
       ${!entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
+      ${canManagePerms ? `<button class="delete-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>` : ""}
       <button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>
     `;
     row.addEventListener("click", () => {
@@ -489,6 +585,12 @@ function renderColumnList(key) {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         downloadFile(entry.fullPath);
+      });
+    }
+    if (canManagePerms) {
+      row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        openFolderPermissions(entry.fullPath, entry.name);
       });
     }
     row.querySelector(".delete-btn").addEventListener("click", async (e) => {
@@ -690,6 +792,8 @@ async function renderFolder(path) {
 function renderFolderRows() {
   const source = folderSearching ? folderSearchResults : currentFolderEntries;
   const list = sortEntries(source, els.folderSortSelect.value);
+  const inCasesTree = currentTrail[0] && currentTrail[0].path === CASES_PATH;
+  const canManagePerms = inCasesTree && currentUser && currentUser.role === "admin";
   els.folderList.innerHTML = "";
   if (list.length === 0) {
     els.folderList.innerHTML = `<div class="empty-hint">${folderSearching ? "Ничего не найдено" : "Папка пуста"}</div>`;
@@ -707,6 +811,7 @@ function renderFolderRows() {
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode ? "" : !entry.isDir ? `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>` : ""}
+        ${selectMode || !canManagePerms ? "" : `<button class="delete-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
     `;
@@ -726,6 +831,12 @@ function renderFolderRows() {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         downloadFile(entry.fullPath);
+      });
+    }
+    if (!selectMode && canManagePerms) {
+      row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        openFolderPermissions(entry.fullPath, entry.name);
       });
     }
     if (!selectMode) {
