@@ -69,7 +69,7 @@ function toInternalOnlyOfficeUrl(url) {
   }
 }
 
-function buildEditorConfig({ relPath, fileName, userId, userName }) {
+function buildEditorConfig({ relPath, fileName, userId, userName, canEdit }) {
   const ext = extOf(fileName);
   const documentType = DOC_TYPE_BY_EXT[ext];
   if (!documentType) {
@@ -78,6 +78,11 @@ function buildEditorConfig({ relPath, fileName, userId, userName }) {
   const token = signInternalToken(relPath);
   const encodedPath = encodeURIComponent(relPath);
 
+  // По умолчанию — как раньше (редактируемые форматы можно редактировать).
+  // Если явно передан canEdit=false (например, у пользователя только "читать"
+  // на эту папку в "Дела") — открываем строго в режиме просмотра.
+  const allowEdit = canEdit === undefined ? EDITABLE_EXT.has(ext) : (canEdit && EDITABLE_EXT.has(ext));
+
   const config = {
     document: {
       fileType: ext,
@@ -85,12 +90,13 @@ function buildEditorConfig({ relPath, fileName, userId, userName }) {
       title: fileName,
       url: `${FILEMANAGER_INTERNAL_URL}/internal/raw?path=${encodedPath}&token=${token}`,
       permissions: {
-        edit: EDITABLE_EXT.has(ext),
+        edit: allowEdit,
         download: true,
       },
     },
     documentType,
     editorConfig: {
+      mode: allowEdit ? "edit" : "view",
       callbackUrl: `${FILEMANAGER_INTERNAL_URL}/api/onlyoffice/callback?path=${encodedPath}&token=${token}`,
       user: { id: String(userId), name: userName },
       lang: "ru",

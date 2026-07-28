@@ -11,6 +11,8 @@ const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
 const users = require("./users");
 const fileLink = require("./fileLink");
+const folderAccess = require("./folderAccess");
+const folderPermissions = require("./folderPermissions");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -115,6 +117,44 @@ app.delete("/api/tools/:id", auth.requireAuth, auth.requireAdmin, async (req, re
   }
 });
 
+/* ---------------- Персональный доступ к папкам/файлам в "Дела" (только администратор) ---------------- */
+
+app.get("/api/folder-permissions", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const path = req.query.path;
+    if (!path) return res.status(400).json({ message: "Не указан путь" });
+    const permissions = await folderPermissions.listForPath(path);
+    res.json({ permissions });
+  } catch (err) {
+    console.error("Не удалось получить список прав доступа:", err);
+    res.status(500).json({ message: "Не удалось получить список прав доступа" });
+  }
+});
+
+app.post("/api/folder-permissions", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const { path, userId, access } = req.body || {};
+    if (!path || !userId || !["read", "write", "none"].includes(access)) {
+      return res.status(400).json({ message: "Укажите папку, пользователя и уровень доступа" });
+    }
+    const permission = await folderPermissions.setPermission(path, userId, access);
+    res.json({ permission });
+  } catch (err) {
+    console.error("Не удалось сохранить право доступа:", err);
+    res.status(500).json({ message: "Не удалось сохранить право доступа" });
+  }
+});
+
+app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    await folderPermissions.removePermission(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось удалить право доступа:", err);
+    res.status(500).json({ message: "Не удалось удалить право доступа" });
+  }
+});
+
 /* ---------------- Пользователи и права доступа (только администратор) ---------------- */
 
 app.get("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
@@ -178,16 +218,36 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
 
 /* ---------------- File browsing ---------------- */
 
-app.get("/api/resources", auth.requireAuth, requireColumnAccess, async (req, res) => {
+function joinRelPath(base, name) {
+  const b = base.endsWith("/") ? base : base + "/";
+  return b + name;
+}
+
+app.get("/api/resources", auth.requireAuth, requireColumnAccess(), async (req, res) => {
   try {
     const data = await filesLib.listDir(req.query.path || "/");
+
+    // В "Дела" у обычных пользователей может быть доступ не ко всему —
+    // прячем из списка то, что не разрешено (и не является "проходной"
+    // папкой на пути к разрешённому).
+    if (req.user.role !== "admin" && columnForPath(req.query.path) === "cases") {
+      const base = req.query.path || "/";
+      const rules = req.folderRules;
+      data.folders = (data.folders || []).filter((f) =>
+        folderAccess.canList(rules, joinRelPath(base, f.name))
+      );
+      data.files = (data.files || []).filter((f) =>
+        Boolean(folderAccess.resolveAccess(rules, joinRelPath(base, f.name)))
+      );
+    }
+
     res.json(data);
   } catch (err) {
     res.status(400).json({ message: "Не удалось прочитать папку: " + err.message });
   }
 });
 
-app.post("/api/folder", auth.requireAuth, requireColumnAccess, async (req, res) => {
+app.post("/api/folder", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     await filesLib.ensureDir(req.body.path);
     res.json({ ok: true });
@@ -196,13 +256,21 @@ app.post("/api/folder", auth.requireAuth, requireColumnAccess, async (req, res) 
   }
 });
 
-app.get("/api/search", auth.requireAuth, requireColumnAccess, async (req, res) => {
+app.get("/api/search", auth.requireAuth, requireColumnAccess(), async (req, res) => {
   try {
     const q = (req.query.q || "").trim();
     if (!q) {
       return res.json({ results: [] });
     }
-    const results = await filesLib.searchTree(req.query.path || "/", q);
+    let results = await filesLib.searchTree(req.query.path || "/", q);
+
+    // Поиск не должен показывать то, до чего пользователь не имеет права
+    // добраться, даже если оно лежит внутри разрешённой ему папки на глубине.
+    if (req.user.role !== "admin" && columnForPath(req.query.path) === "cases") {
+      const rules = req.folderRules;
+      results = results.filter((r) => Boolean(folderAccess.resolveAccess(rules, r.path)));
+    }
+
     res.json({ results });
   } catch (err) {
     console.error("Ошибка поиска:", err);
@@ -216,7 +284,7 @@ const FILE_TEMPLATES = {
   xlsx: { file: "empty.xlsx", defaultName: "Новая таблица.xlsx" },
 };
 
-app.post("/api/create-file", auth.requireAuth, requireColumnAccess, async (req, res) => {
+app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     const { type } = req.body || {};
     let { name } = req.body || {};
@@ -248,9 +316,12 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess, async (req, 
   }
 });
 
-app.delete("/api/resources", auth.requireAuth, requireColumnAccess, async (req, res) => {
+app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     await filesLib.removeEntry(req.query.path);
+    if (columnForPath(req.query.path) === "cases") {
+      await folderPermissions.removeRulesUnderPath(req.query.path);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ message: "Не удалось удалить: " + err.message });
@@ -267,7 +338,7 @@ function sanitizeRelativePath(relPath) {
     .join("/");
 }
 
-app.post("/api/upload", auth.requireAuth, requireColumnAccess, upload.single("file"), async (req, res) => {
+app.post("/api/upload", auth.requireAuth, upload.single("file"), requireColumnAccess({ write: true }), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "Файл не получен" });
@@ -300,7 +371,7 @@ app.post("/api/upload", auth.requireAuth, requireColumnAccess, upload.single("fi
   }
 });
 
-app.get("/api/download", auth.requireAuth, requireColumnAccess, (req, res) => {
+app.get("/api/download", auth.requireAuth, requireColumnAccess(), (req, res) => {
   try {
     const abs = filesLib.safeResolve(req.query.path);
     res.download(abs);
@@ -312,7 +383,7 @@ app.get("/api/download", auth.requireAuth, requireColumnAccess, (req, res) => {
 // В отличие от /api/download — не заставляет браузер скачивать файл,
 // а отдаёт его "как есть", чтобы браузер сам решил, показать его
 // (например, PDF) или предложить сохранить.
-app.get("/api/view", auth.requireAuth, requireColumnAccess, (req, res) => {
+app.get("/api/view", auth.requireAuth, requireColumnAccess(), (req, res) => {
   try {
     const abs = filesLib.safeResolve(req.query.path);
     res.setHeader("Content-Disposition", "inline");
@@ -331,12 +402,26 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
     }
 
     if (req.user.role !== "admin") {
+      let casesRules = null;
       for (const p of paths) {
         const col = columnForPath(p);
-        const allowed = (col === "db" && req.user.can_db) || (col === "cases" && req.user.can_cases);
-        if (!allowed) {
-          return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
+        if (col === "db") {
+          if (!req.user.can_db) {
+            return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
+          }
+          continue;
         }
+        if (col === "cases") {
+          if (!req.user.can_cases) {
+            return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
+          }
+          if (!casesRules) casesRules = await folderAccess.getUserRules(req.user.id);
+          if (!folderAccess.resolveAccess(casesRules, p)) {
+            return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
+          }
+          continue;
+        }
+        return res.status(403).json({ message: "Нет доступа к одному из выбранных элементов" });
       }
     }
 
@@ -375,15 +460,22 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
 
 /* ---------------- OnlyOffice ---------------- */
 
-app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess, (req, res) => {
+app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess(), (req, res) => {
   try {
     const relPath = req.query.path;
     const fileName = path.basename(relPath);
+    // В "Дела" доступ мог быть только "читать" — тогда открываем строго
+    // в режиме просмотра, без возможности редактировать и сохранить.
+    const canEdit =
+      req.user.role === "admin" ||
+      columnForPath(relPath) !== "cases" ||
+      req.folderAccess === "write";
     const { config, scriptUrl } = onlyoffice.buildEditorConfig({
       relPath,
       fileName,
       userId: req.user.id,
       userName: req.user.username,
+      canEdit,
     });
     res.json({ config, scriptUrl });
   } catch (err) {
