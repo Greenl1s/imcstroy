@@ -13,6 +13,7 @@ const users = require("./users");
 const fileLink = require("./fileLink");
 const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
+const gpGenerate = require("./gpGenerate");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -213,6 +214,111 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
   } catch (err) {
     console.error("Не удалось удалить пользователя:", err);
     res.status(500).json({ message: "Не удалось удалить пользователя" });
+  }
+});
+
+/* ---------------- Гарантийные письма (ГП) ---------------- */
+
+const EXPERTS_DIR = "/База данных/Эксперты";
+
+app.get("/api/experts", auth.requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin" && !req.user.can_db) {
+      return res.status(403).json({ message: "Нет доступа к этому разделу" });
+    }
+    const dirAbs = filesLib.safeResolve(EXPERTS_DIR);
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dirAbs, { withFileTypes: true });
+    } catch (err) {
+      return res.json({ experts: [] }); // папки с экспертами ещё нет — просто пустой список
+    }
+    const experts = entries
+      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".docx"))
+      .map((e) => ({
+        name: e.name.replace(/\.docx$/i, ""),
+        path: EXPERTS_DIR + "/" + e.name,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    res.json({ experts });
+  } catch (err) {
+    console.error("Не удалось получить список экспертов:", err);
+    res.status(500).json({ message: "Не удалось получить список экспертов" });
+  }
+});
+
+const GP_OUTPUT_DIR = "/Дела/Планы";
+
+app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
+  try {
+    // Готовый файл всегда уходит строго в "Дела/Планы" — проверяем право
+    // на запись именно туда, а не на путь, присланный в запросе.
+    if (req.user.role !== "admin") {
+      if (!req.user.can_cases) {
+        return res.status(403).json({ message: "Нет доступа к этому разделу" });
+      }
+      const rules = await folderAccess.getUserRules(req.user.id);
+      if (folderAccess.resolveAccess(rules, GP_OUTPUT_DIR) !== "write") {
+        return res.status(403).json({ message: "Нет прав на создание файлов в «Дела/Планы»" });
+      }
+    }
+
+    const body = req.body || {};
+    const questions = Array.isArray(body.questions) ? body.questions.map((q) => String(q || "").trim()).filter(Boolean) : [];
+    const expertPaths = Array.isArray(body.expertPaths) ? body.expertPaths : [];
+
+    if (!questions.length) {
+      return res.status(400).json({ message: "Добавьте хотя бы один вопрос экспертизы" });
+    }
+    if (!expertPaths.length) {
+      return res.status(400).json({ message: "Выберите хотя бы одного эксперта" });
+    }
+
+    const experts = [];
+    for (const p of expertPaths) {
+      if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/")) {
+        return res.status(400).json({ message: "Недопустимый путь к файлу эксперта" });
+      }
+      const abs = filesLib.safeResolve(p);
+      let buffer;
+      try {
+        buffer = await fs.promises.readFile(abs);
+      } catch (err) {
+        return res.status(400).json({ message: `Не удалось прочитать файл эксперта: ${p}` });
+      }
+      const descLines = gpGenerate.extractParagraphTexts(buffer);
+      const name = path.basename(p).replace(/\.docx$/i, "");
+      experts.push({ name, descLines });
+    }
+
+    const data = {
+      courtHeader: String(body.courtHeader || ""),
+      caseNumber: String(body.caseNumber || ""),
+      courtGenitive: String(body.courtGenitive || ""),
+      expertiseType: String(body.expertiseType || ""),
+      questions,
+      costText: `${body.costAmount || ""} (${body.costWords || ""})`,
+      termText: `${body.termDays || ""} (${body.termWords || ""})`,
+      experts,
+    };
+
+    const buffer = gpGenerate.generateGP(data);
+
+    const safeCaseNumber = String(body.caseNumber || "без номера").replace(/[\\/]/g, "-");
+    const fileName = `ГП по делу № ${safeCaseNumber}.docx`;
+    const destDir = filesLib.safeResolve(GP_OUTPUT_DIR);
+    await fs.promises.mkdir(destDir, { recursive: true });
+    const destPath = path.join(destDir, fileName);
+
+    if (fs.existsSync(destPath)) {
+      return res.status(400).json({ message: "Файл с таким названием уже существует в «Дела/Планы»" });
+    }
+
+    await fs.promises.writeFile(destPath, buffer);
+    res.json({ ok: true, name: fileName, path: GP_OUTPUT_DIR + "/" + fileName });
+  } catch (err) {
+    console.error("Не удалось создать ГП:", err);
+    res.status(500).json({ message: "Не удалось создать документ: " + err.message });
   }
 });
 
