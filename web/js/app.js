@@ -1,6 +1,6 @@
 import { api, getToken } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, CONTROL_TYPES } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm } from './instruments.js';
@@ -43,6 +43,8 @@ async function init() {
 function bindEvents() {
   document.getElementById('loginForm').onsubmit = onLogin;
 
+  populateControlTypeFilter();
+
   document.getElementById('logoutButton').onclick = () => {
     api.logout();
     state.currentUser = null;
@@ -81,6 +83,24 @@ function bindEvents() {
 function setFilter(key, value) {
   state[key] = value;
   renderList(openCard);
+}
+
+/**
+ * Заполняет фильтр "Классификация" полными названиями из CONTROL_TYPES —
+ * единственного места, где заведён список классификаций (используется и
+ * здесь, и в форме прибора). Так названия не могут разъехаться между собой.
+ * "Все" и "Не указано" уже есть в index.html — новые варианты вставляем
+ * между ними.
+ */
+function populateControlTypeFilter() {
+  const select = document.getElementById('controlTypeFilter');
+  const noneOption = select.querySelector('option[value="none"]');
+  for (const [code, full] of CONTROL_TYPES) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = full;
+    select.insertBefore(opt, noneOption);
+  }
 }
 
 // ---------- Вход ----------
