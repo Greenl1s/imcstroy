@@ -115,6 +115,7 @@ const svgLink = `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0
 const svgTrash = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>`;
 const svgDownload = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
 const svgDots = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;stroke:none"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+const svgRename = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 
 function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return "";
@@ -431,7 +432,7 @@ async function loadFolderPermRules() {
   }
 }
 
-const FOLDER_ACCESS_LABEL = { read: "Читать", write: "Редактировать", none: "Запрещено" };
+const FOLDER_ACCESS_LABEL = { read: "Читать", write: "Редактировать", none: "Доступ закрыт" };
 
 function renderFolderPermRules(list) {
   els.folderPermList.innerHTML = "";
@@ -682,6 +683,7 @@ function renderColumnList(key) {
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
       ${selState.active ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
+      ${selState.active ? "" : `<button class="rename-btn" title="Переименовать" aria-label="Переименовать">${svgRename}</button>`}
       ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
       ${selState.active ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
     `;
@@ -701,6 +703,16 @@ function renderColumnList(key) {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
+      });
+      row.querySelector('[title="Переименовать"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        promptRename(entry.fullPath, entry.name, () => {
+          if (state.searching) {
+            searchColumn(key, colRefs(key).searchInput.value.trim());
+          } else {
+            loadColumnList(key);
+          }
+        });
       });
       if (canManagePerms) {
         row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
@@ -927,6 +939,7 @@ function renderFolderRows() {
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
+        ${selectMode ? "" : `<button class="rename-btn" title="Переименовать" aria-label="Переименовать">${svgRename}</button>`}
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
         ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
@@ -947,6 +960,16 @@ function renderFolderRows() {
       row.querySelector(".download-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
+      });
+      row.querySelector('[title="Переименовать"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        promptRename(entry.fullPath, entry.name, () => {
+          if (folderSearching) {
+            searchFolder(els.folderSearchInput.value.trim());
+          } else {
+            renderFolder(currentPath);
+          }
+        });
       });
     }
     if (!selectMode && canManagePerms) {
@@ -1252,6 +1275,20 @@ function openFile(relPath, fileName) {
     return;
   }
   window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
+}
+
+async function promptRename(fullPath, currentName, onDone) {
+  const newName = prompt("Новое имя:", currentName);
+  if (!newName || newName === currentName) return;
+  try {
+    await apiFetch("/api/rename", {
+      method: "POST",
+      body: JSON.stringify({ path: fullPath, newName }),
+    });
+    onDone();
+  } catch (err) {
+    alert("Не удалось переименовать: " + err.message);
+  }
 }
 
 function downloadFile(relPath) {

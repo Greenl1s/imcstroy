@@ -245,6 +245,17 @@ button.primary:hover { background: #2569c9; }
 
 .perm-btn:hover { color: var(--accent); background: var(--accent-bg); }
 
+.rename-btn {
+  width: 26px; height: 26px;
+  border: none; background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rename-btn:hover { color: var(--accent); background: var(--accent-bg); }
+
 /* Users management modal */
 .modal-overlay {
   position: fixed; inset: 0;
