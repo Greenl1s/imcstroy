@@ -37,4 +37,18 @@ async function removeRulesUnderPath(path) {
   );
 }
 
-module.exports = { listForPath, setPermission, removePermission, removeRulesUnderPath };
+/** При переименовании файла/папки переносим все связанные правила на новый путь. */
+async function renamePath(oldPath, newPath) {
+  const oldClean = normalize(oldPath);
+  const newClean = normalize(newPath);
+
+  await db.query("UPDATE fm_folder_permissions SET path = $2 WHERE path = $1", [oldClean, newClean]);
+
+  const res = await db.query("SELECT id, path FROM fm_folder_permissions WHERE path LIKE $1", [oldClean + "/%"]);
+  for (const row of res.rows) {
+    const suffix = row.path.slice(oldClean.length);
+    await db.query("UPDATE fm_folder_permissions SET path = $2 WHERE id = $1", [row.id, newClean + suffix]);
+  }
+}
+
+module.exports = { listForPath, setPermission, removePermission, removeRulesUnderPath, renamePath };

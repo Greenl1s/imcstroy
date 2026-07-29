@@ -46,6 +46,28 @@ async function removeEntry(relPath) {
   await fsp.rm(abs, { recursive: true, force: true });
 }
 
+// Переименовывает файл/папку внутри той же родительской папки.
+// Возвращает новый относительный путь.
+async function renameEntry(relPath, newName) {
+  const cleanName = String(newName || "").trim().replace(/[\\/]/g, "");
+  if (!cleanName) {
+    throw new Error("Пустое имя недопустимо");
+  }
+  const oldAbs = safeResolve(relPath);
+  const parentAbs = path.dirname(oldAbs);
+  const newAbs = path.join(parentAbs, cleanName);
+
+  if (fs.existsSync(newAbs)) {
+    throw new Error("Файл или папка с таким именем уже существует");
+  }
+
+  await fsp.rename(oldAbs, newAbs);
+
+  const cleanRelPath = "/" + relPath.replace(/^\/+/, "").replace(/\/+$/, "");
+  const parentRel = cleanRelPath.slice(0, cleanRelPath.lastIndexOf("/")) || "/";
+  return parentRel === "/" ? "/" + cleanName : parentRel + "/" + cleanName;
+}
+
 // Рекурсивно ищет файлы и папки по подстроке в имени (без учёта регистра),
 // начиная от relPath и ниже по всем вложенным папкам.
 // Возвращает плоский список с относительным путём каждого совпадения.
@@ -117,4 +139,4 @@ async function buildTree(relPath) {
   return { name: path.basename(abs), isDir: true, children };
 }
 
-module.exports = { DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, searchTree, buildTree, absolutePathFor };
+module.exports = { DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, searchTree, buildTree, absolutePathFor };

@@ -364,6 +364,22 @@ app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true
   }
 });
 
+app.post("/api/rename", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
+  try {
+    const { path: oldPath, newName } = req.body || {};
+    if (!oldPath || !newName) {
+      return res.status(400).json({ message: "Укажите путь и новое имя" });
+    }
+    const newPath = await filesLib.renameEntry(oldPath, newName);
+    if (columnForPath(oldPath) === "cases") {
+      await folderPermissions.renamePath(oldPath, newPath);
+    }
+    res.json({ ok: true, path: newPath });
+  } catch (err) {
+    res.status(400).json({ message: "Не удалось переименовать: " + err.message });
+  }
+});
+
 // Убирает ".." и пустые сегменты из относительного пути, присланного
 // клиентом при загрузке папки — чтобы нельзя было вылезти за пределы
 // целевой директории через специально сформированный путь.
