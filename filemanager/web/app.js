@@ -107,6 +107,21 @@ const els = {
   casesDownloadSelectedBtn: document.getElementById("casesDownloadSelectedBtn"),
   casesDeleteSelectedBtn: document.getElementById("casesDeleteSelectedBtn"),
   casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
+  addGpBtn: document.getElementById("addGpBtn"),
+  gpOverlay: document.getElementById("gpOverlay"),
+  gpCloseBtn: document.getElementById("gpCloseBtn"),
+  gpForm: document.getElementById("gpForm"),
+  gpCourtHeader: document.getElementById("gpCourtHeader"),
+  gpCaseNumber: document.getElementById("gpCaseNumber"),
+  gpCourtGenitive: document.getElementById("gpCourtGenitive"),
+  gpExpertiseType: document.getElementById("gpExpertiseType"),
+  gpQuestionsList: document.getElementById("gpQuestionsList"),
+  gpAddQuestionBtn: document.getElementById("gpAddQuestionBtn"),
+  gpCostAmount: document.getElementById("gpCostAmount"),
+  gpCostWords: document.getElementById("gpCostWords"),
+  gpTermDays: document.getElementById("gpTermDays"),
+  gpTermWords: document.getElementById("gpTermWords"),
+  gpExpertsList: document.getElementById("gpExpertsList"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -786,6 +801,123 @@ async function createFolderIn(basePath, onDone) {
     alert("Не удалось создать папку: " + err.message);
   }
 }
+
+/* ---------- Гарантийные письма (ГП) ---------- */
+
+let gpQuestionCount = 0;
+
+function gpAddQuestionRow(prefill) {
+  gpQuestionCount++;
+  const row = document.createElement("div");
+  row.className = "gp-question-row";
+  row.style.cssText = "display:flex; gap:8px; align-items:flex-start;";
+  row.innerHTML = `
+    <span style="padding-top:8px; font-size:12px; color:var(--text-muted); min-width:16px;">${gpQuestionCount}.</span>
+    <textarea class="gp-question-input" rows="2" style="flex:1; border-radius:8px; border:1px solid var(--border-strong); padding:8px; font-size:13px; font-family:inherit;" placeholder="Текст вопроса экспертизы">${prefill || ""}</textarea>
+    <button type="button" class="delete-btn" title="Убрать вопрос" aria-label="Убрать вопрос">${svgTrash}</button>
+  `;
+  row.querySelector(".delete-btn").addEventListener("click", () => {
+    row.remove();
+    renumberGpQuestions();
+  });
+  els.gpQuestionsList.appendChild(row);
+}
+
+function renumberGpQuestions() {
+  const rows = els.gpQuestionsList.querySelectorAll(".gp-question-row");
+  rows.forEach((row, i) => {
+    row.querySelector("span").textContent = `${i + 1}.`;
+  });
+  gpQuestionCount = rows.length;
+}
+
+els.gpAddQuestionBtn.addEventListener("click", () => gpAddQuestionRow());
+
+async function openGpForm() {
+  els.gpForm.reset();
+  els.gpQuestionsList.innerHTML = "";
+  gpQuestionCount = 0;
+  gpAddQuestionRow();
+
+  els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
+  els.gpOverlay.classList.remove("hidden");
+
+  try {
+    const { experts } = await apiFetch("/api/experts");
+    if (!experts || experts.length === 0) {
+      els.gpExpertsList.innerHTML = '<div class="empty-hint">Нет файлов экспертов в «База данных/Эксперты»</div>';
+      return;
+    }
+    els.gpExpertsList.innerHTML = "";
+    for (const expert of experts) {
+      const label = document.createElement("label");
+      label.style.cssText = "display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;";
+      label.innerHTML = `<input type="checkbox" value="${expert.path}"> <span>${expert.name}</span>`;
+      els.gpExpertsList.appendChild(label);
+    }
+  } catch (err) {
+    els.gpExpertsList.innerHTML = '<div class="empty-hint">Не удалось загрузить список экспертов</div>';
+  }
+}
+
+els.addGpBtn.addEventListener("click", openGpForm);
+els.gpCloseBtn.addEventListener("click", () => {
+  els.gpOverlay.classList.add("hidden");
+});
+
+els.gpForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const questions = [...els.gpQuestionsList.querySelectorAll(".gp-question-input")]
+    .map((t) => t.value.trim())
+    .filter(Boolean);
+  const expertPaths = [...els.gpExpertsList.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((cb) => cb.value);
+
+  if (questions.length === 0) {
+    alert("Добавьте хотя бы один вопрос экспертизы");
+    return;
+  }
+  if (expertPaths.length === 0) {
+    alert("Выберите хотя бы одного эксперта");
+    return;
+  }
+
+  const submitBtn = els.gpForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Создаём…";
+
+  try {
+    const result = await apiFetch("/api/gp/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        courtHeader: els.gpCourtHeader.value.trim(),
+        caseNumber: els.gpCaseNumber.value.trim(),
+        courtGenitive: els.gpCourtGenitive.value.trim(),
+        expertiseType: els.gpExpertiseType.value.trim(),
+        questions,
+        costAmount: els.gpCostAmount.value.trim(),
+        costWords: els.gpCostWords.value.trim(),
+        termDays: els.gpTermDays.value.trim(),
+        termWords: els.gpTermWords.value.trim(),
+        expertPaths,
+      }),
+    });
+    els.gpOverlay.classList.add("hidden");
+    alert(`Готово! Файл «${result.name}» создан в «Дела/Планы».`);
+    // Обновим колонку "Дела" на случай, если сейчас открыта именно "Планы"
+    if (currentPath === CASES_PATH + "/Планы" || currentPath === "/Дела/Планы") {
+      renderFolder(currentPath);
+    } else {
+      loadColumnList("cases");
+    }
+  } catch (err) {
+    alert("Не удалось создать документ: " + err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Создать";
+  }
+});
 
 /* ---------- Добавить (новая папка / docx / xlsx) в текущей папке ---------- */
 

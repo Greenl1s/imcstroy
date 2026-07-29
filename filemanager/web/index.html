@@ -75,6 +75,7 @@
       <div class="col-header">
         <span>Дела</span>
         <div style="display:flex; gap:6px;">
+          <button class="add-btn" id="addGpBtn" title="Добавить гарантийное письмо" aria-label="Добавить ГП" style="width:auto; padding:0 8px; font-size:11px;">ГП</button>
           <button class="add-btn" id="selectCasesBtn" title="Выбрать" aria-label="Выбрать">☑</button>
           <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
         </div>
@@ -261,6 +262,70 @@
         Ваш браузер не поддерживает сохранение папки напрямую — доступен только ZIP
       </p>
     </div>
+  </div>
+</div>
+
+<div id="gpOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:640px;">
+    <div class="modal-header">
+      <span>Добавить гарантийное письмо</span>
+      <button class="back-btn" id="gpCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="gpForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Суд (шапка письма)
+          <input type="text" id="gpCourtHeader" placeholder="В Арбитражный суд г. Москвы Судье Иванову И.И." required>
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label>Номер дела
+          <input type="text" id="gpCaseNumber" placeholder="А40-000000/2026" required>
+        </label>
+        <label>Суд, родительный падеж (для текста письма)
+          <input type="text" id="gpCourtGenitive" placeholder="Арбитражного суда города Москвы" required>
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Вид экспертизы
+          <input type="text" id="gpExpertiseType" placeholder="строительно-технической" required>
+        </label>
+      </div>
+
+      <div>
+        <span class="row-subtitle">Вопросы экспертизы</span>
+        <div id="gpQuestionsList" style="display:flex; flex-direction:column; gap:8px; margin-top:6px;"></div>
+        <button type="button" class="secondary" id="gpAddQuestionBtn" style="margin-top:8px;">+ Добавить вопрос</button>
+      </div>
+
+      <div class="add-user-row">
+        <label>Стоимость, цифрами
+          <input type="text" id="gpCostAmount" placeholder="6 400 000" required>
+        </label>
+        <label>Стоимость, прописью
+          <input type="text" id="gpCostWords" placeholder="Шесть миллионов четыреста тысяч" required>
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label>Срок, рабочих дней
+          <input type="text" id="gpTermDays" placeholder="60" required>
+        </label>
+        <label>Срок, прописью
+          <input type="text" id="gpTermWords" placeholder="Шестьдесят" required>
+        </label>
+      </div>
+
+      <div>
+        <span class="row-subtitle">Эксперты</span>
+        <div id="gpExpertsList" style="display:flex; flex-direction:column; gap:6px; margin-top:6px; max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="primary" type="submit">Создать</button>
+      </div>
+    </form>
   </div>
 </div>
 
