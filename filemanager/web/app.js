@@ -712,7 +712,7 @@ function renderColumnList(key) {
           } else {
             loadColumnList(key);
           }
-        });
+        }, entry.isDir);
       });
       if (canManagePerms) {
         row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
@@ -969,7 +969,7 @@ function renderFolderRows() {
           } else {
             renderFolder(currentPath);
           }
-        });
+        }, entry.isDir);
       });
     }
     if (!selectMode && canManagePerms) {
@@ -1277,9 +1277,24 @@ function openFile(relPath, fileName) {
   window.location.href = `/api/download?path=${encodeURIComponent(relPath)}`;
 }
 
-async function promptRename(fullPath, currentName, onDone) {
-  const newName = prompt("Новое имя:", currentName);
-  if (!newName || newName === currentName) return;
+async function promptRename(fullPath, currentName, onDone, isDir) {
+  // Для файлов не даём трогать расширение — показываем в поле только имя без
+  // него, а при сохранении дописываем обратно. Для папок (нет расширения)
+  // ничего не отрезаем.
+  let baseName = currentName;
+  let ext = "";
+  if (!isDir) {
+    const dotIndex = currentName.lastIndexOf(".");
+    if (dotIndex > 0) {
+      baseName = currentName.slice(0, dotIndex);
+      ext = currentName.slice(dotIndex);
+    }
+  }
+
+  const newBaseName = prompt("Новое имя:", baseName);
+  if (!newBaseName || newBaseName === baseName) return;
+  const newName = newBaseName + ext;
+
   try {
     await apiFetch("/api/rename", {
       method: "POST",
