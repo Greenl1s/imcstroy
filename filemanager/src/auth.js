@@ -1,4 +1,3 @@
-const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("./db");
 
@@ -7,49 +6,14 @@ if (!JWT_SECRET) {
   throw new Error("Переменная окружения JWT_SECRET не задана");
 }
 
-const COOKIE_NAME = "fm_token";
-const TOKEN_TTL = "12h";
-
-async function findUser(username) {
-  const res = await db.query(
-    "SELECT id, username, password_hash, role, can_tools, can_db, can_cases FROM fm_users WHERE username = $1",
-    [username]
-  );
-  return res.rows[0] || null;
-}
-
-async function verifyLogin(username, password) {
-  const user = await findUser(username);
-  if (!user) return null;
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return null;
-  return {
-    id: user.id,
-    username: user.username,
-    role: user.role,
-    can_tools: user.can_tools,
-    can_db: user.can_db,
-    can_cases: user.can_cases,
-  };
-}
-
-function signToken(user) {
-  return jwt.sign(
-    {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      can_tools: user.can_tools,
-      can_db: user.can_db,
-      can_cases: user.can_cases,
-    },
-    JWT_SECRET,
-    { expiresIn: TOKEN_TTL }
-  );
-}
+// Должно совпадать с cookie, которую выставляет "Учёт оборудования" —
+// так вход на любом из двух сайтов сразу открывает и второй (SSO).
+const COOKIE_NAME = "sso_token";
+const COOKIE_DOMAIN = process.env.SSO_COOKIE_DOMAIN || undefined;
 
 function setAuthCookie(res, token) {
   res.cookie(COOKIE_NAME, token, {
+    domain: COOKIE_DOMAIN,
     httpOnly: true,
     secure: true,
     sameSite: "lax",
@@ -58,19 +22,51 @@ function setAuthCookie(res, token) {
 }
 
 function clearAuthCookie(res) {
-  res.clearCookie(COOKIE_NAME);
+  res.clearCookie(COOKIE_NAME, { domain: COOKIE_DOMAIN });
 }
 
-function requireAuth(req, res, next) {
+async function getPermissions(userId) {
+  const res = await db.query(
+    "SELECT can_tools, can_db, can_cases FROM fm_permissions WHERE user_id = $1",
+    [userId]
+  );
+  return res.rows[0] || { can_tools: false, can_db: false, can_cases: false };
+}
+
+/**
+ * Личность (id/username/role) теперь всегда приходит из общего токена,
+ * подписанного "Учётом оборудования" при входе — паролей мы у себя
+ * больше не храним и не проверяем. Права на разделы ИСУ (can_tools/
+ * can_db/can_cases) по-прежнему свои, берём их из fm_permissions.
+ */
+async function requireAuth(req, res, next) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) {
     return res.status(401).json({ message: "Не авторизован" });
   }
+
+  let identity;
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
+    identity = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     return res.status(401).json({ message: "Сессия недействительна" });
+  }
+
+  try {
+    const userId = Number(identity.sub);
+    const perms = await getPermissions(userId);
+    req.user = {
+      id: userId,
+      username: identity.username,
+      role: identity.role,
+      can_tools: perms.can_tools,
+      can_db: perms.can_db,
+      can_cases: perms.can_cases,
+    };
+    next();
+  } catch (err) {
+    console.error("Не удалось получить права пользователя:", err);
+    res.status(500).json({ message: "Не удалось проверить права доступа" });
   }
 }
 
@@ -82,11 +78,10 @@ function requireAdmin(req, res, next) {
 }
 
 module.exports = {
-  verifyLogin,
-  signToken,
   setAuthCookie,
   clearAuthCookie,
   requireAuth,
   requireAdmin,
+  getPermissions,
   COOKIE_NAME,
 };
