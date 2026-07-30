@@ -100,6 +100,7 @@ export const api = {
   bulkIssue: (ids, data) => request('/instruments/bulk/issue', { method: 'POST', body: { ids, ...data } }),
   bulkBook: (ids, data) => request('/instruments/bulk/book', { method: 'POST', body: { ids, ...data } }),
   bulkCancelBooking: (ids) => request('/instruments/bulk/cancel-booking', { method: 'POST', body: { ids } }),
+  bulkConfirmBooking: (ids) => request('/instruments/bulk/confirm-booking', { method: 'POST', body: { ids } }),
   bulkReturn: (ids) => request('/instruments/bulk/return', { method: 'POST', body: { ids } }),
   bulkTransfer: (ids, data) => request('/instruments/bulk/transfer', { method: 'POST', body: { ids, ...data } }),
 

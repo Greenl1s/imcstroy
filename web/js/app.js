@@ -86,6 +86,10 @@ function bindEvents() {
     closeMassActionsMenu();
     bulkSimple(e.currentTarget, 'return');
   };
+  document.getElementById('massConfirmBookingBtn').onclick = (e) => {
+    closeMassActionsMenu();
+    bulkSimple(e.currentTarget, 'confirm-booking');
+  };
   document.getElementById('massCancelBookingBtn').onclick = (e) => {
     closeMassActionsMenu();
     bulkSimple(e.currentTarget, 'cancel-booking');
@@ -248,18 +252,23 @@ async function bulkSimple(button, kind) {
   const ids = selectedIds();
   if (!ids.length) return toast('Выберите приборы', true);
 
-  const question = kind === 'return'
-    ? `Вернуть ${ids.length} прибор(ов)?`
-    : `Отменить бронирование у ${ids.length} прибор(ов)?`;
-  if (!confirm(question)) return;
+  const questions = {
+    return: `Вернуть ${ids.length} прибор(ов)?`,
+    'cancel-booking': `Отменить бронирование у ${ids.length} прибор(ов)?`,
+    'confirm-booking': `Подтвердить бронирование и выдать ${ids.length} прибор(ов)?`
+  };
+  if (!confirm(questions[kind])) return;
 
-  const result = await run(
-    () => (kind === 'return' ? api.bulkReturn(ids) : api.bulkCancelBooking(ids)),
-    { button }
-  );
+  const actions = {
+    return: () => api.bulkReturn(ids),
+    'cancel-booking': () => api.bulkCancelBooking(ids),
+    'confirm-booking': () => api.bulkConfirmBooking(ids)
+  };
+  const result = await run(actions[kind], { button });
   if (result === null) return;
 
-  reportBulkResult(result, kind === 'return' ? 'возвращено' : 'отменено');
+  const verbs = { return: 'возвращено', 'cancel-booking': 'отменено', 'confirm-booking': 'выдано' };
+  reportBulkResult(result, verbs[kind]);
   setMassMode(false);
   await refresh();
   renderRoute();
