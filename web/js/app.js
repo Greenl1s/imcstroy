@@ -281,6 +281,8 @@ function showBulkTransferForm() {
   const others = state.users.filter((u) => u.id !== state.currentUser.id);
   if (!others.length) return toast('Некому передавать', true);
 
+  const extraByUserId = Object.fromEntries(others.map((u) => [u.id, u.extra || '']));
+
   openModal(`Передать приборы (${ids.length})`, `
     <form id="bulkTransferForm" class="form-grid">
       <label>Новый пользователь
@@ -289,11 +291,16 @@ function showBulkTransferForm() {
         </select>
       </label>
       <label>Место использования<input name="taken_where"></label>
-      <label>Доп. данные<input name="taken_extra"></label>
+      <label>Доп. данные<input name="taken_extra" value="${escapeHtml(extraByUserId[others[0].id] || '')}"></label>
       <div class="modal-actions"><button class="primary" type="submit">Передать (${ids.length})</button></div>
     </form>`);
 
-  document.getElementById('bulkTransferForm').onsubmit = async (event) => {
+  const form = document.getElementById('bulkTransferForm');
+  form.querySelector('[name="to_user_id"]').addEventListener('change', (event) => {
+    form.querySelector('[name="taken_extra"]').value = extraByUserId[event.target.value] || '';
+  });
+
+  form.onsubmit = async (event) => {
     event.preventDefault();
     const button = event.target.querySelector('button[type="submit"]');
     const data = Object.fromEntries(new FormData(event.target).entries());

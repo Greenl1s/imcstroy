@@ -416,15 +416,24 @@ function showTransferForm(item) {
   const others = state.users.filter((u) => u.id !== item.taken_by);
   if (!others.length) return toast('Некому передавать', true);
 
+  // "Доп. данные" подставляем из профиля выбранного пользователя — но поле
+  // остаётся обычным текстовым, его можно поправить вручную перед передачей.
+  const extraByUserId = Object.fromEntries(others.map((u) => [u.id, u.extra || '']));
+
   openModal('Передать прибор', `
     <form id="transferForm" class="form-grid">
       ${select('to_user_id', 'Новый пользователь', '', others.map((u) => [u.id, u.username]))}
       ${input('taken_where', 'Место использования', item.taken_where || '')}
-      ${input('taken_extra', 'Доп. данные', item.taken_extra || '')}
+      ${input('taken_extra', 'Доп. данные', extraByUserId[others[0].id] || '')}
       <div class="modal-actions"><button class="primary" type="submit">Передать</button></div>
     </form>`);
 
-  document.getElementById('transferForm').onsubmit = async (event) => {
+  const form = document.getElementById('transferForm');
+  form.querySelector('[name="to_user_id"]').addEventListener('change', (event) => {
+    form.querySelector('[name="taken_extra"]').value = extraByUserId[event.target.value] || '';
+  });
+
+  form.onsubmit = async (event) => {
     event.preventDefault();
     const button = event.target.querySelector('button[type="submit"]');
     const result = await run(
