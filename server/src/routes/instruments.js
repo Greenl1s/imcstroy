@@ -321,6 +321,52 @@ instruments.delete('/:id', requireAdmin, async (req, res) => {
 // мог быть занят кем-то прямо перед этим — обрабатываем каждый по отдельности
 // и возвращаем и успехи, и неудачи, а не проваливаем всю операцию целиком.
 
+instruments.post('/bulk/confirm-booking', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'busy',
+                  taken_by = booked_by, taken_at = $4, taken_extra = booked_extra,
+                  taken_where = booked_where,
+                  booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
+            WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
+            RETURNING *`,
+          [id, req.user.id, req.user.role === 'admin', today()]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» не забронирован или бронь оформлена другим пользователем`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'confirm_booking', actor: req.user,
+          note: 'Бронирование подтверждено, прибор выдан (групповая операция)'
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
 instruments.post('/bulk/cancel-booking', async (req, res) => {
   const ids = (req.body?.ids || []).map(Number).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
