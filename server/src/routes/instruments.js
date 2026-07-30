@@ -558,6 +558,7 @@ instruments.post('/bulk/book', async (req, res) => {
 
   const booked_for = req.body?.booked_for || today();
   const booked_extra = nullify(req.body?.booked_extra);
+  const booked_where = nullify(req.body?.booked_where);
 
   const succeeded = [];
   const failed = [];
@@ -567,10 +568,10 @@ instruments.post('/bulk/book', async (req, res) => {
       const instrument = await transaction(async (client) => {
         const { rows } = await client.query(
           `UPDATE instruments
-              SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4
+              SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4, booked_where = $5
             WHERE id = $1 AND status = 'free'
             RETURNING *`,
-          [id, req.user.id, booked_for, booked_extra]
+          [id, req.user.id, booked_for, booked_extra, booked_where]
         );
         if (!rows.length) {
           const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
@@ -583,7 +584,7 @@ instruments.post('/bulk/book', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'book', actor: req.user,
-          targetName: req.user.username, extra: booked_extra,
+          targetName: req.user.username, place: booked_where, extra: booked_extra,
           note: `Забронирован на ${booked_for} (групповое бронирование)`
         });
         return row;
