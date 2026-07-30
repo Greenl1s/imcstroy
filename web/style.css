@@ -20,6 +20,7 @@
   --transition: 0.2s ease;
   --input-bg: #ffffff;
   --badge-bg: #e9edf1;
+  --filter-value-bg: #ccd5dc;
   --issued-bg: #fbf1e4;
   --issued-line: #eecd97;
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
@@ -44,6 +45,7 @@ body.dark-theme {
   --shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.5);
   --input-bg: #1a222b;
   --badge-bg: #29333d;
+  --filter-value-bg: #3a4652;
   --issued-bg: #2a2015;
   --issued-line: #4f3a1e;
 }
@@ -292,12 +294,23 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #6b342c; }
 .filter-chip-label {
   font-size: 11px; font-weight: 700; font-family: var(--font-mono); text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--muted);
+  /* Резервируем место под подпись в две строки (даже если она в одну) —
+     иначе у чипов с более длинной подписью ("Поверка/Калибровка") значение
+     "Все" съезжает ниже, чем у соседних чипов с однострочной подписью.
+     Текст прижимаем к низу этой области — тогда "Все" у всех чипов
+     оказывается на одной высоте, независимо от переноса строки. */
+  min-height: 2.6em; line-height: 1.3;
+  display: flex; align-items: flex-end; justify-content: center; text-align: center;
 }
 .filter-chip select {
-  border: none; background: transparent; padding: 0; min-height: auto; width: 100%;
+  border: none; padding: 3px 12px; min-height: auto; width: auto; max-width: 100%;
   text-align: center; text-align-last: center; font-weight: 600; font-size: 14px;
   color: var(--text); cursor: pointer; appearance: none; outline: none;
+  /* Значение фильтра — скруглённая "таблетка" чуть темнее фона самого чипа. */
+  background: var(--filter-value-bg); border-radius: 999px;
+  transition: filter var(--transition);
 }
+.filter-chip select:hover { filter: brightness(0.94); }
 
 /* ---------- Модальные окна ---------- */
 dialog {
