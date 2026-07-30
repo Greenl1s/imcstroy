@@ -5,7 +5,7 @@ import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
-import { displayNo, verificationBadge, verificationText } from './utils.js';
+import { displayNo, verificationBadge, verificationText, today } from './utils.js';
 
 // ---------- Тема ----------
 
@@ -65,8 +65,23 @@ function bindEvents() {
   document.getElementById('controlTypeFilter').onchange = (e) => setFilter('controlType', e.target.value);
 
   document.getElementById('massToggleBtn').onclick = () => setMassMode(!state.massMode);
-  document.getElementById('massRetireBtn').onclick = (e) => bulk(e.currentTarget, 'retire');
-  document.getElementById('massDeleteBtn').onclick = (e) => bulk(e.currentTarget, 'delete');
+  bindMassActionsMenu();
+  document.getElementById('massIssueBtn').onclick = () => {
+    closeMassActionsMenu();
+    showBulkTakeForm();
+  };
+  document.getElementById('massBookBtn').onclick = () => {
+    closeMassActionsMenu();
+    showBulkBookForm();
+  };
+  document.getElementById('massRetireBtn').onclick = (e) => {
+    closeMassActionsMenu();
+    bulk(e.currentTarget, 'retire');
+  };
+  document.getElementById('massDeleteBtn').onclick = (e) => {
+    closeMassActionsMenu();
+    bulk(e.currentTarget, 'delete');
+  };
 
   // Сервер сказал, что сессия недействительна — возвращаемся ко входу
   window.addEventListener('app:unauthorized', () => {
@@ -172,10 +187,9 @@ function goList() {
 // ---------- Массовые операции ----------
 
 function setMassMode(enabled) {
-  state.massMode = enabled && isAdmin();
-  const display = state.massMode ? 'inline-flex' : 'none';
-  document.getElementById('massRetireBtn').style.display = display;
-  document.getElementById('massDeleteBtn').style.display = display;
+  state.massMode = enabled;
+  document.getElementById('massActionsWrapper').style.display = state.massMode ? 'inline-flex' : 'none';
+  document.getElementById('massActionsDropdown').classList.add('hidden');
   document.getElementById('massToggleBtn').textContent = state.massMode ? 'Отменить выбор' : 'Выбрать';
   if (state.currentUser) renderList(openCard);
 }
@@ -210,6 +224,77 @@ async function bulk(button, kind) {
   await refresh();
   renderRoute();
 }
+
+/**
+ * В отличие от списания/удаления, взять или забронировать сразу все
+ * выбранные приборы не всегда получится: кто-то мог занять один из них
+ * прямо перед этим. Поэтому сервер обрабатывает каждый прибор отдельно
+ * и возвращает список успехов и неудач — показываем это пользователю,
+ * а не молча проваливаем всю операцию из-за одного занятого прибора.
+ */
+function reportBulkResult(result, verbPast) {
+  const { succeeded = [], failed = [] } = result || {};
+  if (failed.length === 0) {
+    toast(`Готово: ${succeeded.length} прибор(ов) ${verbPast}`);
+    return;
+  }
+  const details = failed.map((f) => f.message).join('; ');
+  toast(`${verbPast[0].toUpperCase()}${verbPast.slice(1)}: ${succeeded.length}. Не удалось: ${failed.length} (${details})`, true);
+}
+
+function showBulkTakeForm() {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  openModal(`Взять приборы (${ids.length})`, `
+    <form id="bulkTakeForm" class="form-grid">
+      <p>Кто берёт: ${escapeHtml(state.currentUser.username)}</p>
+      <label>Место использования<input name="taken_where"></label>
+      <label>Доп. данные<input name="taken_extra" value="${escapeHtml(state.currentUser.extra || '')}"></label>
+      <label>Дата<input name="taken_at" type="date" value="${today()}"></label>
+      <div class="modal-actions"><button class="primary" type="submit">Взять (${ids.length})</button></div>
+    </form>`);
+
+  document.getElementById('bulkTakeForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    const result = await run(() => api.bulkIssue(ids, data), { button });
+    if (result === null) return;
+    closeModal();
+    reportBulkResult(result, 'взято');
+    setMassMode(false);
+    await refresh();
+    renderRoute();
+  };
+}
+
+function showBulkBookForm() {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  openModal(`Забронировать приборы (${ids.length})`, `
+    <form id="bulkBookForm" class="form-grid">
+      <p>Кто бронирует: ${escapeHtml(state.currentUser.username)}</p>
+      <label>Дата бронирования<input name="booked_for" type="date" value="${today()}" required></label>
+      <label>Доп. информация<input name="booked_extra" value="${escapeHtml(state.currentUser.extra || '')}"></label>
+      <div class="modal-actions"><button class="primary" type="submit">Забронировать (${ids.length})</button></div>
+    </form>`);
+
+  document.getElementById('bulkBookForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    const result = await run(() => api.bulkBook(ids, data), { button });
+    if (result === null) return;
+    closeModal();
+    reportBulkResult(result, 'забронировано');
+    setMassMode(false);
+    await refresh();
+    renderRoute();
+  };
+}
+
 
 // ---------- Списанные ----------
 
@@ -264,6 +349,26 @@ async function showRetired() {
 }
 
 // ---------- Меню экспорта в Excel ----------
+
+function bindMassActionsMenu() {
+  const button = document.getElementById('massActionsBtn');
+  const dropdown = document.getElementById('massActionsDropdown');
+
+  button.onclick = (event) => {
+    event.stopPropagation();
+    dropdown.classList.toggle('hidden');
+  };
+
+  document.addEventListener('click', (event) => {
+    if (!dropdown.classList.contains('hidden') && !dropdown.contains(event.target) && event.target !== button) {
+      dropdown.classList.add('hidden');
+    }
+  });
+}
+
+function closeMassActionsMenu() {
+  document.getElementById('massActionsDropdown').classList.add('hidden');
+}
 
 function bindMenu() {
   const button = document.getElementById('menuButton');

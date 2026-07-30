@@ -34,7 +34,7 @@ export function filteredInstruments() {
 
 export function renderList(openCard) {
   const list = filteredInstruments();
-  const showCheckboxes = isAdmin() && state.massMode;
+  const showCheckboxes = state.massMode;
 
   const html = list.length
     ? list.map((item) => `

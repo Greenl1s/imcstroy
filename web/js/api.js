@@ -97,6 +97,8 @@ export const api = {
   restore: (id) => request(`/instruments/${id}/restore`, { method: 'POST', body: {} }),
   bulkRetire: (ids) => request('/instruments/bulk/retire', { method: 'POST', body: { ids } }),
   bulkDelete: (ids) => request('/instruments/bulk/delete', { method: 'POST', body: { ids } }),
+  bulkIssue: (ids, data) => request('/instruments/bulk/issue', { method: 'POST', body: { ids, ...data } }),
+  bulkBook: (ids, data) => request('/instruments/bulk/book', { method: 'POST', body: { ids, ...data } }),
 
   // ---------- История ----------
   instrumentHistory: (id) => request(`/instruments/${id}/history`),
