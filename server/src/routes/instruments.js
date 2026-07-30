@@ -465,6 +465,103 @@ instruments.post('/:id/restore', requireAdmin, (req, res) => transition(res, {
 }));
 
 // ---------- Массовые операции ----------
+// Взять/забронировать доступны любому пользователю (как и одиночные версии).
+// В отличие от списания/удаления, тут возможен частичный успех: один прибор
+// мог быть занят кем-то прямо перед этим — обрабатываем каждый по отдельности
+// и возвращаем и успехи, и неудачи, а не проваливаем всю операцию целиком.
+
+instruments.post('/bulk/issue', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const taken_where = nullify(req.body?.taken_where);
+  const taken_extra = nullify(req.body?.taken_extra);
+  const taken_at = req.body?.taken_at || today();
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
+            WHERE id = $1 AND status = 'free'
+            RETURNING *`,
+          [id, req.user.id, taken_where, taken_extra, taken_at]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'issue', actor: req.user,
+          targetName: req.user.username, place: taken_where, extra: taken_extra,
+          note: `Выдан: ${req.user.username} (групповая выдача)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/book', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const booked_for = req.body?.booked_for || today();
+  const booked_extra = nullify(req.body?.booked_extra);
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4
+            WHERE id = $1 AND status = 'free'
+            RETURNING *`,
+          [id, req.user.id, booked_for, booked_extra]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'book', actor: req.user,
+          targetName: req.user.username, extra: booked_extra,
+          note: `Забронирован на ${booked_for} (групповое бронирование)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+// ---------- Массовые операции (списание/удаление) ----------
 // Выполняются одной транзакцией: либо обрабатываются все приборы, либо ни одного.
 
 instruments.post('/bulk/retire', requireAdmin, async (req, res) => {
