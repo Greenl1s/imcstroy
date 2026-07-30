@@ -1,583 +1,757 @@
-import { api } from './api.js';
-import { state, refresh, isAdmin } from './state.js';
-import {
-  escapeAttr, escapeHtml, formData, today, displayNo,
-  verificationBadge, verificationText, verificationState,
-  statusBadge, statusText, checkTypeText,
-  dateFieldLabel, validUntilLabel, documentButtonLabel,
-  CONTROL_TYPES, controlTypeShort, controlTypeFull, controlTypeBadge
-} from './utils.js';
-import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
+import { Router } from 'express';
+import { query, transaction } from '../db.js';
+import { requireAuth, requireAdmin } from '../auth.js';
+import { logEvent } from '../history.js';
+import { fetchLinkedFile } from '../fileLink.js';
 
-// Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
-const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
+export const instruments = Router();
+instruments.use(requireAuth);
 
-/** Клиентская фильтрация уже загруженного списка. */
-export function filteredInstruments() {
-  const q = state.search.trim().toLowerCase();
-
-  return state.instruments.filter((i) => {
-    const matchesSearch = !q || [i.name, i.serial_number, i.model, i.inventory_no]
-      .some((v) => String(v || '').toLowerCase().includes(q));
-
-    const matchesVerification = state.verification === 'all' ||
-      verificationState(i) === state.verification;
-
-    const matchesStatus = state.condition === 'all' || i.status === state.condition;
-
-    const matchesControlType = state.controlType === 'all' ||
-      (state.controlType === 'none' ? !i.control_type : i.control_type === state.controlType);
-
-    return matchesSearch && matchesVerification && matchesStatus && matchesControlType;
-  });
-}
-
-export function renderList(openCard) {
-  const list = filteredInstruments();
-  const showCheckboxes = state.massMode;
-
-  const html = list.length
-    ? list.map((item) => `
-      <div class="row panel${showCheckboxes ? ' row-selectable' : ''}">
-        ${showCheckboxes
-          ? `<input type="checkbox" class="instrument-checkbox" value="${escapeAttr(item.id)}">`
-          : ''}
-        <a class="row-link" href="?id=${escapeAttr(item.id)}" data-open-id="${escapeAttr(item.id)}">
-          <div>
-            <div class="row-title">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
-            <div class="row-subtitle">
-              ${escapeHtml(item.model || 'Модель не указана')} ·
-              ${escapeHtml(item.serial_number || 'Серийный номер не указан')}
-            </div>
-          </div>
-          <div class="row-status-group">
-            <div class="row-status-col">
-              <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-            </div>
-            <div class="row-status-col">
-              <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
-            </div>
-            <div class="row-status-col">
-              <span class="badge ${controlTypeBadge(item.control_type)}" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
-            </div>
-          </div>
-        </a>
-      </div>`).join('')
-    : '<div class="panel card">Нет приборов по выбранным условиям</div>';
-
-  document.getElementById('instrumentList').innerHTML = html;
-  document.querySelectorAll('[data-open-id]').forEach((node) => {
-    node.onclick = (event) => {
-      event.preventDefault();
-      openCard(node.dataset.openId);
-    };
-  });
-}
-
-export async function renderCard(id, goList) {
-  const screen = document.getElementById('cardScreen');
-  document.getElementById('listScreen').classList.add('hidden');
-  screen.classList.remove('hidden');
-  screen.innerHTML = '<div class="panel card">Загрузка...</div>';
-
-  let item;
-  try {
-    item = await api.getInstrument(id);
-  } catch (err) {
-    screen.innerHTML = `<div class="panel card">${escapeHtml(err.message)}
-      <div class="actions"><button class="secondary" data-back>К списку</button></div></div>`;
-    screen.querySelector('[data-back]').onclick = goList;
-    return;
-  }
-
-  const admin = isAdmin();
-  const me = state.currentUser.id;
-  const isOwner = item.taken_by === me;
-  const isBookedByMe = item.booked_by === me;
-
-  // ---------- Кнопки ----------
-  let main = '';
-  let danger = '';
-
-  if (item.status === 'retired') {
-    if (admin) {
-      main += '<button class="primary" data-restore>Восстановить</button>';
-      main += '<button class="secondary" data-edit>Редактировать</button>';
-      danger += '<button class="danger" data-delete>Удалить</button>';
-    }
-  } else if (item.status === 'free') {
-    main += '<button class="primary" data-issue>Взять</button>';
-    main += '<button class="secondary" data-book>Забронировать</button>';
-  } else if (item.status === 'booked') {
-    if (isBookedByMe || admin) {
-      main += '<button class="primary" data-confirm-booking>Подтвердить бронирование</button>';
-      main += '<button class="danger" data-cancel-booking>Отменить бронирование</button>';
-    } else {
-      main += `<span class="badge warn">Забронирован: ${escapeHtml(item.booked_by_name || '')}</span>`;
-    }
-  } else if (item.status === 'busy') {
-    if (isOwner || admin) {
-      main += '<button class="primary" data-return>Вернуть</button>';
-      main += '<button class="secondary" data-transfer>Передать</button>';
-    } else {
-      main += `<span class="badge warn">Занят: ${escapeHtml(item.taken_by_name || '')}</span>`;
-    }
-  }
-
-  main += '<button class="secondary" data-qr>QR</button>';
-  if (item.has_document) {
-    main += `<button class="secondary" data-document>${escapeHtml(documentButtonLabel(item.check_type))}</button>`;
-  }
-  main += '<button class="secondary" data-copy>Копировать</button>';
-  main += '<button class="secondary" data-history>История</button>';
-
-  if (admin && item.status !== 'retired') {
-    main += '<button class="secondary" data-edit>Редактировать</button>';
-    danger += '<button class="danger" data-retire>Списать</button>';
-    danger += '<button class="danger" data-delete>Удалить</button>';
-  }
-
-  // ---------- Блок «кто держит» ----------
-  let holder = '';
-  if (item.status === 'busy') {
-    holder = `<div class="issued">
-      ${field('Кто взял', item.taken_by_name)}
-      ${field('Место', item.taken_where)}
-      ${field('Доп. данные', item.taken_extra)}
-      ${field('Дата выдачи', item.taken_at)}
-    </div>`;
-  } else if (item.status === 'booked') {
-    holder = `<div class="issued booked">
-      ${field('Забронировал', item.booked_by_name)}
-      ${field('Место', item.booked_where)}
-      ${field('Дата бронирования', item.booked_for)}
-      ${field('Доп. информация', item.booked_extra)}
-    </div>`;
-  } else if (item.status === 'retired') {
-    holder = `<div class="issued retired">${field('Дата списания', item.retired_at)}</div>`;
-  }
-
-  screen.innerHTML = `
-    <article class="panel card">
-      ${item.has_photo ? '<div class="photo-box" id="photoBox">Загрузка фото...</div>' : ''}
-      <h1>${escapeHtml(item.name)}</h1>
-      <div class="badges badges-left">
-        <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-        <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
-      </div>
-      <div class="card-grid">
-        ${field('Номер', displayNo(item))}
-        ${field('Серийный номер', item.serial_number)}
-        ${field('Модель', item.model)}
-        ${field('Тип метрологического контроля', checkTypeText(item.check_type))}
-        ${field('Классификация', controlTypeFull(item.control_type))}
-        ${field(dateFieldLabel(item.check_type), item.verification_date)}
-        ${field(validUntilLabel(item.check_type), item.valid_until)}
-      </div>
-      ${item.comment ? field('Комментарий', item.comment) : ''}
-      ${holder}
-      <div class="actions">${main}</div>
-      <div class="actions">${danger}<span class="spacer"></span>
-        <button class="secondary" data-back>К списку</button></div>
-    </article>`;
-
-  // Фото подгружаем отдельным запросом — оно не тормозит отрисовку карточки
-  if (item.has_photo) {
-    api.photoUrl(item.id).then((url) => {
-      const box = document.getElementById('photoBox');
-      if (box && url) box.innerHTML = `<img src="${url}" alt="Фото прибора">`;
-    });
-  }
-
-  bindCardActions(item, goList);
-}
-
-function bindCardActions(item, goList) {
-  const root = document.getElementById('cardScreen');
-  const on = (selector, handler) => {
-    const node = root.querySelector(selector);
-    if (node) node.onclick = (event) => handler(event.currentTarget);
-  };
-
-  // После любой операции сервер возвращает новое состояние — просто
-  // перечитываем данные и перерисовываем экран.
-  const after = async (button, fn, message) => {
-    const result = await run(fn, { button, success: message });
-    if (result === null) return;
-    await refresh();
-    window.dispatchEvent(new Event('app:refresh-route'));
-  };
-
-  on('[data-back]', goList);
-  on('[data-issue]', () => showTakeForm(item));
-  on('[data-book]', () => showBookForm(item));
-  on('[data-transfer]', () => showTransferForm(item));
-  on('[data-edit]', () => showInstrumentForm(item));
-  on('[data-qr]', () => showQr(item));
-  on('[data-document]', () => showDocument(item));
-  on('[data-copy]', () => copyInfo(item));
-  on('[data-history]', () => showHistory(item));
-
-  on('[data-return]', (b) => after(b, () => api.return(item.id), 'Прибор возвращён'));
-  on('[data-confirm-booking]', (b) => {
-    if (!confirm('Подтвердить бронирование и выдать прибор?')) return;
-    after(b, () => api.confirmBooking(item.id), 'Прибор выдан');
-  });
-  on('[data-cancel-booking]', (b) => {
-    if (!confirm('Отменить бронирование?')) return;
-    after(b, () => api.cancelBooking(item.id), 'Бронирование отменено');
-  });
-  on('[data-retire]', (b) => {
-    if (!confirm('Списать прибор?')) return;
-    after(b, () => api.retire(item.id), 'Прибор списан');
-  });
-  on('[data-restore]', (b) => {
-    if (!confirm('Восстановить прибор из списанных?')) return;
-    after(b, () => api.restore(item.id), 'Прибор восстановлен');
-  });
-  on('[data-delete]', async (b) => {
-    if (!confirm('Удалить прибор безвозвратно? Это действие нельзя отменить.')) return;
-    const result = await run(() => api.deleteInstrument(item.id), { button: b, success: 'Прибор удалён' });
-    if (result === null) return;
-    await refresh();
-    goList();
-  });
-}
-
-// ---------- Выбор файла из files.imcstroy.ru ----------
+const today = () => new Date().toISOString().slice(0, 10);
 
 /**
- * Открывает files.imcstroy.ru во всплывающем окне в режиме выбора файла.
- * Когда пользователь кликает по файлу, окно шлёт нам сообщение и закрывается.
- * onPicked(path, name) вызывается ровно один раз с выбранным файлом.
+ * Все переходы состояния сделаны одним UPDATE с условием на текущий статус.
+ *
+ *   UPDATE ... WHERE id = $1 AND status = 'free'
+ *
+ * Если два человека одновременно нажмут «Взять», база выполнит запросы
+ * по очереди: первый получит строку, второй — ноль строк и увидит честную
+ * ошибку «прибор уже занят». Проверка «если свободен, то занять» на клиенте
+ * такой гарантии не даёт в принципе.
  */
-function openFilemanagerPicker(onPicked) {
-  const origin = encodeURIComponent(location.origin);
-  const popup = window.open(
-    `${FILEMANAGER_ORIGIN}/?picker=1&origin=${origin}`,
-    'filemanager-picker',
-    'width=1100,height=720'
+async function transition(res, { id, actor, sql, params, action, guardMessage, buildLog }) {
+  try {
+    const row = await transaction(async (client) => {
+      const { rows } = await client.query(sql, params);
+      if (!rows.length) {
+        const exists = await client.query('SELECT status FROM instruments WHERE id = $1', [id]);
+        const err = new Error(
+          exists.rows.length ? guardMessage : 'Прибор не найден'
+        );
+        err.status = exists.rows.length ? 409 : 404;
+        throw err;
+      }
+      const instrument = rows[0];
+      await logEvent(client, { instrument, action, actor, ...buildLog(instrument) });
+      return instrument;
+    });
+    res.json(await withNames(row.id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+}
+
+async function withNames(id) {
+  const { rows } = await query('SELECT * FROM instruments_view WHERE id = $1', [id]);
+  return rows[0] || null;
+}
+
+// ---------- Чтение ----------
+
+/** Список. Фотографии сюда НЕ попадают — только флаг has_photo. */
+instruments.get('/', async (req, res) => {
+  const status = req.query.status === 'retired' ? 'retired' : null;
+  const { rows } = await query(
+    status
+      ? `SELECT * FROM instruments_view WHERE status = 'retired' ORDER BY id`
+      : `SELECT * FROM instruments_view WHERE status <> 'retired' ORDER BY id`
   );
-  if (!popup) {
-    toast('Браузер заблокировал всплывающее окно — разрешите всплывающие окна для этого сайта', true);
-    return;
-  }
-  const handler = (event) => {
-    if (event.origin !== FILEMANAGER_ORIGIN) return;
-    if (!event.data || event.data.type !== 'filemanager:file-selected') return;
-    window.removeEventListener('message', handler);
-    onPicked(event.data.path, event.data.name);
-  };
-  window.addEventListener('message', handler);
-}
+  res.json(rows);
+});
 
-// ---------- Формы ----------
+instruments.get('/:id', async (req, res) => {
+  const item = await withNames(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Прибор не найден' });
+  res.json(item);
+});
 
-export function showInstrumentForm(item = null) {
-  const isEdit = Boolean(item);
-  const v = item || { check_type: 'verification', comment: '' };
+instruments.get('/:id/history', async (req, res) => {
+  const { rows } = await query(
+    'SELECT * FROM history WHERE instrument_id = $1 ORDER BY created_at DESC LIMIT 200',
+    [req.params.id]
+  );
+  res.json(rows);
+});
 
-  // Путь к файлу, выбранному в files.imcstroy.ru (если выбрали) —
-  // живёт только пока открыта форма, отправляется на сервер при сохранении.
-  let pickedPhotoPath = null;
-  let pickedDocumentPath = null;
-
-  openModal(isEdit ? 'Редактировать прибор' : 'Добавить прибор', `
-    <form id="instrumentForm" class="form-grid">
-      ${input('inventory_no', 'Инвентарный номер (необязательно)', v.inventory_no || '')}
-      ${input('name', 'Название', v.name || '', 'text', true)}
-      ${input('serial_number', 'Серийный номер', v.serial_number || '')}
-      ${input('model', 'Модель', v.model || '')}
-      ${select('check_type', 'Тип метрологического контроля', v.check_type, [
-        ['verification', 'Поверка'],
-        ['calibration', 'Калибровка'],
-        ['none', 'Не требуется']
-      ])}
-      ${select('control_type', 'Классификация', v.control_type || '',
-        [['', 'Не указано'], ...CONTROL_TYPES.map(([code, full, short]) => [code, `${full} (${short})`])])}
-      ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
-      ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
-      ${input('comment', 'Комментарий', v.comment || '')}
-      <div class="form-field-group">
-        <span class="row-subtitle">Фото прибора</span>
-        <div class="actions" style="margin-top:4px;">
-          <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
-          <span class="row-subtitle" data-photo-status></span>
-        </div>
-      </div>
-      <div class="form-field-group">
-        <span class="row-subtitle">Фото документа поверки/калибровки</span>
-        <div class="actions" style="margin-top:4px;">
-          <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
-          <span class="row-subtitle" data-document-status></span>
-        </div>
-      </div>
-      <div class="modal-actions">
-        ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
-        ${isEdit && v.has_document ? '<button type="button" class="danger" data-remove-document>Удалить документ</button>' : ''}
-        <button class="primary" type="submit">Сохранить</button>
-      </div>
-    </form>`);
-
-  const form = document.getElementById('instrumentForm');
-
-  form.querySelector('[data-pick-photo]').onclick = () => {
-    openFilemanagerPicker((path, name) => {
-      pickedPhotoPath = path;
-      form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
-    });
-  };
-
-  form.querySelector('[data-pick-document]').onclick = () => {
-    openFilemanagerPicker((path, name) => {
-      pickedDocumentPath = path;
-      form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
-    });
-  };
-
-  const removePhoto = form.querySelector('[data-remove-photo]');
-  if (removePhoto) {
-    removePhoto.onclick = async (event) => {
-      if (!confirm('Удалить фото?')) return;
-      const ok = await run(() => api.deletePhoto(item.id), { button: event.currentTarget, success: 'Фото удалено' });
-      if (ok === null) return;
-      closeModal();
-      await refresh();
-      window.dispatchEvent(new Event('app:refresh-route'));
-    };
-  }
-
-  const removeDocument = form.querySelector('[data-remove-document]');
-  if (removeDocument) {
-    removeDocument.onclick = async (event) => {
-      if (!confirm('Удалить документ?')) return;
-      const ok = await run(() => api.deleteDocument(item.id), { button: event.currentTarget, success: 'Документ удалён' });
-      if (ok === null) return;
-      closeModal();
-      await refresh();
-      window.dispatchEvent(new Event('app:refresh-route'));
-    };
-  }
-
-  form.onsubmit = async (event) => {
-    event.preventDefault();
-    const button = form.querySelector('button[type="submit"]');
-    const data = formData(form);
-
-    const result = await run(async () => {
-      const saved = isEdit
-        ? await api.updateInstrument(item.id, data)
-        : await api.createInstrument(data);
-
-      if (pickedPhotoPath) {
-        await api.linkPhoto(saved.id, pickedPhotoPath);
-      }
-      if (pickedDocumentPath) {
-        await api.linkDocument(saved.id, pickedDocumentPath);
-      }
-
-      return saved;
-    }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
-
-    if (result === null) return;
-    closeModal();
-    await refresh();
-    // Открываем карточку сохранённого прибора без перезагрузки страницы
-    history.pushState(null, '', `?id=${result.id}`);
-    window.dispatchEvent(new Event('app:refresh-route'));
-  };
-}
-
-function showTakeForm(item) {
-  openModal('Взять прибор', `
-    <form id="takeForm" class="form-grid">
-      ${field('Кто берёт', state.currentUser.username)}
-      ${input('taken_where', 'Место использования', '')}
-      ${input('taken_extra', 'Доп. данные', state.currentUser.extra || '')}
-      ${input('taken_at', 'Дата', today(), 'date')}
-      <div class="modal-actions"><button class="primary" type="submit">Взять</button></div>
-    </form>`);
-
-  document.getElementById('takeForm').onsubmit = async (event) => {
-    event.preventDefault();
-    const button = event.target.querySelector('button[type="submit"]');
-    const result = await run(
-      () => api.issue(item.id, formData(event.target)),
-      { button, success: 'Прибор выдан' }
-    );
-    if (result === null) return;
-    closeModal();
-    await refresh();
-    window.dispatchEvent(new Event('app:refresh-route'));
-  };
-}
-
-function showTransferForm(item) {
-  const others = state.users.filter((u) => u.id !== item.taken_by);
-  if (!others.length) return toast('Некому передавать', true);
-
-  openModal('Передать прибор', `
-    <form id="transferForm" class="form-grid">
-      ${select('to_user_id', 'Новый пользователь', '', others.map((u) => [u.id, u.username]))}
-      ${input('taken_where', 'Место использования', item.taken_where || '')}
-      ${input('taken_extra', 'Доп. данные', item.taken_extra || '')}
-      <div class="modal-actions"><button class="primary" type="submit">Передать</button></div>
-    </form>`);
-
-  document.getElementById('transferForm').onsubmit = async (event) => {
-    event.preventDefault();
-    const button = event.target.querySelector('button[type="submit"]');
-    const result = await run(
-      () => api.transfer(item.id, formData(event.target)),
-      { button, success: 'Прибор передан' }
-    );
-    if (result === null) return;
-    closeModal();
-    await refresh();
-    window.dispatchEvent(new Event('app:refresh-route'));
-  };
-}
-
-function showBookForm(item) {
-  openModal('Забронировать прибор', `
-    <form id="bookForm" class="form-grid">
-      ${field('Кто бронирует', state.currentUser.username)}
-      ${input('booked_where', 'Куда бронируем (место использования)', '')}
-      ${input('booked_for', 'Дата бронирования', today(), 'date', true)}
-      ${input('booked_extra', 'Доп. информация', state.currentUser.extra || '')}
-      <div class="modal-actions"><button class="primary" type="submit">Забронировать</button></div>
-    </form>`);
-
-  document.getElementById('bookForm').onsubmit = async (event) => {
-    event.preventDefault();
-    const button = event.target.querySelector('button[type="submit"]');
-    const result = await run(
-      () => api.book(item.id, formData(event.target)),
-      { button, success: 'Прибор забронирован' }
-    );
-    if (result === null) return;
-    closeModal();
-    await refresh();
-    window.dispatchEvent(new Event('app:refresh-route'));
-  };
-}
-
-// ---------- История прибора ----------
-
-const ACTION_TEXT = {
-  create: 'Добавлен', update: 'Изменён', delete: 'Удалён',
-  issue: 'Выдан', return: 'Возвращён', transfer: 'Передан',
-  book: 'Забронирован', cancel_booking: 'Бронь отменена',
-  confirm_booking: 'Бронь подтверждена',
-  retire: 'Списан', restore: 'Восстановлен'
-};
-
-async function showHistory(item) {
-  openModal('История', '<div class="list">Загрузка...</div>');
-  let rows;
-  try {
-    rows = await api.instrumentHistory(item.id);
-  } catch (err) {
-    return openModal('История', `<div class="panel card">${escapeHtml(err.message)}</div>`);
-  }
-
-  const html = rows.length
-    ? rows.map((row) => `
-      <div class="row panel">
-        <div>
-          <div class="row-title">${escapeHtml(ACTION_TEXT[row.action] || row.action)}</div>
-          <div class="row-subtitle">
-            ${escapeHtml(new Date(row.created_at).toLocaleString('ru'))} ·
-            ${escapeHtml(row.actor_name)}
-            ${row.note ? ' · ' + escapeHtml(row.note) : ''}
-            ${row.place ? ' · ' + escapeHtml(row.place) : ''}
-          </div>
-        </div>
-      </div>`).join('')
-    : '<div class="panel card">Событий пока нет</div>';
-
-  openModal(`История: ${item.name}`, `<div class="list">${html}</div>`);
-}
-
-// ---------- Прочее ----------
-
-function showQr(item) {
-  const url = `${location.origin}${location.pathname}?id=${encodeURIComponent(item.id)}`;
-  openModal('QR-код', `
-    <div id="qrBox" class="qr-box"></div>
-    <p class="qr-caption">${escapeHtml(item.name)}</p>
-    <div class="modal-actions"><button class="primary" data-download-qr>Скачать</button></div>`);
-
-  new QRCode(document.getElementById('qrBox'), { text: url, width: 220, height: 220 });
-
-  document.querySelector('[data-download-qr]').onclick = () => {
-    const box = document.getElementById('qrBox');
-    const source = box.querySelector('canvas')?.toDataURL('image/png') || box.querySelector('img')?.src;
-    if (!source) return toast('QR-код ещё не готов', true);
-    const link = document.createElement('a');
-    link.href = source;
-    link.download = `qr-${item.id}.png`;
-    link.click();
-  };
-}
+// ---------- Фото ----------
 
 /**
- * Раньше документ был всегда картинкой. Теперь, если он привязан из
- * files.imcstroy.ru, это может быть PDF, docx и что угодно ещё —
- * показываем превью только для картинок, иначе даём кнопку "Открыть".
+ * Если у прибора привязан файл из файлового менеджера (photo_link_path) —
+ * забираем его оттуда по внутренней докер-сети и отдаём как обычно.
+ * Иначе — как раньше, байты из instrument_photos.
  */
-async function showDocument(item) {
-  const title = documentButtonLabel(item.check_type);
-  openModal(title, '<p class="qr-caption">Загрузка...</p>');
+instruments.get('/:id/photo', async (req, res) => {
+  const { rows: instRows } = await query(
+    'SELECT photo_link_path FROM instruments WHERE id = $1',
+    [req.params.id]
+  );
+  if (!instRows.length) return res.status(404).end();
 
-  const result = await api.documentUrl(item.id);
-  if (!result) {
-    return openModal(title, '<p class="qr-caption">Не удалось загрузить документ</p>');
+  const linkPath = instRows[0].photo_link_path;
+  if (linkPath) {
+    try {
+      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      res.set('Content-Type', contentType);
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.send(buffer);
+    } catch (err) {
+      console.error('Не удалось получить привязанное фото из файлового менеджера:', err);
+      return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
+    }
   }
 
-  const { url, contentType } = result;
-  const isImage = contentType.startsWith('image/');
+  const { rows } = await query(
+    'SELECT mime_type, bytes FROM instrument_photos WHERE instrument_id = $1',
+    [req.params.id]
+  );
+  if (!rows.length) return res.status(404).end();
+  res.set('Content-Type', rows[0].mime_type);
+  res.set('Cache-Control', 'private, max-age=300');
+  res.send(rows[0].bytes);
+});
 
-  const preview = isImage
-    ? `<div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>`
-    : `<p class="qr-caption">Файл: ${escapeHtml(contentType || 'неизвестный тип')}</p>`;
+instruments.put('/:id/photo', requireAdmin, async (req, res) => {
+  const { data_url } = req.body || {};
+  const match = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(String(data_url || ''));
+  if (!match) return res.status(400).json({ error: 'Ожидается изображение в формате data URL' });
 
-  openModal(title, `
-    ${preview}
-    <p class="qr-caption">${escapeHtml(item.name)}</p>
-    <div class="modal-actions">
-      ${isImage ? '' : '<button class="secondary" data-open-document>Открыть в новой вкладке</button>'}
-      <button class="primary" data-download-document>Скачать</button>
-    </div>`);
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length > 5 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Файл больше 5 МБ' });
+  }
+  await query(
+    `INSERT INTO instrument_photos (instrument_id, mime_type, bytes, size_bytes)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (instrument_id)
+     DO UPDATE SET mime_type = EXCLUDED.mime_type, bytes = EXCLUDED.bytes,
+                   size_bytes = EXCLUDED.size_bytes, uploaded_at = now()`,
+    [req.params.id, match[1], bytes, bytes.length]
+  );
+  // Загрузка с компьютера отменяет ранее привязанный файл из файлового менеджера.
+  await query('UPDATE instruments SET photo_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
 
-  const openBtn = document.querySelector('[data-open-document]');
-  if (openBtn) {
-    openBtn.onclick = () => window.open(url, '_blank');
+/** Привязка фото из файлового менеджера вместо загрузки с компьютера. */
+instruments.put('/:id/photo/link', requireAdmin, async (req, res) => {
+  const linkPath = req.body?.path;
+  if (!linkPath || typeof linkPath !== 'string') {
+    return res.status(400).json({ error: 'Не указан путь к файлу' });
+  }
+  await query('UPDATE instruments SET photo_link_path = $2 WHERE id = $1', [req.params.id, linkPath]);
+  // Привязка отменяет ранее загруженное с компьютера фото.
+  await query('DELETE FROM instrument_photos WHERE instrument_id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+instruments.delete('/:id/photo', requireAdmin, async (req, res) => {
+  await query('DELETE FROM instrument_photos WHERE instrument_id = $1', [req.params.id]);
+  await query('UPDATE instruments SET photo_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---------- Фото документа (замена ссылки на документ) ----------
+
+instruments.get('/:id/document', async (req, res) => {
+  const { rows: instRows } = await query(
+    'SELECT document_link_path FROM instruments WHERE id = $1',
+    [req.params.id]
+  );
+  if (!instRows.length) return res.status(404).end();
+
+  const linkPath = instRows[0].document_link_path;
+  if (linkPath) {
+    try {
+      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      res.set('Content-Type', contentType);
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.send(buffer);
+    } catch (err) {
+      console.error('Не удалось получить привязанный документ из файлового менеджера:', err);
+      return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
+    }
   }
 
-  document.querySelector('[data-download-document]').onclick = () => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `document-${item.id}`;
-    link.click();
-  };
-}
+  const { rows } = await query(
+    'SELECT mime_type, bytes FROM instrument_documents WHERE instrument_id = $1',
+    [req.params.id]
+  );
+  if (!rows.length) return res.status(404).end();
+  res.set('Content-Type', rows[0].mime_type);
+  res.set('Cache-Control', 'private, max-age=300');
+  res.send(rows[0].bytes);
+});
 
-async function copyInfo(item) {
-  const text = [
-    `Номер: ${displayNo(item)}`,
-    `Название: ${item.name}`,
-    `Серийный номер: ${item.serial_number || '—'}`,
-    `Модель: ${item.model || '—'}`,
-    `Тип: ${checkTypeText(item.check_type)}`,
-    `Классификация: ${controlTypeFull(item.control_type)}`,
-    `Действительно до: ${item.valid_until || '—'}`
-  ].join('\n');
+instruments.put('/:id/document', requireAdmin, async (req, res) => {
+  const { data_url } = req.body || {};
+  const match = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(String(data_url || ''));
+  if (!match) return res.status(400).json({ error: 'Ожидается изображение в формате data URL' });
+
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length > 5 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Файл больше 5 МБ' });
+  }
+  await query(
+    `INSERT INTO instrument_documents (instrument_id, mime_type, bytes, size_bytes)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (instrument_id)
+     DO UPDATE SET mime_type = EXCLUDED.mime_type, bytes = EXCLUDED.bytes,
+                   size_bytes = EXCLUDED.size_bytes, uploaded_at = now()`,
+    [req.params.id, match[1], bytes, bytes.length]
+  );
+  await query('UPDATE instruments SET document_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+/** Привязка документа из файлового менеджера вместо загрузки с компьютера. */
+instruments.put('/:id/document/link', requireAdmin, async (req, res) => {
+  const linkPath = req.body?.path;
+  if (!linkPath || typeof linkPath !== 'string') {
+    return res.status(400).json({ error: 'Не указан путь к файлу' });
+  }
+  await query('UPDATE instruments SET document_link_path = $2 WHERE id = $1', [req.params.id, linkPath]);
+  await query('DELETE FROM instrument_documents WHERE instrument_id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+instruments.delete('/:id/document', requireAdmin, async (req, res) => {
+  await query('DELETE FROM instrument_documents WHERE instrument_id = $1', [req.params.id]);
+  await query('UPDATE instruments SET document_link_path = NULL WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---------- Создание / изменение / удаление ----------
+
+export const EDITABLE = [
+  'inventory_no', 'name', 'serial_number', 'model', 'check_type', 'control_type',
+  'verification_date', 'valid_until', 'comment'
+];
+
+/** Пустая строка из формы должна стать NULL, а не '' — иначе даты не сохранятся. */
+const nullify = (v) => (v === '' || v === undefined ? null : v);
+
+/** Комментарий — исключение: колонка NOT NULL, пустое значение должно остаться '', а не стать NULL. */
+const toDbValue = (key, v) => (key === 'comment' ? String(v ?? '') : nullify(v));
+
+instruments.post('/', requireAdmin, async (req, res) => {
+  const values = EDITABLE.map((key) => toDbValue(key, req.body?.[key]));
+  try {
+    const row = await transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO instruments
+           (inventory_no, name, serial_number, model, check_type, control_type,
+            verification_date, valid_until, comment)
+         VALUES ($1, $2, $3, $4, coalesce($5::check_type, 'verification'), $6::control_type,
+                 $7, $8, coalesce($9, ''))
+         RETURNING *`,
+        values
+      );
+      await logEvent(client, {
+        instrument: rows[0], action: 'create', actor: req.user, note: 'Прибор добавлен'
+      });
+      return rows[0];
+    });
+    res.status(201).json(await withNames(row.id));
+  } catch (err) {
+    res.status(400).json({ error: humanize(err) });
+  }
+});
+
+instruments.patch('/:id', requireAdmin, async (req, res) => {
+  const updates = EDITABLE.filter((key) => key in (req.body || {}));
+  if (!updates.length) return res.status(400).json({ error: 'Нечего обновлять' });
+
+  // Для колонок-перечислений (enum) явно указываем базе, как трактовать
+  // значение — иначе она не всегда правильно угадывает тип сама.
+  const ENUM_CASTS = { check_type: '::check_type', control_type: '::control_type' };
+  const set = updates
+    .map((key, i) => `${key} = $${i + 2}${ENUM_CASTS[key] || ''}`)
+    .join(', ');
+  const params = [req.params.id, ...updates.map((key) => toDbValue(key, req.body[key]))];
 
   try {
-    await navigator.clipboard.writeText(text);
-    toast('Информация скопирована');
-  } catch {
-    toast('Браузер не разрешил копирование', true);
+    const row = await transaction(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE instruments SET ${set} WHERE id = $1 RETURNING *`, params
+      );
+      if (!rows.length) {
+        const err = new Error('Прибор не найден');
+        err.status = 404;
+        throw err;
+      }
+      await logEvent(client, {
+        instrument: rows[0], action: 'update', actor: req.user, note: 'Карточка изменена'
+      });
+      return rows[0];
+    });
+    res.json(await withNames(row.id));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: humanize(err) });
   }
+});
+
+/**
+ * Удаление. Раньше строка убиралась только из массива в браузере и после
+ * перезагрузки страницы возвращалась. Теперь удаление происходит в базе.
+ * Запись в журнале остаётся: instrument_id станет NULL, но имя сохранено.
+ */
+instruments.delete('/:id', requireAdmin, async (req, res) => {
+  try {
+    await transaction(async (client) => {
+      const { rows } = await client.query('SELECT * FROM instruments WHERE id = $1', [req.params.id]);
+      if (!rows.length) {
+        const err = new Error('Прибор не найден');
+        err.status = 404;
+        throw err;
+      }
+      await logEvent(client, {
+        instrument: rows[0], action: 'delete', actor: req.user, note: 'Прибор удалён безвозвратно'
+      });
+      await client.query('DELETE FROM instruments WHERE id = $1', [req.params.id]);
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ---------- Массовые операции ----------
+// Взять/забронировать доступны любому пользователю (как и одиночные версии).
+// В отличие от списания/удаления, тут возможен частичный успех: один прибор
+// мог быть занят кем-то прямо перед этим — обрабатываем каждый по отдельности
+// и возвращаем и успехи, и неудачи, а не проваливаем всю операцию целиком.
+
+instruments.post('/bulk/cancel-booking', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'free', booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
+            WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
+            RETURNING *`,
+          [id, req.user.id, req.user.role === 'admin']
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» не забронирован или бронь оформлена другим пользователем`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'cancel_booking', actor: req.user,
+          note: 'Бронирование отменено (групповая операция)'
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/return', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'free', taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL
+            WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+            RETURNING *`,
+          [id, req.user.id, req.user.role === 'admin']
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» не выдан или выдан другому пользователю`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'return', actor: req.user,
+          note: `Возвращён: ${req.user.username} (групповая операция)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/transfer', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const targetId = Number(req.body?.to_user_id);
+  if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
+
+  const { rows: target } = await query('SELECT username FROM users WHERE id = $1', [targetId]);
+  if (!target.length) return res.status(400).json({ error: 'Пользователь не найден' });
+
+  const taken_where = nullify(req.body?.taken_where);
+  const taken_extra = nullify(req.body?.taken_extra);
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET taken_by = $4, taken_where = $5, taken_extra = $6, taken_at = $7
+            WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+            RETURNING *`,
+          [id, req.user.id, req.user.role === 'admin', targetId, taken_where, taken_extra, today()]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» можно передать, только если он у вас на руках`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'transfer', actor: req.user,
+          targetName: target[0].username, place: taken_where,
+          note: `Передан: ${req.user.username} → ${target[0].username} (групповая операция)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/issue', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const taken_where = nullify(req.body?.taken_where);
+  const taken_extra = nullify(req.body?.taken_extra);
+  const taken_at = req.body?.taken_at || today();
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
+            WHERE id = $1 AND status = 'free'
+            RETURNING *`,
+          [id, req.user.id, taken_where, taken_extra, taken_at]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'issue', actor: req.user,
+          targetName: req.user.username, place: taken_where, extra: taken_extra,
+          note: `Выдан: ${req.user.username} (групповая выдача)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/book', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const booked_for = req.body?.booked_for || today();
+  const booked_extra = nullify(req.body?.booked_extra);
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4
+            WHERE id = $1 AND status = 'free'
+            RETURNING *`,
+          [id, req.user.id, booked_for, booked_extra]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'book', actor: req.user,
+          targetName: req.user.username, extra: booked_extra,
+          note: `Забронирован на ${booked_for} (групповое бронирование)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+// ---------- Массовые операции (списание/удаление) ----------
+// Выполняются одной транзакцией: либо обрабатываются все приборы, либо ни одного.
+
+instruments.post('/bulk/retire', requireAdmin, async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const count = await transaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE instruments
+          SET status = 'retired', retired_at = $2,
+              taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
+              booked_by = NULL, booked_for = NULL, booked_extra = NULL
+        WHERE id = ANY($1::bigint[]) AND status <> 'retired'
+        RETURNING *`,
+      [ids, today()]
+    );
+    for (const instrument of rows) {
+      await logEvent(client, {
+        instrument, action: 'retire', actor: req.user, note: 'Прибор списан (массовая операция)'
+      });
+    }
+    return rows.length;
+  });
+  res.json({ ok: true, count });
+});
+
+instruments.post('/bulk/delete', requireAdmin, async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const count = await transaction(async (client) => {
+    const { rows } = await client.query('SELECT * FROM instruments WHERE id = ANY($1::bigint[])', [ids]);
+    for (const instrument of rows) {
+      await logEvent(client, {
+        instrument, action: 'delete', actor: req.user, note: 'Прибор удалён (массовая операция)'
+      });
+    }
+    await client.query('DELETE FROM instruments WHERE id = ANY($1::bigint[])', [ids]);
+    return rows.length;
+  });
+  res.json({ ok: true, count });
+});
+
+// ---------- Операции с приборами ----------
+
+instruments.post('/:id/issue', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'issue',
+  guardMessage: 'Прибор уже занят или забронирован',
+  sql: `UPDATE instruments
+           SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
+         WHERE id = $1 AND status = 'free'
+         RETURNING *`,
+  params: [
+    req.params.id, req.user.id,
+    nullify(req.body?.taken_where), nullify(req.body?.taken_extra),
+    req.body?.taken_at || today()
+  ],
+  buildLog: (i) => ({
+    targetName: req.user.username, place: i.taken_where, extra: i.taken_extra,
+    note: `Выдан: ${req.user.username}`
+  })
+}));
+
+/** Вернуть может тот, кто взял, либо администратор. */
+instruments.post('/:id/return', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'return',
+  guardMessage: 'Прибор не выдан или выдан другому пользователю',
+  sql: `UPDATE instruments
+           SET status = 'free', taken_by = NULL, taken_where = NULL,
+               taken_extra = NULL, taken_at = NULL
+         WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+         RETURNING *`,
+  params: [req.params.id, req.user.id, req.user.role === 'admin'],
+  buildLog: () => ({ note: `Возвращён: ${req.user.username}` })
+}));
+
+/** Передать другому — только тот, у кого прибор на руках. */
+instruments.post('/:id/transfer', async (req, res) => {
+  const targetId = Number(req.body?.to_user_id);
+  if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
+
+  const { rows: target } = await query('SELECT username FROM users WHERE id = $1', [targetId]);
+  if (!target.length) return res.status(400).json({ error: 'Пользователь не найден' });
+
+  return transition(res, {
+    id: req.params.id,
+    actor: req.user,
+    action: 'transfer',
+    guardMessage: 'Передать можно только прибор, который у вас на руках',
+    sql: `UPDATE instruments
+             SET taken_by = $4, taken_where = $5, taken_extra = $6, taken_at = $7
+           WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+           RETURNING *`,
+    params: [
+      req.params.id, req.user.id, req.user.role === 'admin', targetId,
+      nullify(req.body?.taken_where), nullify(req.body?.taken_extra), today()
+    ],
+    buildLog: (i) => ({
+      targetName: target[0].username, place: i.taken_where,
+      note: `Передан: ${req.user.username} → ${target[0].username}`
+    })
+  });
+});
+
+instruments.post('/:id/book', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'book',
+  guardMessage: 'Прибор уже занят или забронирован',
+  sql: `UPDATE instruments
+           SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4, booked_where = $5
+         WHERE id = $1 AND status = 'free'
+         RETURNING *`,
+  params: [
+    req.params.id, req.user.id,
+    req.body?.booked_for || today(), nullify(req.body?.booked_extra), nullify(req.body?.booked_where)
+  ],
+  buildLog: (i) => ({
+    targetName: req.user.username, place: i.booked_where, extra: i.booked_extra,
+    note: `Забронирован на ${i.booked_for}`
+  })
+}));
+
+instruments.post('/:id/cancel-booking', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'cancel_booking',
+  guardMessage: 'Прибор не забронирован или бронь оформлена другим пользователем',
+  sql: `UPDATE instruments
+           SET status = 'free', booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
+         WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
+         RETURNING *`,
+  params: [req.params.id, req.user.id, req.user.role === 'admin'],
+  buildLog: () => ({ note: 'Бронирование отменено' })
+}));
+
+/** Подтверждение брони: прибор переходит к тому, кто его бронировал. */
+instruments.post('/:id/confirm-booking', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'confirm_booking',
+  guardMessage: 'Прибор не забронирован или бронь оформлена другим пользователем',
+  // "Место использования" не спрашиваем заново — берём то, что уже было
+  // указано при бронировании (booked_where), чтобы не вводить дважды.
+  sql: `UPDATE instruments
+           SET status = 'busy',
+               taken_by = booked_by, taken_at = $4, taken_extra = booked_extra,
+               taken_where = booked_where,
+               booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
+         WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
+         RETURNING *`,
+  params: [
+    req.params.id, req.user.id, req.user.role === 'admin',
+    today()
+  ],
+  buildLog: () => ({ note: 'Бронирование подтверждено, прибор выдан' })
+}));
+
+/**
+ * Списание. Прибор НЕ переезжает в другую таблицу и НЕ меняет свой id —
+ * он просто получает статус retired. Никаких префиксов '0'.
+ */
+instruments.post('/:id/retire', requireAdmin, (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'retire',
+  guardMessage: 'Прибор уже списан',
+  sql: `UPDATE instruments
+           SET status = 'retired', retired_at = $2,
+               taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
+               booked_by = NULL, booked_for = NULL, booked_extra = NULL
+         WHERE id = $1 AND status <> 'retired'
+         RETURNING *`,
+  params: [req.params.id, today()],
+  buildLog: () => ({ note: 'Прибор списан' })
+}));
+
+instruments.post('/:id/restore', requireAdmin, (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'restore',
+  guardMessage: 'Прибор не находится в списанных',
+  sql: `UPDATE instruments
+           SET status = 'free', retired_at = NULL
+         WHERE id = $1 AND status = 'retired'
+         RETURNING *`,
+  params: [req.params.id],
+  buildLog: () => ({ note: 'Прибор восстановлен из списанных' })
+}));
+
+/** Превращаем ошибки Postgres в понятный текст. */
+function humanize(err) {
+  if (err.code === '23505') return 'Прибор с таким инвентарным номером уже есть';
+  if (err.code === '23514' && String(err.constraint).includes('dates_sane')) {
+    return 'Дата поверки не может быть позже даты окончания её действия';
+  }
+  if (err.code === '23514') return 'Недопустимое состояние прибора';
+  return err.message;
 }
