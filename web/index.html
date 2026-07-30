@@ -58,9 +58,16 @@
             <div class="toolbar-buttons">
               <button id="addInstrumentButton" class="primary admin-only" type="button">Добавить</button>
               <button id="retiredButton" class="secondary admin-only" type="button">Списанные</button>
-              <button id="massToggleBtn" class="secondary admin-only" type="button">Выбрать</button>
-              <button id="massRetireBtn" class="danger admin-only" type="button" style="display:none;">Списать выбранные</button>
-              <button id="massDeleteBtn" class="danger admin-only" type="button" style="display:none;">Удалить выбранные</button>
+              <button id="massToggleBtn" class="secondary" type="button">Выбрать</button>
+              <div class="menu-wrapper" id="massActionsWrapper" style="display:none;">
+                <button id="massActionsBtn" class="primary" type="button">Действия ▾</button>
+                <div id="massActionsDropdown" class="menu-dropdown hidden">
+                  <button id="massIssueBtn" type="button">Взять выбранные</button>
+                  <button id="massBookBtn" type="button">Забронировать выбранные</button>
+                  <button id="massRetireBtn" class="admin-only" type="button">Списать выбранные</button>
+                  <button id="massDeleteBtn" class="admin-only" type="button">Удалить выбранные</button>
+                </div>
+              </div>
             </div>
 
             <div class="filters-row">
