@@ -303,11 +303,15 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #6b342c; }
   display: flex; align-items: flex-end; justify-content: center; text-align: center;
 }
 .filter-chip select {
-  border: none; padding: 3px 12px; min-height: auto; width: auto; max-width: 100%;
+  border: none; padding: 3px 12px; min-height: auto; width: 100%; max-width: 100%;
   text-align: center; text-align-last: center; font-weight: 600; font-size: 14px;
   color: var(--text); cursor: pointer; appearance: none; outline: none;
-  /* Значение фильтра — скруглённая "таблетка" чуть темнее фона самого чипа. */
+  /* Значение фильтра — скруглённая "таблетка" чуть темнее фона самого чипа.
+     width:100% (а не auto) — иначе браузер меряет ширину по самому длинному
+     варианту в списке (например, у "Классификация" это длинные названия),
+     а не по тому, что видно сейчас, и капсула вылезает за пределы чипа. */
   background: var(--filter-value-bg); border-radius: 999px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   transition: filter var(--transition);
 }
 .filter-chip select:hover { filter: brightness(0.94); }
