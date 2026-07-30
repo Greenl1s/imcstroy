@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { query } from '../db.js';
-import { checkPassword, hashPassword, issueToken, requireAuth } from '../auth.js';
+import { checkPassword, hashPassword, issueToken, requireAuth, setSsoCookie, clearSsoCookie } from '../auth.js';
 
 export const auth = Router();
 
@@ -38,14 +38,24 @@ auth.post('/login', loginLimit, async (req, res) => {
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   }
 
+  const token = issueToken(user);
+  // Общая cookie — она же откроет и files.<домен> (ИСУ) без повторного входа.
+  setSsoCookie(res, token);
+
   res.json({
-    token: issueToken(user),
+    token,
     user: { id: user.id, username: user.username, role: user.role, extra: user.extra }
   });
 });
 
 /** Кто я сейчас. Используется при перезагрузке страницы. */
 auth.get('/me', requireAuth, (req, res) => res.json(req.user));
+
+/** Выход. Стирает общую cookie — выходит сразу из обоих сайтов. */
+auth.post('/logout', (req, res) => {
+  clearSsoCookie(res);
+  res.json({ ok: true });
+});
 
 /** Смена собственного пароля и доп. информации. */
 auth.patch('/me', requireAuth, async (req, res) => {
