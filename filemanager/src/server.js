@@ -38,25 +38,46 @@ for (const rel of COLUMN_ROOTS) {
 
 /* ---------------- Auth ---------------- */
 
+// Адрес API "Учёта оборудования" — единственного места, где теперь
+// проверяются логин и пароль. ИСУ больше не хранит паролей у себя.
+const IDENTITY_API_URL = process.env.IDENTITY_API_URL;
+if (!IDENTITY_API_URL) {
+  throw new Error('Переменная окружения IDENTITY_API_URL не задана (адрес API "Учёта оборудования")');
+}
+
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ message: "Введите логин и пароль" });
     }
-    const user = await auth.verifyLogin(username, password);
-    if (!user) {
-      return res.status(401).json({ message: "Неверный логин или пароль" });
+
+    let upstream;
+    try {
+      const upstreamRes = await fetch(`${IDENTITY_API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      upstream = await upstreamRes.json();
+      if (!upstreamRes.ok) {
+        return res.status(upstreamRes.status).json({ message: upstream.error || "Неверный логин или пароль" });
+      }
+    } catch (err) {
+      console.error('Не удалось проверить логин через "Учёт оборудования":', err);
+      return res.status(502).json({ message: "Сервис входа временно недоступен, попробуйте позже" });
     }
-    const token = auth.signToken(user);
-    auth.setAuthCookie(res, token);
+
+    auth.setAuthCookie(res, upstream.token);
+    const perms = await auth.getPermissions(upstream.user.id);
+
     res.json({
       user: {
-        username: user.username,
-        role: user.role,
-        can_tools: user.can_tools,
-        can_db: user.can_db,
-        can_cases: user.can_cases,
+        username: upstream.user.username,
+        role: upstream.user.role,
+        can_tools: perms.can_tools,
+        can_db: perms.can_db,
+        can_cases: perms.can_cases,
       },
     });
   } catch (err) {
@@ -160,7 +181,7 @@ app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, a
 
 app.get("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    res.json({ users: await users.listUsers() });
+    res.json({ users: await users.listUsers(req.cookies[auth.COOKIE_NAME]) });
   } catch (err) {
     console.error("Не удалось получить список пользователей:", err);
     res.status(500).json({ message: "Не удалось получить список пользователей" });
@@ -173,24 +194,27 @@ app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => 
     if (!username || !password) {
       return res.status(400).json({ message: "Укажите логин и пароль" });
     }
-    const user = await users.createUser({ username, password, role, can_tools, can_db, can_cases });
+    const user = await users.createUser(
+      { username, password, role, can_tools, can_db, can_cases },
+      req.cookies[auth.COOKIE_NAME]
+    );
     res.json({ user });
   } catch (err) {
-    if (err.code === "23505") {
+    if (err.status === 409) {
       return res.status(400).json({ message: "Пользователь с таким логином уже существует" });
     }
     console.error("Не удалось создать пользователя:", err);
-    res.status(500).json({ message: "Не удалось создать пользователя" });
+    res.status(err.status || 500).json({ message: err.message || "Не удалось создать пользователя" });
   }
 });
 
 app.patch("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    await users.updateUser(req.params.id, req.body || {});
+    await users.updateUser(req.params.id, req.body || {}, req.cookies[auth.COOKIE_NAME]);
     res.json({ ok: true });
   } catch (err) {
     console.error("Не удалось обновить пользователя:", err);
-    res.status(500).json({ message: "Не удалось обновить пользователя" });
+    res.status(err.status || 500).json({ message: err.message || "Не удалось обновить пользователя" });
   }
 });
 
@@ -199,21 +223,21 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
     if (String(req.user.id) === String(req.params.id)) {
       return res.status(400).json({ message: "Нельзя удалить самого себя" });
     }
-    const target = await users.getUser(req.params.id);
+    const target = await users.getUser(req.params.id, req.cookies[auth.COOKIE_NAME]);
     if (!target) {
       return res.status(404).json({ message: "Пользователь не найден" });
     }
     if (target.role === "admin") {
-      const adminCount = await users.countAdmins();
+      const adminCount = await users.countAdmins(req.cookies[auth.COOKIE_NAME]);
       if (adminCount <= 1) {
         return res.status(400).json({ message: "Нельзя удалить последнего администратора" });
       }
     }
-    await users.deleteUser(req.params.id);
+    await users.deleteUser(req.params.id, req.cookies[auth.COOKIE_NAME]);
     res.json({ ok: true });
   } catch (err) {
     console.error("Не удалось удалить пользователя:", err);
-    res.status(500).json({ message: "Не удалось удалить пользователя" });
+    res.status(err.status || 500).json({ message: err.message || "Не удалось удалить пользователя" });
   }
 });
 
