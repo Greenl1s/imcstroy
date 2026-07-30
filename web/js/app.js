@@ -82,6 +82,18 @@ function bindEvents() {
     closeMassActionsMenu();
     bulk(e.currentTarget, 'delete');
   };
+  document.getElementById('massReturnBtn').onclick = (e) => {
+    closeMassActionsMenu();
+    bulkSimple(e.currentTarget, 'return');
+  };
+  document.getElementById('massCancelBookingBtn').onclick = (e) => {
+    closeMassActionsMenu();
+    bulkSimple(e.currentTarget, 'cancel-booking');
+  };
+  document.getElementById('massTransferBtn').onclick = () => {
+    closeMassActionsMenu();
+    showBulkTransferForm();
+  };
 
   // Сервер сказал, что сессия недействительна — возвращаемся ко входу
   window.addEventListener('app:unauthorized', () => {
@@ -226,6 +238,67 @@ async function bulk(button, kind) {
 }
 
 /**
+ * "Вернуть" и "Отменить бронирование" не требуют доп. данных — просто
+ * подтверждение, как списание/удаление. Но, в отличие от них, здесь
+ * возможен частичный успех (кто-то мог уже вернуть/отменить бронь
+ * на один из выбранных приборов раньше нас) — поэтому используем
+ * тот же построчный разбор результата, что и для "Взять"/"Забронировать".
+ */
+async function bulkSimple(button, kind) {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  const question = kind === 'return'
+    ? `Вернуть ${ids.length} прибор(ов)?`
+    : `Отменить бронирование у ${ids.length} прибор(ов)?`;
+  if (!confirm(question)) return;
+
+  const result = await run(
+    () => (kind === 'return' ? api.bulkReturn(ids) : api.bulkCancelBooking(ids)),
+    { button }
+  );
+  if (result === null) return;
+
+  reportBulkResult(result, kind === 'return' ? 'возвращено' : 'отменено');
+  setMassMode(false);
+  await refresh();
+  renderRoute();
+}
+
+function showBulkTransferForm() {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  const others = state.users.filter((u) => u.id !== state.currentUser.id);
+  if (!others.length) return toast('Некому передавать', true);
+
+  openModal(`Передать приборы (${ids.length})`, `
+    <form id="bulkTransferForm" class="form-grid">
+      <label>Новый пользователь
+        <select name="to_user_id" required>
+          ${others.map((u) => `<option value="${u.id}">${escapeHtml(u.username)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Место использования<input name="taken_where"></label>
+      <label>Доп. данные<input name="taken_extra"></label>
+      <div class="modal-actions"><button class="primary" type="submit">Передать (${ids.length})</button></div>
+    </form>`);
+
+  document.getElementById('bulkTransferForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    const result = await run(() => api.bulkTransfer(ids, data), { button });
+    if (result === null) return;
+    closeModal();
+    reportBulkResult(result, 'передано');
+    setMassMode(false);
+    await refresh();
+    renderRoute();
+  };
+}
+
+/**
  * В отличие от списания/удаления, взять или забронировать сразу все
  * выбранные приборы не всегда получится: кто-то мог занять один из них
  * прямо перед этим. Поэтому сервер обрабатывает каждый прибор отдельно
@@ -276,6 +349,7 @@ function showBulkBookForm() {
   openModal(`Забронировать приборы (${ids.length})`, `
     <form id="bulkBookForm" class="form-grid">
       <p>Кто бронирует: ${escapeHtml(state.currentUser.username)}</p>
+      <label>Куда бронируем (место использования)<input name="booked_where"></label>
       <label>Дата бронирования<input name="booked_for" type="date" value="${today()}" required></label>
       <label>Доп. информация<input name="booked_extra" value="${escapeHtml(state.currentUser.extra || '')}"></label>
       <div class="modal-actions"><button class="primary" type="submit">Забронировать (${ids.length})</button></div>
