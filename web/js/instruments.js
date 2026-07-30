@@ -10,7 +10,7 @@ import {
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
 // Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
-const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
+export const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
 
 /** Клиентская фильтрация уже загруженного списка. */
 export function filteredInstruments() {

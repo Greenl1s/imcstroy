@@ -1,9 +1,9 @@
-import { api, getToken } from './api.js';
+import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
 import { escapeHtml, CONTROL_TYPES } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm } from './instruments.js';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { displayNo, verificationBadge, verificationText, today } from './utils.js';
 
@@ -27,15 +27,16 @@ document.addEventListener('DOMContentLoaded', init);
 async function init() {
   bindEvents();
 
-  // Токен есть — проверяем у сервера, что он ещё действителен
-  if (getToken()) {
-    try {
-      state.currentUser = await api.me();
-      await enterApp();
-      return;
-    } catch {
-      // токен протух — просто покажем экран входа
-    }
+  // Один и тот же запрос проверяет оба варианта: и токен этой вкладки
+  // (если есть), и общую SSO-cookie (если человек уже вошёл на files.<домен>,
+  // в ИСУ — тогда браузер сам пришлёт cookie, даже если токена в этой
+  // вкладке никогда не было).
+  try {
+    state.currentUser = await api.me();
+    await enterApp();
+    return;
+  } catch {
+    // ни токена, ни действующей cookie — показываем экран входа
   }
   showAuth();
 }
@@ -45,8 +46,8 @@ function bindEvents() {
 
   populateControlTypeFilter();
 
-  document.getElementById('logoutButton').onclick = () => {
-    api.logout();
+  document.getElementById('logoutButton').onclick = async () => {
+    await api.logout();
     state.currentUser = null;
     history.pushState(null, '', location.pathname);
     showAuth();
@@ -460,6 +461,80 @@ function closeMassActionsMenu() {
   document.getElementById('massActionsDropdown').classList.add('hidden');
 }
 
+/* ---------- Массовая выгрузка QR-кодов в ИСУ ---------- */
+
+const QR_EXPORT_PATH = '/База данных/Оборудование/QR-код';
+
+// Убирает символы, недопустимые в имени файла на большинстве ОС.
+function sanitizeFilename(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, '-').trim() || 'без_названия';
+}
+
+// Строит PNG того же QR-кода, что показывает кнопка "QR" на карточке
+// (тот же URL, та же библиотека) — просто в скрытом контейнере, без модалки.
+function renderQrPng(item) {
+  return new Promise((resolve, reject) => {
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed; left:-9999px; top:-9999px;';
+    document.body.appendChild(container);
+
+    const url = `${location.origin}${location.pathname}?id=${encodeURIComponent(item.id)}`;
+    new QRCode(container, { text: url, width: 220, height: 220 });
+
+    setTimeout(() => {
+      const canvas = container.querySelector('canvas');
+      if (!canvas) {
+        document.body.removeChild(container);
+        return reject(new Error('Не удалось построить QR-код'));
+      }
+      canvas.toBlob((blob) => {
+        document.body.removeChild(container);
+        if (!blob) return reject(new Error('Не удалось получить изображение'));
+        resolve(blob);
+      }, 'image/png');
+    }, 30);
+  });
+}
+
+async function exportAllQrCodes() {
+  const items = state.instruments || [];
+  if (!items.length) return toast('Нет приборов для выгрузки', true);
+  if (!confirm(`Выгрузить QR-коды всех приборов (${items.length}) в ИСУ, в «База данных/Оборудование/QR-код»?`)) return;
+
+  let success = 0;
+  const failed = [];
+
+  for (const item of items) {
+    try {
+      const blob = await renderQrPng(item);
+      const filename = `${sanitizeFilename(item.name)}.png`;
+      const form = new FormData();
+      form.append('path', QR_EXPORT_PATH);
+      form.append('file', blob, filename);
+
+      const res = await fetch(`${FILEMANAGER_ORIGIN}/api/upload`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+      success++;
+    } catch (err) {
+      failed.push({ name: item.name, message: err.message });
+    }
+  }
+
+  if (failed.length === 0) {
+    toast(`Готово: ${success} QR-код(ов) выгружено в ИСУ`);
+  } else {
+    const details = failed.map((f) => `${f.name} (${f.message})`).join('; ');
+    toast(`Выгружено: ${success}. Не удалось: ${failed.length} — ${details}`, true);
+  }
+}
+
 function bindMenu() {
   const button = document.getElementById('menuButton');
   const dropdown = document.getElementById('menuDropdown');
@@ -483,5 +558,9 @@ function bindMenu() {
   document.getElementById('exportExpiringButton').onclick = () => {
     dropdown.classList.add('hidden');
     exportExpiringInstruments();
+  };
+  document.getElementById('exportQrButton').onclick = () => {
+    dropdown.classList.add('hidden');
+    exportAllQrCodes();
   };
 }
