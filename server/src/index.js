@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { query, waitForDb } from './db.js';
 import { hashPassword } from './auth.js';
 import { auth } from './routes/auth.js';
@@ -14,6 +15,9 @@ const PORT = Number(process.env.PORT || 3000);
 
 app.set('trust proxy', 1); // за Caddy — чтобы rate limit видел реальный IP
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
+// Нужен, чтобы requireAuth мог прочитать общую SSO-cookie (единый вход с ИСУ),
+// когда в заголовке Authorization токена ещё нет.
+app.use(cookieParser());
 
 // Разрешаем запросы только с адресов, перечисленных в ALLOWED_ORIGINS.
 // Если фронтенд отдаётся тем же сервером — список можно оставить пустым.

@@ -9,6 +9,12 @@ if (!SECRET || SECRET.length < 32) {
   throw new Error('JWT_SECRET не задан или слишком короткий (нужно минимум 32 символа)');
 }
 
+// Общая cookie для единого входа (SSO) — та же самая cookie распознаётся
+// и файловым менеджером ИСУ, если у обоих сервисов задан один и тот же
+// JWT_SECRET и SSO_COOKIE_DOMAIN.
+export const SSO_COOKIE_NAME = 'sso_token';
+const SSO_COOKIE_DOMAIN = process.env.SSO_COOKIE_DOMAIN || undefined;
+
 /** Хэш пароля. В базу никогда не попадает пароль в открытом виде. */
 export function hashPassword(plain) {
   return bcrypt.hash(String(plain), 12);
@@ -26,14 +32,31 @@ export function issueToken(user) {
   );
 }
 
+/** Выставляет общую cookie так, чтобы её видел и files.<домен>, и сам сайт. */
+export function setSsoCookie(res, token) {
+  res.cookie(SSO_COOKIE_NAME, token, {
+    domain: SSO_COOKIE_DOMAIN,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 12 * 60 * 60 * 1000,
+  });
+}
+
+export function clearSsoCookie(res) {
+  res.clearCookie(SSO_COOKIE_NAME, { domain: SSO_COOKIE_DOMAIN });
+}
+
 /**
- * Проверяет токен из заголовка Authorization и кладёт пользователя в req.user.
- * Роль берётся ИЗ ТОКЕНА, подписанного сервером, а не из того, что прислал браузер.
- * Подделать её нельзя, не зная JWT_SECRET.
+ * Проверяет токен из заголовка Authorization, а если его нет — из общей
+ * cookie SSO (например, если человек уже вошёл на files.<домен> и просто
+ * открыл этот сайт — тогда токена в заголовке ещё нет, но cookie браузер
+ * пришлёт сам). Роль берётся ИЗ ТОКЕНА, подписанного сервером, а не из
+ * того, что прислал браузер. Подделать её нельзя, не зная JWT_SECRET.
  */
 export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = header.startsWith('Bearer ') ? header.slice(7) : (req.cookies?.[SSO_COOKIE_NAME] || null);
   if (!token) return res.status(401).json({ error: 'Требуется авторизация' });
 
   try {
