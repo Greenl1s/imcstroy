@@ -1,3 +1,4 @@
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("./db");
 
@@ -6,10 +7,36 @@ if (!JWT_SECRET) {
   throw new Error("Переменная окружения JWT_SECRET не задана");
 }
 
-// Должно совпадать с cookie, которую выставляет "Учёт оборудования" —
-// так вход на любом из двух сайтов сразу открывает и второй (SSO).
+// Должно совпадать с тем, что выставляет "Учёт оборудования" — так вход
+// на любом из двух сайтов сразу открывает и второй (SSO). ИСУ и "Учёт
+// оборудования" используют одну и ту же базу данных, поэтому пароль
+// проверяем напрямую по общей таблице users — отдельно свою таблицу
+// пользователей (и уж тем более отдельные пароли) здесь больше не ведём.
 const COOKIE_NAME = "sso_token";
 const COOKIE_DOMAIN = process.env.SSO_COOKIE_DOMAIN || undefined;
+const TOKEN_TTL = "12h";
+
+async function verifyLogin(username, password) {
+  const res = await db.query(
+    "SELECT id, username, password_hash, role FROM users WHERE lower(username) = lower($1)",
+    [username]
+  );
+  const user = res.rows[0];
+  if (!user) return null;
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return null;
+  return { id: user.id, username: user.username, role: user.role };
+}
+
+// Форма токена та же, что у "Учёта оборудования" (sub/username/role) —
+// токен, выданный любым из двух сайтов, принимается другим без изменений.
+function issueToken(user) {
+  return jwt.sign(
+    { sub: String(user.id), username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: TOKEN_TTL }
+  );
+}
 
 function setAuthCookie(res, token) {
   res.cookie(COOKIE_NAME, token, {
@@ -34,10 +61,9 @@ async function getPermissions(userId) {
 }
 
 /**
- * Личность (id/username/role) теперь всегда приходит из общего токена,
- * подписанного "Учётом оборудования" при входе — паролей мы у себя
- * больше не храним и не проверяем. Права на разделы ИСУ (can_tools/
- * can_db/can_cases) по-прежнему свои, берём их из fm_permissions.
+ * Личность (id/username/role) — из общей cookie, подписанной либо этим
+ * сайтом, либо "Учётом оборудования" (у обоих один и тот же JWT_SECRET).
+ * Права на разделы ИСУ (can_tools/can_db/can_cases) — из fm_permissions.
  */
 async function requireAuth(req, res, next) {
   const token = req.cookies[COOKIE_NAME];
@@ -78,6 +104,8 @@ function requireAdmin(req, res, next) {
 }
 
 module.exports = {
+  verifyLogin,
+  issueToken,
   setAuthCookie,
   clearAuthCookie,
   requireAuth,
