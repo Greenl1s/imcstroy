@@ -1,5 +1,6 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
+const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
@@ -17,6 +18,16 @@ const gpGenerate = require("./gpGenerate");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
+
+// "Учёт оборудования" (другой поддомен) должен уметь загружать файлы сюда
+// напрямую из браузера (например, массовая выгрузка QR-кодов) — для этого
+// нужен CORS с credentials, чтобы прошла общая cookie SSO.
+const SSO_DOMAIN = process.env.SSO_COOKIE_DOMAIN;
+app.use(cors({
+  origin: SSO_DOMAIN ? [`https://${SSO_DOMAIN}`, `https://files.${SSO_DOMAIN}`] : true,
+  credentials: true,
+}));
+
 app.use(express.json());
 app.use(cookieParser());
 
