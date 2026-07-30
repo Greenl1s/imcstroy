@@ -496,10 +496,45 @@ function renderQrPng(item) {
   });
 }
 
+/**
+ * Удаляет всё, что сейчас лежит в папке QR-кодов, перед новой выгрузкой —
+ * иначе там годами копились бы QR-коды переименованных или удалённых
+ * приборов. Если папки ещё вообще нет (самый первый запуск) — просто
+ * ничего не делаем, удалять нечего.
+ */
+async function clearQrFolder() {
+  let listing;
+  try {
+    const res = await fetch(`${FILEMANAGER_ORIGIN}/api/resources?path=${encodeURIComponent(QR_EXPORT_PATH)}`, {
+      credentials: 'include',
+    });
+    if (!res.ok) return; // папки ещё нет — нечего чистить
+    listing = await res.json();
+  } catch {
+    return; // ИСУ недоступна — не блокируем сам экспорт из-за этого
+  }
+
+  const entries = [...(listing.folders || []), ...(listing.files || [])];
+  await Promise.all(
+    entries.map((entry) => {
+      const fullPath = `${QR_EXPORT_PATH}/${entry.name}`;
+      return fetch(`${FILEMANAGER_ORIGIN}/api/resources?path=${encodeURIComponent(fullPath)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      }).catch(() => {});
+    })
+  );
+}
+
 async function exportAllQrCodes() {
   const items = state.instruments || [];
   if (!items.length) return toast('Нет приборов для выгрузки', true);
-  if (!confirm(`Выгрузить QR-коды всех приборов (${items.length}) в ИСУ, в «База данных/Оборудование/QR-код»?`)) return;
+  if (!confirm(
+    `Выгрузить QR-коды всех приборов (${items.length}) в ИСУ?\n\n` +
+    'Всё, что сейчас лежит в «База данных/Оборудование/QR-код», будет удалено и заменено новыми файлами.'
+  )) return;
+
+  await clearQrFolder();
 
   let success = 0;
   const failed = [];
