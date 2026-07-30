@@ -234,7 +234,7 @@ async function showRetired() {
           </div>
         </div>
         <div class="badges">
-          <span class="badge ${verificationBadge(item.valid_until)}">${verificationText(item.valid_until)}</span>
+          <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
           <button class="secondary" data-open-retired="${item.id}">Открыть</button>
           ${isAdmin() ? `<button class="primary" data-restore="${item.id}">Восстановить</button>` : ''}
         </div>

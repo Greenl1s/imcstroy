@@ -4,6 +4,7 @@ import {
   escapeAttr, escapeHtml, formData, today, displayNo,
   verificationBadge, verificationText, verificationState,
   statusBadge, statusText, checkTypeText,
+  dateFieldLabel, validUntilLabel, documentButtonLabel,
   CONTROL_TYPES, controlTypeShort, controlTypeFull, controlTypeBadge
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
@@ -20,7 +21,7 @@ export function filteredInstruments() {
       .some((v) => String(v || '').toLowerCase().includes(q));
 
     const matchesVerification = state.verification === 'all' ||
-      verificationState(i.valid_until) === state.verification;
+      verificationState(i) === state.verification;
 
     const matchesStatus = state.condition === 'all' || i.status === state.condition;
 
@@ -51,7 +52,7 @@ export function renderList(openCard) {
           </div>
           <div class="row-status-group">
             <div class="row-status-col">
-              <span class="badge ${verificationBadge(item.valid_until)}">${verificationText(item.valid_until)}</span>
+              <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
             </div>
             <div class="row-status-col">
               <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
@@ -125,7 +126,7 @@ export async function renderCard(id, goList) {
 
   main += '<button class="secondary" data-qr>QR</button>';
   if (item.has_document) {
-    main += '<button class="secondary" data-document>Документ</button>';
+    main += `<button class="secondary" data-document>${escapeHtml(documentButtonLabel(item.check_type))}</button>`;
   }
   main += '<button class="secondary" data-copy>Копировать</button>';
   main += '<button class="secondary" data-history>История</button>';
@@ -160,17 +161,17 @@ export async function renderCard(id, goList) {
       ${item.has_photo ? '<div class="photo-box" id="photoBox">Загрузка фото...</div>' : ''}
       <h1>${escapeHtml(item.name)}</h1>
       <div class="badges badges-left">
-        <span class="badge ${verificationBadge(item.valid_until)}">${verificationText(item.valid_until)}</span>
+        <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
         <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
       </div>
       <div class="card-grid">
         ${field('Номер', displayNo(item))}
         ${field('Серийный номер', item.serial_number)}
         ${field('Модель', item.model)}
-        ${field('Тип', checkTypeText(item.check_type))}
+        ${field('Тип метрологического контроля', checkTypeText(item.check_type))}
         ${field('Классификация', controlTypeFull(item.control_type))}
-        ${field('Дата поверки/калибровки', item.verification_date)}
-        ${field('Действительно до', item.valid_until)}
+        ${field(dateFieldLabel(item.check_type), item.verification_date)}
+        ${field(validUntilLabel(item.check_type), item.valid_until)}
       </div>
       ${item.comment ? field('Комментарий', item.comment) : ''}
       ${holder}
@@ -286,7 +287,11 @@ export function showInstrumentForm(item = null) {
       ${input('name', 'Название', v.name || '', 'text', true)}
       ${input('serial_number', 'Серийный номер', v.serial_number || '')}
       ${input('model', 'Модель', v.model || '')}
-      ${select('check_type', 'Тип', v.check_type, [['verification', 'Поверка'], ['calibration', 'Калибровка']])}
+      ${select('check_type', 'Тип метрологического контроля', v.check_type, [
+        ['verification', 'Поверка'],
+        ['calibration', 'Калибровка'],
+        ['none', 'Не требуется']
+      ])}
       ${select('control_type', 'Классификация', v.control_type || '',
         [['', 'Не указано'], ...CONTROL_TYPES.map(([code, full, short]) => [code, `${full} (${short})`])])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
@@ -520,11 +525,12 @@ function showQr(item) {
  * показываем превью только для картинок, иначе даём кнопку "Открыть".
  */
 async function showDocument(item) {
-  openModal('Документ', '<p class="qr-caption">Загрузка...</p>');
+  const title = documentButtonLabel(item.check_type);
+  openModal(title, '<p class="qr-caption">Загрузка...</p>');
 
   const result = await api.documentUrl(item.id);
   if (!result) {
-    return openModal('Документ', '<p class="qr-caption">Не удалось загрузить документ</p>');
+    return openModal(title, '<p class="qr-caption">Не удалось загрузить документ</p>');
   }
 
   const { url, contentType } = result;
@@ -534,7 +540,7 @@ async function showDocument(item) {
     ? `<div class="qr-box"><img src="${url}" alt="Фото документа" class="document-photo"></div>`
     : `<p class="qr-caption">Файл: ${escapeHtml(contentType || 'неизвестный тип')}</p>`;
 
-  openModal('Документ', `
+  openModal(title, `
     ${preview}
     <p class="qr-caption">${escapeHtml(item.name)}</p>
     <div class="modal-actions">
