@@ -520,8 +520,13 @@ function renderToolsColumn(links) {
     const row = document.createElement("div");
     row.className = "row-item";
     row.style.justifyContent = "space-between";
+    // Внутренние ссылки (относительные, вида "/instruments/") открываем в
+    // этой же вкладке — они часть того же сайта. Внешние (http://, https://) —
+    // как раньше, в новой вкладке.
+    const isInternal = link.url.startsWith("/");
+    const linkAttrs = isInternal ? "" : 'target="_blank" rel="noopener"';
     row.innerHTML = `
-      <a href="${link.url}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
+      <a href="${link.url}" ${linkAttrs} style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
         ${svgLink}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${link.label}</span>
       </a>
       <button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>
