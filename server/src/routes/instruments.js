@@ -474,16 +474,16 @@ instruments.post('/bulk/transfer', async (req, res) => {
       const instrument = await transaction(async (client) => {
         const { rows } = await client.query(
           `UPDATE instruments
-              SET taken_by = $4, taken_where = $5, taken_extra = $6, taken_at = $7
-            WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+              SET pending_transfer_to = $4, pending_transfer_where = $5, pending_transfer_extra = $6
+            WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3) AND pending_transfer_to IS NULL
             RETURNING *`,
-          [id, req.user.id, req.user.role === 'admin', targetId, taken_where, taken_extra, today()]
+          [id, req.user.id, req.user.role === 'admin', targetId, taken_where, taken_extra]
         );
         if (!rows.length) {
           const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
           const err = new Error(
             exists.rows.length
-              ? `«${exists.rows[0].name}» можно передать, только если он у вас на руках`
+              ? `«${exists.rows[0].name}» можно передать, только если он у вас на руках и не ждёт другой передачи`
               : 'Прибор не найден'
           );
           err.status = exists.rows.length ? 409 : 404;
@@ -491,9 +491,99 @@ instruments.post('/bulk/transfer', async (req, res) => {
         }
         const row = rows[0];
         await logEvent(client, {
-          instrument: row, action: 'transfer', actor: req.user,
+          instrument: row, action: 'transfer_request', actor: req.user,
           targetName: target[0].username, place: taken_where,
-          note: `Передан: ${req.user.username} → ${target[0].username} (групповая операция)`
+          note: `Запрошена передача: ${req.user.username} → ${target[0].username} (групповая операция), ожидает подтверждения`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/accept-transfer', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET taken_by = pending_transfer_to,
+                  taken_where = pending_transfer_where,
+                  taken_extra = pending_transfer_extra,
+                  taken_at = $3,
+                  pending_transfer_to = NULL, pending_transfer_where = NULL, pending_transfer_extra = NULL
+            WHERE id = $1 AND pending_transfer_to = $2
+            RETURNING *`,
+          [id, req.user.id, today()]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» — эта передача не адресована вам или уже обработана`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'transfer_accept', actor: req.user,
+          note: `Передача подтверждена: принял ${req.user.username} (групповая операция)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
+instruments.post('/bulk/reject-transfer', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments
+              SET pending_transfer_to = NULL, pending_transfer_where = NULL, pending_transfer_extra = NULL
+            WHERE id = $1 AND pending_transfer_to = $2
+            RETURNING *`,
+          [id, req.user.id]
+        );
+        if (!rows.length) {
+          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
+          const err = new Error(
+            exists.rows.length
+              ? `«${exists.rows[0].name}» — эта передача не адресована вам или уже обработана`
+              : 'Прибор не найден'
+          );
+          err.status = exists.rows.length ? 409 : 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'transfer_reject', actor: req.user,
+          note: `Передача отклонена пользователем ${req.user.username} (групповая операция)`
         });
         return row;
       });
@@ -679,7 +769,11 @@ instruments.post('/:id/return', (req, res) => transition(res, {
   buildLog: () => ({ note: `Возвращён: ${req.user.username}` })
 }));
 
-/** Передать другому — только тот, у кого прибор на руках. */
+/**
+ * Передать другому — только тот, у кого прибор на руках. Прибор НЕ переходит
+ * сразу: тому, кому передают, приходит запрос на подтверждение, и только
+ * после его согласия (см. /:id/accept-transfer) taken_by реально меняется.
+ */
 instruments.post('/:id/transfer', async (req, res) => {
   const targetId = Number(req.body?.to_user_id);
   if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
@@ -690,22 +784,54 @@ instruments.post('/:id/transfer', async (req, res) => {
   return transition(res, {
     id: req.params.id,
     actor: req.user,
-    action: 'transfer',
-    guardMessage: 'Передать можно только прибор, который у вас на руках',
+    action: 'transfer_request',
+    guardMessage: 'Передать можно только прибор на руках, у которого нет уже ожидающей передачи',
     sql: `UPDATE instruments
-             SET taken_by = $4, taken_where = $5, taken_extra = $6, taken_at = $7
-           WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+             SET pending_transfer_to = $4, pending_transfer_where = $5, pending_transfer_extra = $6
+           WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3) AND pending_transfer_to IS NULL
            RETURNING *`,
     params: [
       req.params.id, req.user.id, req.user.role === 'admin', targetId,
-      nullify(req.body?.taken_where), nullify(req.body?.taken_extra), today()
+      nullify(req.body?.taken_where), nullify(req.body?.taken_extra)
     ],
-    buildLog: (i) => ({
-      targetName: target[0].username, place: i.taken_where,
-      note: `Передан: ${req.user.username} → ${target[0].username}`
+    buildLog: () => ({
+      targetName: target[0].username,
+      note: `Запрошена передача: ${req.user.username} → ${target[0].username}, ожидает подтверждения`
     })
   });
 });
+
+/** Получатель подтверждает — прибор реально переходит к нему. */
+instruments.post('/:id/accept-transfer', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'transfer_accept',
+  guardMessage: 'Эта передача не адресована вам или уже обработана',
+  sql: `UPDATE instruments
+           SET taken_by = pending_transfer_to,
+               taken_where = pending_transfer_where,
+               taken_extra = pending_transfer_extra,
+               taken_at = $3,
+               pending_transfer_to = NULL, pending_transfer_where = NULL, pending_transfer_extra = NULL
+         WHERE id = $1 AND pending_transfer_to = $2
+         RETURNING *`,
+  params: [req.params.id, req.user.id, today()],
+  buildLog: () => ({ note: `Передача подтверждена: принял ${req.user.username}` })
+}));
+
+/** Получатель отклоняет — прибор остаётся у прежнего держателя. */
+instruments.post('/:id/reject-transfer', (req, res) => transition(res, {
+  id: req.params.id,
+  actor: req.user,
+  action: 'transfer_reject',
+  guardMessage: 'Эта передача не адресована вам или уже обработана',
+  sql: `UPDATE instruments
+           SET pending_transfer_to = NULL, pending_transfer_where = NULL, pending_transfer_extra = NULL
+         WHERE id = $1 AND pending_transfer_to = $2
+         RETURNING *`,
+  params: [req.params.id, req.user.id],
+  buildLog: () => ({ note: `Передача отклонена пользователем ${req.user.username}` })
+}));
 
 instruments.post('/:id/book', (req, res) => transition(res, {
   id: req.params.id,
