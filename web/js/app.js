@@ -1,9 +1,9 @@
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
-import { escapeHtml, CONTROL_TYPES } from './utils.js';
+import { escapeHtml, getControlTypes, setControlTypes } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal } from './instruments.js';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { displayNo, verificationBadge, verificationText, today } from './utils.js';
 
@@ -44,8 +44,6 @@ async function init() {
 function bindEvents() {
   document.getElementById('loginForm').onsubmit = onLogin;
 
-  populateControlTypeFilter();
-
   const backToIsuButton = document.getElementById('backToIsuButton');
   if (backToIsuButton) {
     backToIsuButton.onclick = () => {
@@ -65,6 +63,7 @@ function bindEvents() {
   bindMenu();
 
   document.getElementById('usersButton').onclick = showUsersManager;
+  document.getElementById('controlTypesButton').onclick = showControlTypesManager;
   document.getElementById('profileButton').onclick = () => showUserForm(state.currentUser);
   document.getElementById('addInstrumentButton').onclick = () => showInstrumentForm();
   document.getElementById('retiredButton').onclick = showRetired;
@@ -119,6 +118,9 @@ function bindEvents() {
   });
   window.addEventListener('app:refresh-route', renderRoute);
   window.addEventListener('popstate', renderRoute);
+  window.addEventListener('app:control-types-changed', () => {
+    loadControlTypes();
+  });
 }
 
 function setFilter(key, value) {
@@ -127,21 +129,32 @@ function setFilter(key, value) {
 }
 
 /**
- * Заполняет фильтр "Классификация" полными названиями из CONTROL_TYPES —
- * единственного места, где заведён список классификаций (используется и
- * здесь, и в форме прибора). Так названия не могут разъехаться между собой.
- * "Все" и "Не указано" уже есть в index.html — новые варианты вставляем
- * между ними.
+ * Заполняет фильтр "Классификация" полными названиями — список приходит
+ * с сервера (см. loadControlTypes), чтобы админ мог управлять им без
+ * правки кода. "Все" и "Не указано" уже есть в index.html и никогда не
+ * трогаются — остальные варианты между ними стираем и вставляем заново
+ * (функция может вызываться повторно, например, после того как админ
+ * что-то добавил или удалил в списке классификаций).
  */
 function populateControlTypeFilter() {
   const select = document.getElementById('controlTypeFilter');
   const noneOption = select.querySelector('option[value="none"]');
-  for (const [code, full] of CONTROL_TYPES) {
+  select.querySelectorAll('option').forEach((opt) => {
+    if (opt.value !== 'all' && opt.value !== 'none') opt.remove();
+  });
+  for (const [code, full] of getControlTypes()) {
     const opt = document.createElement('option');
     opt.value = code;
     opt.textContent = full;
     select.insertBefore(opt, noneOption);
   }
+}
+
+/** Получает список классификаций с сервера и сохраняет его для всего приложения. */
+async function loadControlTypes() {
+  const list = await api.listControlTypes();
+  setControlTypes(list);
+  populateControlTypeFilter();
 }
 
 // ---------- Вход ----------
@@ -173,6 +186,7 @@ async function enterApp() {
 
   try {
     await refresh();
+    await loadControlTypes();
   } catch (err) {
     setSync('Ошибка загрузки');
     toast(err.message, true);

@@ -80,39 +80,44 @@ export function readFileAsDataUrl(file) {
   });
 }
 
-/** Классификация приборов по видам контроля. Код — то, что хранится в базе. */
-export const CONTROL_TYPES = [
-  ['vik', 'Визуально-измерительный контроль', 'ВИК'],
-  ['uzk', 'Ультразвуковой контроль', 'УЗК'],
-  ['elk', 'Электрический контроль', 'ЭЛК'],
-  ['tk',  'Тепловой контроль', 'ТК'],
-  ['ak',  'Акустический контроль', 'АК'],
-  ['kbt', 'Контроль бетона', 'КБТ'],
-  ['rgk', 'Радиографический контроль', 'РГК'],
-  ['gdz', 'Геодезическое оборудование', 'ГДЗ'],
-  ['vspom', 'Вспомогательные приборы', 'ВСПОМ']
-];
+/**
+ * Классификация приборов по видам контроля. Раньше список был жёстко
+ * зашит здесь в коде — теперь он хранится в базе и управляется
+ * администратором (см. showControlTypesManager в instruments.js).
+ * Заполняется один раз при входе через setControlTypes().
+ */
+let CONTROL_TYPES_LIST = [];
 
-const CONTROL_TYPE_SHORT = Object.fromEntries(CONTROL_TYPES.map(([code, , short]) => [code, short]));
-const CONTROL_TYPE_FULL = Object.fromEntries(CONTROL_TYPES.map(([code, full]) => [code, full]));
+/** Вызывается один раз при входе — после того как список получен с сервера. */
+export function setControlTypes(list) {
+  CONTROL_TYPES_LIST = Array.isArray(list) ? list : [];
+}
+
+/** Список в старом формате [code, full_name, short_name] — для формы/фильтра. */
+export function getControlTypes() {
+  return CONTROL_TYPES_LIST.map((t) => [t.code, t.full_name, t.short_name]);
+}
 
 /** Короткая подпись для бейджа (ВИК, УЗК...), «Не указано» — если код пустой. */
-export const controlTypeShort = (code) => CONTROL_TYPE_SHORT[code] || 'Не указано';
+export const controlTypeShort = (code) => {
+  const found = CONTROL_TYPES_LIST.find((t) => t.code === code);
+  return found ? found.short_name : 'Не указано';
+};
 
 /** Полное название — для всплывающей подсказки при наведении. */
-export const controlTypeFull = (code) => CONTROL_TYPE_FULL[code] || 'Классификация не указана';
+export const controlTypeFull = (code) => {
+  const found = CONTROL_TYPES_LIST.find((t) => t.code === code);
+  return found ? found.full_name : 'Классификация не указана';
+};
 
 /**
- * CSS-класс цвета бейджа. Три цветовые семьи, каждая — темнее внутри себя:
- *   голубая:              ВИК → АК → УЗК → КБТ (от светлого к тёмному)
- *   сине-зелёная (бирюза): ЭЛК → РГК (от светлого к тёмному)
- *   оранжево-коричневая:  ТК → ГДЗ (от светлого к тёмному)
- * «Не указано» остаётся нейтральным серым (класс muted), как и раньше.
+ * CSS-класс цвета бейджа. У изначальных 8 классификаций — свои цвета
+ * (три цветовые семьи, каждая темнее внутри себя). У новых, добавленных
+ * администратором позже, отдельного цвета нет — используется нейтральный
+ * "muted", как и для "не указано". Хотите свой цвет для новой классификации —
+ * добавьте правило .ctrl-<код> в style.css и впишите его сюда.
  */
 export const controlTypeBadge = (code) =>
   ({ vik: 'ctrl-vik', ak: 'ctrl-ak', uzk: 'ctrl-uzk', kbt: 'ctrl-kbt',
      elk: 'ctrl-elk', rgk: 'ctrl-rgk',
      tk: 'ctrl-tk', gdz: 'ctrl-gdz' }[code] || 'muted');
-// Примечание: у "vspom" (Вспомогательные приборы) нет отдельного цвета —
-// используется нейтральный "muted", как и для "не указано". Если захотите
-// свой цвет — добавьте правило .ctrl-vspom в style.css и впишите его сюда.

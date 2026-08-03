@@ -5,7 +5,7 @@ import {
   verificationBadge, verificationText, verificationState,
   statusBadge, statusText, checkTypeText,
   dateFieldLabel, validUntilLabel, documentButtonLabel,
-  CONTROL_TYPES, controlTypeShort, controlTypeFull, controlTypeBadge
+  getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
@@ -298,7 +298,7 @@ export function showInstrumentForm(item = null) {
         ['none', 'Не требуется']
       ])}
       ${select('control_type', 'Классификация', v.control_type || '',
-        [['', 'Не указано'], ...CONTROL_TYPES.map(([code, full, short]) => [code, `${full} (${short})`])])}
+        [['', 'Не указано'], ...getControlTypes().map(([code, full, short]) => [code, `${full} (${short})`])])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
       ${input('comment', 'Комментарий', v.comment || '')}
@@ -511,6 +511,64 @@ async function showHistory(item) {
     : '<div class="panel card">Событий пока нет</div>';
 
   openModal(`История: ${item.name}`, `<div class="list">${html}</div>`);
+}
+
+// ---------- Управление классификациями (только администратор) ----------
+
+export async function showControlTypesManager() {
+  openModal('Классификации', '<p class="qr-caption">Загрузка...</p>');
+  let list;
+  try {
+    list = await api.listControlTypes();
+  } catch (err) {
+    return openModal('Классификации', `<p class="qr-caption">${escapeHtml(err.message)}</p>`);
+  }
+  renderControlTypesManager(list);
+}
+
+function renderControlTypesManager(list) {
+  const rows = list.map((t) => `
+    <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+      <div style="flex:1; min-width:0;">
+        <strong>${escapeHtml(t.full_name)}</strong> (${escapeHtml(t.short_name)})
+        <div style="font-size:12px; color:var(--muted);">код: ${escapeHtml(t.code)}</div>
+      </div>
+      <button type="button" class="danger" data-delete-code="${escapeHtml(t.code)}">Удалить</button>
+    </div>`).join('');
+
+  openModal('Классификации', `
+    <div style="max-height:300px; overflow-y:auto;">${rows || '<p class="qr-caption">Пока пусто</p>'}</div>
+    <form id="addControlTypeForm" class="form-grid" style="margin-top:16px;">
+      <div class="row-subtitle">Добавить новую</div>
+      ${input('code', 'Код (латиницей, без пробелов)', '')}
+      ${input('full_name', 'Полное название', '')}
+      ${input('short_name', 'Короткое название', '')}
+      <div class="modal-actions"><button class="primary" type="submit">Добавить</button></div>
+    </form>`);
+
+  document.querySelectorAll('[data-delete-code]').forEach((btn) => {
+    btn.onclick = async () => {
+      const code = btn.dataset.deleteCode;
+      if (!confirm(`Удалить классификацию «${code}»?`)) return;
+      try {
+        await api.deleteControlType(code);
+        await showControlTypesManager();
+        window.dispatchEvent(new Event('app:control-types-changed'));
+      } catch (err) {
+        alert('Не удалось удалить: ' + err.message);
+      }
+    };
+  });
+
+  document.getElementById('addControlTypeForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const data = formData(event.target);
+    const result = await run(() => api.createControlType(data), { button, success: 'Классификация добавлена' });
+    if (result === null) return;
+    await showControlTypesManager();
+    window.dispatchEvent(new Event('app:control-types-changed'));
+  };
 }
 
 // ---------- Передачи, ожидающие подтверждения ----------

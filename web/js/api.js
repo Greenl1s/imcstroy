@@ -119,6 +119,11 @@ export const api = {
   // ---------- История ----------
   instrumentHistory: (id) => request(`/instruments/${id}/history`),
 
+  // ---------- Классификации ----------
+  listControlTypes: () => request('/control-types'),
+  createControlType: (data) => request('/control-types', { method: 'POST', body: data }),
+  deleteControlType: (code) => request(`/control-types/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+
   // ---------- Фото ----------
   uploadPhoto: (id, dataUrl) =>
     request(`/instruments/${id}/photo`, { method: 'PUT', body: { data_url: dataUrl } }),
