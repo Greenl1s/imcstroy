@@ -1,77 +1,72 @@
-# SITE_ADDRESS берётся из .env
-#
-#   pribory.example.ru   → Caddy сам получит сертификат Let's Encrypt (HTTPS)
-#   :80                  → работа по HTTP, для локальной сети без домена
-#
-# Фронтенд и API живут на одном адресе. Благодаря этому нет ни проблем с CORS,
-# ни запрета браузера на обращение с HTTPS-страницы к HTTP-серверу.
-
 {$SITE_ADDRESS} {
-	encode gzip
+        encode gzip
 
-	# Всё, что начинается с /api, уходит на Node
-	handle /api/* {
-		reverse_proxy api:3000
-	}
+        handle /api/* {
+                reverse_proxy api:3000
+        }
 
-	# Остальное — статические файлы приложения
-	handle {
-		root * /srv/web
-		try_files {path} /index.html
-		file_server
-	}
+        handle {
+                root * /srv/web
+                try_files {path} /index.html
+                file_server
+        }
 
-	header {
-		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
-		Referrer-Policy same-origin
-		-Server
-	}
+        header {
+                X-Content-Type-Options nosniff
+                X-Frame-Options DENY
+                Referrer-Policy same-origin
+                -Server
+        }
 
-	log {
-		output stdout
-		format console
-	}
+        log {
+                output stdout
+                format console
+        }
 }
 
-# Файловый менеджер — на отдельном поддомене, своя пара HTTPS-сертификатов.
-# Для его работы нужна отдельная DNS-запись:  files  →  тот же публичный IP.
 files.{$SITE_ADDRESS} {
-	encode gzip
-	reverse_proxy files:80
+        encode gzip
 
-	header {
-		X-Content-Type-Options nosniff
-		# SAMEORIGIN, а не DENY: превью PDF/Word встраивает файлы через iframe
-		# внутри самого files.imcstroy.ru — при DENY браузер такое блокировал.
-		# Посторонним сайтам встраивать files.imcstroy.ru всё равно нельзя.
-		X-Frame-Options SAMEORIGIN
-		Referrer-Policy same-origin
-		-Server
-	}
+        redir /instruments /instruments/ permanent
 
-	log {
-		output stdout
-		format console
-	}
+        handle /instruments/api/* {
+                uri strip_prefix /instruments
+                reverse_proxy api:3000
+        }
+
+        handle /instruments/* {
+                uri strip_prefix /instruments
+                root * /srv/web
+                try_files {path} /index.html
+                file_server
+        }
+
+        handle {
+                reverse_proxy filemanager:3000
+        }
+
+        header {
+                X-Content-Type-Options nosniff
+                X-Frame-Options SAMEORIGIN
+                Referrer-Policy same-origin
+                -Server
+        }
+        log {
+                output stdout
+                format console
+        }
 }
 
-# OnlyOffice — настоящий просмотр/редактирование Excel, Word, PowerPoint.
-# Файловый менеджер встраивает его в себя через iframe с ДРУГОГО поддомена,
-# поэтому здесь намеренно НЕТ X-Frame-Options — иначе браузер запретил бы
-# именно то встраивание, ради которого всё затевалось. Защиту от чужого
-# встраивания OnlyOffice обеспечивает сам, через общий секретный ключ (JWT).
-# Нужна ещё одна DNS-запись:  office  →  тот же публичный IP.
 office.{$SITE_ADDRESS} {
-	reverse_proxy onlyoffice:80
+        reverse_proxy onlyoffice:80
 
-	header {
-		X-Content-Type-Options nosniff
-		-Server
-	}
+        header {
+                X-Content-Type-Options nosniff
+                -Server
+        }
 
-	log {
-		output stdout
-		format console
-	}
+        log {
+                output stdout
+                format console
+        }
 }
