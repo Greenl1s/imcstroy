@@ -123,6 +123,7 @@ body {
   background: transparent; font-weight: 500;
 }
 .menu-dropdown button:hover { background: var(--badge-bg); }
+.menu-divider { height: 1px; background: var(--line); margin: 6px 4px; }
 
 /* ---------- Кнопки ---------- */
 button {

@@ -37,19 +37,21 @@
         <div class="topbar-actions">
           <button id="backToIsuButton" class="primary" type="button">← В ИСУ</button>
           <span id="currentUserBadge" class="badge muted"></span>
-          <button id="themeToggle" class="secondary" type="button">Тёмная</button>
-          <button id="usersButton" class="secondary admin-only" type="button">Пользователи</button>
-          <button id="controlTypesButton" class="secondary admin-only" type="button">Классификации</button>
-          <button id="profileButton" class="secondary" type="button">Профиль</button>
-          <button id="logoutButton" class="danger" type="button">Выйти</button>
           <div class="menu-wrapper">
             <button id="menuButton" class="secondary icon-btn" type="button" aria-label="Меню">☰</button>
             <div id="menuDropdown" class="menu-dropdown hidden">
+              <button id="themeToggle" type="button">Тёмная</button>
+              <button id="profileButton" type="button">Профиль</button>
+              <div class="menu-divider admin-only"></div>
+              <button id="usersButton" class="admin-only" type="button">Пользователи</button>
+              <button id="controlTypesButton" class="admin-only" type="button">Классификации</button>
+              <div class="menu-divider"></div>
               <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
               <button id="exportExpiringButton" type="button">Окончание поверок</button>
               <button id="exportQrButton" type="button">Выгрузить все QR-коды</button>
             </div>
           </div>
+          <button id="logoutButton" class="danger" type="button">Выйти</button>
         </div>
       </header>
 
