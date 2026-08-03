@@ -45,6 +45,7 @@ const els = {
   folderList: document.getElementById("folderList"),
   backBtn: document.getElementById("backBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
+  equipmentBtn: document.getElementById("equipmentBtn"),
   uploadInput: document.getElementById("uploadInput"),
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
@@ -296,6 +297,10 @@ els.logoutBtn.addEventListener("click", async () => {
   currentUser = null;
   singleColumnMode = null;
   showLogin();
+});
+
+els.equipmentBtn.addEventListener("click", () => {
+  location.href = "/instruments/";
 });
 
 /* ---------- Профиль / управление пользователями ---------- */
