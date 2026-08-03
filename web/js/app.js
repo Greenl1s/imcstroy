@@ -610,6 +610,16 @@ function bindMenu() {
     }
   });
 
+  // Клик по любому пункту ВНУТРИ меню — тоже закрывает его (сам пункт
+  // при этом уже успевает сработать: его собственный onclick навешен
+  // отдельно, в bindEvents(), и выполняется раньше, чем событие дойдёт
+  // сюда всплытием).
+  dropdown.addEventListener('click', (event) => {
+    if (event.target.tagName === 'BUTTON') {
+      dropdown.classList.add('hidden');
+    }
+  });
+
   document.getElementById('exportAllButton').onclick = () => {
     dropdown.classList.add('hidden');
     exportAllInstruments();
