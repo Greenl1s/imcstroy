@@ -241,7 +241,7 @@ instruments.post('/', requireAdmin, async (req, res) => {
         `INSERT INTO instruments
            (inventory_no, name, serial_number, model, check_type, control_type,
             verification_date, valid_until, comment)
-         VALUES ($1, $2, $3, $4, coalesce($5::check_type, 'verification'), $6::control_type,
+         VALUES ($1, $2, $3, $4, coalesce($5::check_type, 'verification'), $6,
                  $7, $8, coalesce($9, ''))
          RETURNING *`,
         values
@@ -261,9 +261,10 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
   const updates = EDITABLE.filter((key) => key in (req.body || {}));
   if (!updates.length) return res.status(400).json({ error: 'Нечего обновлять' });
 
-  // Для колонок-перечислений (enum) явно указываем базе, как трактовать
-  // значение — иначе она не всегда правильно угадывает тип сама.
-  const ENUM_CASTS = { check_type: '::check_type', control_type: '::control_type' };
+  // check_type по-прежнему настоящий enum в базе — явно указываем тип.
+  // control_type теперь обычный текст (со ссылкой на таблицу control_types),
+  // ему такой каст больше не нужен.
+  const ENUM_CASTS = { check_type: '::check_type' };
   const set = updates
     .map((key, i) => `${key} = $${i + 2}${ENUM_CASTS[key] || ''}`)
     .join(', ');
@@ -922,6 +923,9 @@ instruments.post('/:id/restore', requireAdmin, (req, res) => transition(res, {
 /** Превращаем ошибки Postgres в понятный текст. */
 function humanize(err) {
   if (err.code === '23505') return 'Прибор с таким инвентарным номером уже есть';
+  if (err.code === '23503' && String(err.constraint).includes('control_type')) {
+    return 'Такой классификации не существует';
+  }
   if (err.code === '23514' && String(err.constraint).includes('dates_sane')) {
     return 'Дата поверки не может быть позже даты окончания её действия';
   }
