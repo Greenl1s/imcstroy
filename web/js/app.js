@@ -3,7 +3,7 @@ import { state, refresh, isAdmin } from './state.js';
 import { escapeHtml, CONTROL_TYPES } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN } from './instruments.js';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { displayNo, verificationBadge, verificationText, today } from './utils.js';
 
@@ -52,6 +52,8 @@ function bindEvents() {
       location.href = '/';
     };
   }
+
+  document.getElementById('pendingTransfersBtn').onclick = () => showPendingTransfersModal();
 
   document.getElementById('logoutButton').onclick = async () => {
     await api.logout();
@@ -300,7 +302,8 @@ function showBulkTransferForm() {
       </label>
       <label>Место использования<input name="taken_where"></label>
       <label>Доп. данные<input name="taken_extra" value="${escapeHtml(extraByUserId[others[0].id] || '')}"></label>
-      <div class="modal-actions"><button class="primary" type="submit">Передать (${ids.length})</button></div>
+      <p class="row-subtitle">Приборы перейдут к новому пользователю только после того, как он сам подтвердит приём.</p>
+      <div class="modal-actions"><button class="primary" type="submit">Предложить передачу (${ids.length})</button></div>
     </form>`);
 
   const form = document.getElementById('bulkTransferForm');
@@ -315,7 +318,7 @@ function showBulkTransferForm() {
     const result = await run(() => api.bulkTransfer(ids, data), { button });
     if (result === null) return;
     closeModal();
-    reportBulkResult(result, 'передано');
+    reportBulkResult(result, 'предложено к передаче');
     setMassMode(false);
     await refresh();
     renderRoute();

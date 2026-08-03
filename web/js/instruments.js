@@ -33,6 +33,7 @@ export function filteredInstruments() {
 }
 
 export function renderList(openCard) {
+  updatePendingTransfersIndicator();
   const list = filteredInstruments();
   const showCheckboxes = state.massMode;
 
@@ -118,7 +119,9 @@ export async function renderCard(id, goList) {
   } else if (item.status === 'busy') {
     if (isOwner || admin) {
       main += '<button class="primary" data-return>Вернуть</button>';
-      main += '<button class="secondary" data-transfer>Передать</button>';
+      if (!item.pending_transfer_to) {
+        main += '<button class="secondary" data-transfer>Передать</button>';
+      }
     } else {
       main += `<span class="badge warn">Занят: ${escapeHtml(item.taken_by_name || '')}</span>`;
     }
@@ -145,6 +148,7 @@ export async function renderCard(id, goList) {
       ${field('Место', item.taken_where)}
       ${field('Доп. данные', item.taken_extra)}
       ${field('Дата выдачи', item.taken_at)}
+      ${item.pending_transfer_to_name ? field('Ожидает подтверждения от', item.pending_transfer_to_name) : ''}
     </div>`;
   } else if (item.status === 'booked') {
     holder = `<div class="issued booked">
@@ -425,7 +429,8 @@ function showTransferForm(item) {
       ${select('to_user_id', 'Новый пользователь', '', others.map((u) => [u.id, u.username]))}
       ${input('taken_where', 'Место использования', item.taken_where || '')}
       ${input('taken_extra', 'Доп. данные', extraByUserId[others[0].id] || '')}
-      <div class="modal-actions"><button class="primary" type="submit">Передать</button></div>
+      <p class="row-subtitle">Прибор перейдёт к новому пользователю только после того, как он сам подтвердит приём.</p>
+      <div class="modal-actions"><button class="primary" type="submit">Предложить передачу</button></div>
     </form>`);
 
   const form = document.getElementById('transferForm');
@@ -438,7 +443,7 @@ function showTransferForm(item) {
     const button = event.target.querySelector('button[type="submit"]');
     const result = await run(
       () => api.transfer(item.id, formData(event.target)),
-      { button, success: 'Прибор передан' }
+      { button, success: 'Передача предложена, ожидает подтверждения' }
     );
     if (result === null) return;
     closeModal();
@@ -506,6 +511,90 @@ async function showHistory(item) {
     : '<div class="panel card">Событий пока нет</div>';
 
   openModal(`История: ${item.name}`, `<div class="list">${html}</div>`);
+}
+
+// ---------- Передачи, ожидающие подтверждения ----------
+
+/**
+ * Показывает/прячет кнопку-"уведомление" о передачах, ожидающих решения
+ * ИМЕННО текущего пользователя. Вызывается при каждом рендере списка —
+ * так индикатор всегда в актуальном состоянии, без отдельного опроса сервера.
+ */
+function updatePendingTransfersIndicator() {
+  const btn = document.getElementById('pendingTransfersBtn');
+  const countEl = document.getElementById('pendingTransfersCount');
+  if (!btn || !countEl || !state.currentUser) return;
+
+  const count = (state.instruments || []).filter(
+    (i) => Number(i.pending_transfer_to) === Number(state.currentUser.id)
+  ).length;
+
+  countEl.textContent = count;
+  btn.style.display = count > 0 ? 'inline-flex' : 'none';
+}
+
+function reportBulkTransferDecision(result, verb) {
+  const { succeeded = [], failed = [] } = result || {};
+  if (!failed.length) {
+    toast(`Готово: ${succeeded.length} — ${verb}`);
+  } else {
+    const details = failed.map((f) => f.message).join('; ');
+    toast(`${verb}: ${succeeded.length}. Не удалось: ${failed.length} — ${details}`, true);
+  }
+}
+
+/** Окно со списком приборов, которые кто-то передаёт текущему пользователю. */
+export function showPendingTransfersModal() {
+  const pending = (state.instruments || []).filter(
+    (i) => Number(i.pending_transfer_to) === Number(state.currentUser?.id)
+  );
+  if (!pending.length) {
+    return toast('Нет передач, ожидающих вашего решения');
+  }
+
+  const rows = pending.map((item) => `
+    <label class="row panel" style="display:flex; align-items:center; gap:10px;">
+      <input type="checkbox" class="pending-transfer-checkbox" value="${item.id}" checked>
+      <div style="flex:1;">
+        <div class="row-title">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
+        <div class="row-subtitle">
+          от ${escapeHtml(item.taken_by_name || '—')}${item.pending_transfer_where ? ` · место: ${escapeHtml(item.pending_transfer_where)}` : ''}
+        </div>
+      </div>
+    </label>`).join('');
+
+  openModal(`Передачи, ожидающие подтверждения (${pending.length})`, `
+    <div class="list">${rows}</div>
+    <div class="modal-actions">
+      <button class="danger" type="button" data-reject-selected>Отклонить выбранные</button>
+      <button class="primary" type="button" data-accept-selected>Принять выбранные</button>
+    </div>`);
+
+  const selectedIds = () =>
+    Array.from(document.querySelectorAll('.pending-transfer-checkbox:checked')).map((cb) => Number(cb.value));
+
+  document.querySelector('[data-accept-selected]').onclick = async (event) => {
+    const ids = selectedIds();
+    if (!ids.length) return toast('Ничего не выбрано', true);
+    const result = await run(() => api.bulkAcceptTransfer(ids), { button: event.currentTarget });
+    if (result === null) return;
+    closeModal();
+    reportBulkTransferDecision(result, 'принято');
+    await refresh();
+    window.dispatchEvent(new Event('app:refresh-route'));
+  };
+
+  document.querySelector('[data-reject-selected]').onclick = async (event) => {
+    const ids = selectedIds();
+    if (!ids.length) return toast('Ничего не выбрано', true);
+    if (!confirm(`Отклонить передачу ${ids.length} прибор(ов)? Они останутся у прежнего держателя.`)) return;
+    const result = await run(() => api.bulkRejectTransfer(ids), { button: event.currentTarget });
+    if (result === null) return;
+    closeModal();
+    reportBulkTransferDecision(result, 'отклонено');
+    await refresh();
+    window.dispatchEvent(new Event('app:refresh-route'));
+  };
 }
 
 // ---------- Прочее ----------

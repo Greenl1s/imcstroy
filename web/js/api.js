@@ -34,8 +34,11 @@ async function request(path, { method = 'GET', body } = {}) {
     throw new Error('Нет связи с сервером');
   }
 
-  // Токен протух или пользователя удалили — возвращаемся на экран входа
-  if (response.status === 401) {
+  // Токен протух или пользователя удалили — возвращаемся на экран входа.
+  // Сам /auth/login сюда не относится: там 401 означает просто неверный
+  // логин/пароль, а не протухшую сессию — его собственный текст ошибки
+  // ("Неверный логин или пароль") показываем как есть, ниже.
+  if (response.status === 401 && path !== '/auth/login') {
     setToken(null);
     window.dispatchEvent(new Event('app:unauthorized'));
     throw new Error('Сессия истекла, войдите заново');
@@ -65,7 +68,12 @@ export const api = {
     return data.user;
   },
 
-  logout() {
+  async logout() {
+    try {
+      await request('/auth/logout', { method: 'POST' });
+    } catch {
+      // не страшно, если сервер недоступен — локально всё равно выходим
+    }
     setToken(null);
   },
 
@@ -103,6 +111,10 @@ export const api = {
   bulkConfirmBooking: (ids) => request('/instruments/bulk/confirm-booking', { method: 'POST', body: { ids } }),
   bulkReturn: (ids) => request('/instruments/bulk/return', { method: 'POST', body: { ids } }),
   bulkTransfer: (ids, data) => request('/instruments/bulk/transfer', { method: 'POST', body: { ids, ...data } }),
+  acceptTransfer: (id) => request(`/instruments/${id}/accept-transfer`, { method: 'POST', body: {} }),
+  rejectTransfer: (id) => request(`/instruments/${id}/reject-transfer`, { method: 'POST', body: {} }),
+  bulkAcceptTransfer: (ids) => request('/instruments/bulk/accept-transfer', { method: 'POST', body: { ids } }),
+  bulkRejectTransfer: (ids) => request('/instruments/bulk/reject-transfer', { method: 'POST', body: { ids } }),
 
   // ---------- История ----------
   instrumentHistory: (id) => request(`/instruments/${id}/history`),
