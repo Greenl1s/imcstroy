@@ -553,18 +553,19 @@ export function showPendingTransfersModal() {
   }
 
   const rows = pending.map((item) => `
-    <label class="row panel" style="display:flex; align-items:center; gap:10px;">
-      <input type="checkbox" class="pending-transfer-checkbox" value="${item.id}" checked>
-      <div style="flex:1;">
-        <div class="row-title">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
-        <div class="row-subtitle">
+    <label style="display:flex; align-items:flex-start; gap:10px; padding:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer;">
+      <input type="checkbox" class="pending-transfer-checkbox" value="${item.id}" checked
+             style="margin-top:3px; flex-shrink:0; width:16px; height:16px; accent-color:var(--primary);">
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:600;">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
+        <div style="font-size:13px; color:var(--muted);">
           от ${escapeHtml(item.taken_by_name || '—')}${item.pending_transfer_where ? ` · место: ${escapeHtml(item.pending_transfer_where)}` : ''}
         </div>
       </div>
     </label>`).join('');
 
   openModal(`Передачи, ожидающие подтверждения (${pending.length})`, `
-    <div class="list">${rows}</div>
+    <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;">${rows}</div>
     <div class="modal-actions">
       <button class="danger" type="button" data-reject-selected>Отклонить выбранные</button>
       <button class="primary" type="button" data-accept-selected>Принять выбранные</button>
