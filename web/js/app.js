@@ -46,6 +46,10 @@ function bindEvents() {
 
   populateControlTypeFilter();
 
+  document.getElementById('backToIsuButton').onclick = () => {
+    location.href = '/';
+  };
+
   document.getElementById('logoutButton').onclick = async () => {
     await api.logout();
     state.currentUser = null;
