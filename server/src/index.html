@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Учет оборудования</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script>
+    // Адрес API. Раньше это был отдельный сайт (imcstroy.ru), теперь этот
+    // же сервис живёт на files.<домен>/instruments — Caddy сам срезает
+    // "/instruments" перед тем, как передать запрос бэкенду, поэтому сам
+    // бэкенд ничего менять не пришлось, только этот адрес во фронтенде.
+    window.API_BASE = '/instruments/api';
+  </script>
+</head>
+<body>
+  <main class="shell">
+    <!-- Авторизация -->
+    <section id="authView" class="auth-view">
+      <form id="loginForm" class="panel auth-panel">
+        <h1>Учет оборудования</h1>
+        <p>Войдите в систему</p>
+        <label>Логин<input id="loginUsername" autocomplete="username" required></label>
+        <label>Пароль<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">Войти</button>
+      </form>
+    </section>
+
+    <!-- Основное приложение -->
+    <section id="appView" class="hidden">
+      <header class="topbar">
+        <div>
+          <h1>Учет оборудования</h1>
+          <p id="syncStatus" class="sync-status"></p>
+        </div>
+        <div class="topbar-actions">
+          <button id="backToIsuButton" class="primary" type="button">← В ИСУ</button>
+          <span id="currentUserBadge" class="badge muted"></span>
+          <button id="themeToggle" class="secondary" type="button">Тёмная</button>
+          <button id="usersButton" class="secondary admin-only" type="button">Пользователи</button>
+          <button id="controlTypesButton" class="secondary admin-only" type="button">Классификации</button>
+          <button id="profileButton" class="secondary" type="button">Профиль</button>
+          <button id="logoutButton" class="danger" type="button">Выйти</button>
+          <div class="menu-wrapper">
+            <button id="menuButton" class="secondary icon-btn" type="button" aria-label="Меню">☰</button>
+            <div id="menuDropdown" class="menu-dropdown hidden">
+              <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
+              <button id="exportExpiringButton" type="button">Окончание поверок</button>
+              <button id="exportQrButton" type="button">Выгрузить все QR-коды</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Список -->
+      <section id="listScreen">
+        <div class="toolbar panel">
+          <input id="searchInput" class="search-full" placeholder="Поиск по названию, серийному номеру, модели или инв. номеру">
+
+          <div class="toolbar-bottom">
+            <div class="toolbar-buttons">
+              <button id="addInstrumentButton" class="primary admin-only" type="button">Добавить</button>
+              <button id="retiredButton" class="secondary admin-only" type="button">Списанные</button>
+              <button id="massToggleBtn" class="secondary" type="button">Выбрать</button>
+              <button id="pendingTransfersBtn" class="danger" type="button" style="display:none;">Передачи (<span id="pendingTransfersCount">0</span>)</button>
+              <div class="menu-wrapper" id="massActionsWrapper" style="display:none;">
+                <button id="massActionsBtn" class="primary" type="button">Действия ▾</button>
+                <div id="massActionsDropdown" class="menu-dropdown hidden">
+                  <button id="massIssueBtn" type="button">Взять выбранные</button>
+                  <button id="massBookBtn" type="button">Забронировать выбранные</button>
+                  <button id="massConfirmBookingBtn" type="button">Подтвердить бронирование</button>
+                  <button id="massReturnBtn" type="button">Вернуть выбранные</button>
+                  <button id="massCancelBookingBtn" type="button">Отменить бронирование</button>
+                  <button id="massTransferBtn" type="button">Передать выбранные</button>
+                  <button id="massRetireBtn" class="admin-only" type="button">Списать выбранные</button>
+                  <button id="massDeleteBtn" class="admin-only" type="button">Удалить выбранные</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="filters-row">
+              <div class="filter-chip">
+                <span class="filter-chip-label">Поверка/Калибровка</span>
+                <select id="verificationFilter">
+                  <option value="all">Все</option>
+                  <option value="valid">Есть</option>
+                  <option value="expired">Нет</option>
+                  <option value="none">Не требуется</option>
+                </select>
+              </div>
+
+              <div class="filter-chip">
+                <span class="filter-chip-label">Состояние</span>
+                <select id="conditionFilter">
+                  <option value="all">Все</option>
+                  <option value="free">Свободен</option>
+                  <option value="busy">Занят</option>
+                  <option value="booked">Забронирован</option>
+                </select>
+              </div>
+
+              <div class="filter-chip">
+                <span class="filter-chip-label">Классификация</span>
+                <select id="controlTypeFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
+                  <option value="all">Все</option>
+                  <option value="none">Не указано</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="instrumentList" class="list"></div>
+      </section>
+
+      <!-- Карточка прибора -->
+      <section id="cardScreen" class="hidden"></section>
+    </section>
+  </main>
+
+  <dialog id="modal"></dialog>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
