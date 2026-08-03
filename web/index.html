@@ -7,10 +7,11 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./style.css">
   <script>
-    // Адрес API. По умолчанию он на том же домене, что и сайт.
-    // Меняйте, только если фронтенд лежит отдельно от сервера:
-    // window.API_BASE = 'https://pribory.example.ru/api';
-    window.API_BASE = '/api';
+    // Адрес API. Раньше это был отдельный сайт (imcstroy.ru), теперь этот
+    // же сервис живёт на files.<домен>/instruments — Caddy сам срезает
+    // "/instruments" перед тем, как передать запрос бэкенду, поэтому сам
+    // бэкенд ничего менять не пришлось, только этот адрес во фронтенде.
+    window.API_BASE = '/instruments/api';
   </script>
 </head>
 <body>
