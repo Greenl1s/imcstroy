@@ -600,11 +600,13 @@ async function exportAllQrCodes() {
 }
 
 /**
- * Собирает QR-коды выбранных приборов в один Word-файл — сеткой по 3
- * в ряд, с красными линиями между ячейками (по ним удобно резать лист
- * после печати) и зелёной рамкой вокруг самого QR-кода. Под каждым —
- * номер прибора. Картинки в файле обычные, их можно потом менять/удалять
- * прямо в Word.
+ * Собирает QR-коды выбранных приборов в один Word-файл: лист альбомный,
+ * сетка 4×4 (16 QR на странице), красные линии делят лист на 8 равных
+ * частей — только по границам строк и ровно по центру (между 2-й и 3-й
+ * колонкой), внутри каждой половины QR-коды стоят по два без линии между
+ * ними. Заполнение по порядку — сначала левый верхний, дальше по строке.
+ * Если приборов больше 16 — начинается новая страница. Под каждым QR —
+ * номер прибора. Картинки обычные, их можно менять/удалять прямо в Word.
  */
 async function downloadSelectedQrAsWord() {
   const ids = selectedIds();
@@ -615,57 +617,95 @@ async function downloadSelectedQrAsWord() {
     .filter(Boolean);
   if (!items.length) return toast('Не удалось найти выбранные приборы', true);
 
-  const { Document, Packer, Table, TableRow, TableCell, Paragraph, ImageRun, TextRun, AlignmentType, BorderStyle, WidthType } = docx;
+  const {
+    Document, Packer, Table, TableRow, TableCell, Paragraph, ImageRun, TextRun,
+    AlignmentType, BorderStyle, WidthType, PageOrientation, HeightRule, VerticalAlign, PageBreak
+  } = docx;
 
-  const COLUMNS = 3;
-  const CELL_WIDTH_DXA = 3100; // ширина колонки (примерно 5.5 см)
-  const QR_SIZE_PX = 140;
-  const redBorder = { style: BorderStyle.SINGLE, size: 12, color: 'FF0000' };
-  const greenBorder = { style: BorderStyle.SINGLE, size: 8, color: '00AA00' };
+  // Параметры листа A4 и сетки подобраны и проверены вручную (визуальным
+  // рендером), чтобы 4 строки гарантированно помещались на одной странице
+  // и картинки нигде не заезжали на красные линии.
+  const PAGE_W = 11906, PAGE_H = 16838; // "портретные" значения — библиотека
+  const MARGIN = 400;                   // сама переставляет их местами для альбомной ориентации
+  const usableW = PAGE_H - MARGIN * 2;
+  const COLS = 4, ROWS = 4;
+  const PER_PAGE = COLS * ROWS;
+  const COL_WIDTH = Math.floor(usableW / COLS);
+  const ROW_HEIGHT = 2450;
+  const QR_SIZE_PX = 90;
 
-  async function buildCell(item) {
+  const red = { style: BorderStyle.SINGLE, size: 16, color: 'FF0000' };
+  const none = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+
+  async function buildCell(item, colIndex) {
+    // Вертикальная красная линия — строго по центру: между 2-й и 3-й
+    // колонкой (индексы 1 и 2 при отсчёте с нуля). Больше нигде по
+    // вертикали линий нет — только общие верх/низ каждой строки.
+    const rightBorder = colIndex === 1 ? red : none;
+    const leftBorder = colIndex === 2 ? red : none;
+
+    if (!item) {
+      return new TableCell({
+        width: { size: COL_WIDTH, type: WidthType.DXA },
+        borders: { top: red, bottom: red, left: leftBorder, right: rightBorder },
+        children: [new Paragraph('')],
+      });
+    }
+
     const blob = await renderQrPng(item);
     // Важно: docx-библиотека объявляет поддержку Blob напрямую, но на
     // практике (проверено) это даёт ПУСТУЮ картинку без единой ошибки —
     // поэтому переводим в Uint8Array сами, это гарантированно работает.
     const data = new Uint8Array(await blob.arrayBuffer());
+
     return new TableCell({
-      width: { size: CELL_WIDTH_DXA, type: WidthType.DXA },
-      borders: { top: redBorder, bottom: redBorder, left: redBorder, right: redBorder },
-      margins: { top: 150, bottom: 150, left: 100, right: 100 },
+      width: { size: COL_WIDTH, type: WidthType.DXA },
+      verticalAlign: VerticalAlign.CENTER,
+      borders: { top: red, bottom: red, left: leftBorder, right: rightBorder },
+      margins: { top: 60, bottom: 60, left: 50, right: 50 },
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          border: { top: greenBorder, bottom: greenBorder, left: greenBorder, right: greenBorder },
+          spacing: { after: 20 },
           children: [new ImageRun({ data, transformation: { width: QR_SIZE_PX, height: QR_SIZE_PX }, type: 'png' })],
         }),
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: displayNo(item), bold: true })],
+          children: [new TextRun({ text: displayNo(item), bold: true, size: 16 })],
         }),
       ],
     });
   }
 
-  function emptyCell() {
-    return new TableCell({
-      width: { size: CELL_WIDTH_DXA, type: WidthType.DXA },
-      borders: { top: redBorder, bottom: redBorder, left: redBorder, right: redBorder },
-      children: [new Paragraph('')],
-    });
-  }
-
   try {
-    const rows = [];
-    for (let i = 0; i < items.length; i += COLUMNS) {
-      const rowItems = items.slice(i, i + COLUMNS);
-      const cells = await Promise.all(rowItems.map(buildCell));
-      while (cells.length < COLUMNS) cells.push(emptyCell());
-      rows.push(new TableRow({ children: cells }));
+    const children = [];
+    for (let page = 0; page * PER_PAGE < items.length; page++) {
+      const pageItems = items.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
+      const rows = [];
+      for (let r = 0; r < ROWS; r++) {
+        const cells = [];
+        for (let c = 0; c < COLS; c++) {
+          cells.push(await buildCell(pageItems[r * COLS + c] || null, c));
+        }
+        rows.push(new TableRow({ children: cells, height: { value: ROW_HEIGHT, rule: HeightRule.EXACT } }));
+      }
+      children.push(new Table({ rows, width: { size: usableW, type: WidthType.DXA }, columnWidths: Array(COLS).fill(COL_WIDTH) }));
+      if ((page + 1) * PER_PAGE < items.length) {
+        children.push(new Paragraph({ children: [new PageBreak()] }));
+      }
     }
 
-    const table = new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } });
-    const wordDoc = new Document({ sections: [{ children: [table] }] });
+    const wordDoc = new Document({
+      sections: [{
+        properties: {
+          page: {
+            size: { orientation: PageOrientation.LANDSCAPE, width: PAGE_W, height: PAGE_H },
+            margin: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+          },
+        },
+        children,
+      }],
+    });
     const blob = await Packer.toBlob(wordDoc);
 
     const url = URL.createObjectURL(blob);
