@@ -53,10 +53,15 @@ export function renderList(openCard) {
             <div class="row-subtitle">
               ${escapeHtml(item.model || 'Модель не указана')} ·
               ${escapeHtml(item.serial_number || 'Серийный номер не указан')}
-              ${item.company_name ? ` · Привязан: ${escapeHtml(item.company_name)}` : ''}
             </div>
           </div>
           <div class="row-status-group">
+            ${item.company_name ? `
+            <div class="row-status-col">
+              <span class="badge muted" title="Привязан: ${escapeAttr(item.company_name)}" style="max-width:140px;">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name)}</span>
+              </span>
+            </div>` : ''}
             <div class="row-status-col">
               <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
             </div>
