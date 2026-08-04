@@ -224,7 +224,7 @@ instruments.delete('/:id/document', requireAdmin, async (req, res) => {
 
 export const EDITABLE = [
   'inventory_no', 'name', 'serial_number', 'model', 'check_type', 'control_type',
-  'verification_date', 'valid_until', 'comment'
+  'verification_date', 'valid_until', 'comment', 'company_code'
 ];
 
 /** Пустая строка из формы должна стать NULL, а не '' — иначе даты не сохранятся. */
@@ -240,9 +240,9 @@ instruments.post('/', requireAdmin, async (req, res) => {
       const { rows } = await client.query(
         `INSERT INTO instruments
            (inventory_no, name, serial_number, model, check_type, control_type,
-            verification_date, valid_until, comment)
+            verification_date, valid_until, comment, company_code)
          VALUES ($1, $2, $3, $4, coalesce($5::check_type, 'verification'), $6,
-                 $7, $8, coalesce($9, ''))
+                 $7, $8, coalesce($9, ''), $10)
          RETURNING *`,
         values
       );
@@ -925,6 +925,9 @@ function humanize(err) {
   if (err.code === '23505') return 'Прибор с таким инвентарным номером уже есть';
   if (err.code === '23503' && String(err.constraint).includes('control_type')) {
     return 'Такой классификации не существует';
+  }
+  if (err.code === '23503' && String(err.constraint).includes('company_code')) {
+    return 'Такой компании не существует';
   }
   if (err.code === '23514' && String(err.constraint).includes('dates_sane')) {
     return 'Дата поверки не может быть позже даты окончания её действия';
