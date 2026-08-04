@@ -45,6 +45,7 @@
               <div class="menu-divider admin-only"></div>
               <button id="usersButton" class="admin-only" type="button">Пользователи</button>
               <button id="controlTypesButton" class="admin-only" type="button">Классификации</button>
+              <button id="companiesButton" class="admin-only" type="button">Компании</button>
               <div class="menu-divider"></div>
               <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
               <button id="exportExpiringButton" type="button">Окончание поверок</button>
@@ -110,6 +111,14 @@
                 <select id="controlTypeFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
                   <option value="all">Все</option>
                   <option value="none">Не указано</option>
+                </select>
+              </div>
+
+              <div class="filter-chip">
+                <span class="filter-chip-label">Привязан</span>
+                <select id="companyFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
+                  <option value="all">Все</option>
+                  <option value="none">Не привязан</option>
                 </select>
               </div>
             </div>
