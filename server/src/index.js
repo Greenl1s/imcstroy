@@ -10,6 +10,7 @@ import { users } from './routes/users.js';
 import { instruments, EDITABLE } from './routes/instruments.js';
 import { history } from './routes/history.js';
 import { controlTypes } from './routes/controlTypes.js';
+import { companies } from './routes/companies.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -46,6 +47,7 @@ app.use('/api/users', users);
 app.use('/api/instruments', instruments);
 app.use('/api/history', history);
 app.use('/api/control-types', controlTypes);
+app.use('/api/companies', companies);
 
 app.use((req, res) => res.status(404).json({ error: 'Метод не найден' }));
 
