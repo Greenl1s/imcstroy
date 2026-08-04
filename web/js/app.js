@@ -1,9 +1,9 @@
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
-import { escapeHtml, getControlTypes, setControlTypes } from './utils.js';
+import { escapeHtml, getControlTypes, setControlTypes, getCompanies, setCompanies } from './utils.js';
 import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager } from './instruments.js';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { displayNo, verificationBadge, verificationText, today } from './utils.js';
 
@@ -64,6 +64,7 @@ function bindEvents() {
 
   document.getElementById('usersButton').onclick = showUsersManager;
   document.getElementById('controlTypesButton').onclick = showControlTypesManager;
+  document.getElementById('companiesButton').onclick = showCompaniesManager;
   document.getElementById('profileButton').onclick = () => showUserForm(state.currentUser);
   document.getElementById('addInstrumentButton').onclick = () => showInstrumentForm();
   document.getElementById('retiredButton').onclick = showRetired;
@@ -72,6 +73,7 @@ function bindEvents() {
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
   document.getElementById('conditionFilter').onchange = (e) => setFilter('condition', e.target.value);
   document.getElementById('controlTypeFilter').onchange = (e) => setFilter('controlType', e.target.value);
+  document.getElementById('companyFilter').onchange = (e) => setFilter('company', e.target.value);
 
   document.getElementById('massToggleBtn').onclick = () => setMassMode(!state.massMode);
   bindMassActionsMenu();
@@ -126,6 +128,9 @@ function bindEvents() {
   window.addEventListener('app:control-types-changed', () => {
     loadControlTypes();
   });
+  window.addEventListener('app:companies-changed', () => {
+    loadCompanies();
+  });
 }
 
 function setFilter(key, value) {
@@ -162,6 +167,32 @@ async function loadControlTypes() {
   populateControlTypeFilter();
 }
 
+/**
+ * Заполняет фильтр "Привязан" — та же логика, что и для классификаций:
+ * список приходит с сервера, "Все" и "Не привязан" уже есть в index.html,
+ * остальное стирается и вставляется заново при каждом вызове.
+ */
+function populateCompanyFilter() {
+  const select = document.getElementById('companyFilter');
+  const noneOption = select.querySelector('option[value="none"]');
+  select.querySelectorAll('option').forEach((opt) => {
+    if (opt.value !== 'all' && opt.value !== 'none') opt.remove();
+  });
+  for (const [code, name] of getCompanies()) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = name;
+    select.insertBefore(opt, noneOption);
+  }
+}
+
+async function loadCompanies() {
+  state.company = state.company || 'all';
+  const list = await api.listCompanies();
+  setCompanies(list);
+  populateCompanyFilter();
+}
+
 // ---------- Вход ----------
 
 async function onLogin(event) {
@@ -192,6 +223,7 @@ async function enterApp() {
   try {
     await refresh();
     await loadControlTypes();
+    await loadCompanies();
   } catch (err) {
     setSync('Ошибка загрузки');
     toast(err.message, true);

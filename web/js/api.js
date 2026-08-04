@@ -124,6 +124,11 @@ export const api = {
   createControlType: (data) => request('/control-types', { method: 'POST', body: data }),
   deleteControlType: (code) => request(`/control-types/${encodeURIComponent(code)}`, { method: 'DELETE' }),
 
+  // ---------- Компании (привязка) ----------
+  listCompanies: () => request('/companies'),
+  createCompany: (data) => request('/companies', { method: 'POST', body: data }),
+  deleteCompany: (code) => request(`/companies/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+
   // ---------- Фото ----------
   uploadPhoto: (id, dataUrl) =>
     request(`/instruments/${id}/photo`, { method: 'PUT', body: { data_url: dataUrl } }),

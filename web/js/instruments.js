@@ -5,7 +5,8 @@ import {
   verificationBadge, verificationText, verificationState,
   statusBadge, statusText, checkTypeText,
   dateFieldLabel, validUntilLabel, documentButtonLabel,
-  getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge
+  getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge,
+  getCompanies, companyName
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
@@ -28,7 +29,10 @@ export function filteredInstruments() {
     const matchesControlType = state.controlType === 'all' ||
       (state.controlType === 'none' ? !i.control_type : i.control_type === state.controlType);
 
-    return matchesSearch && matchesVerification && matchesStatus && matchesControlType;
+    const matchesCompany = state.company === 'all' ||
+      (state.company === 'none' ? !i.company_code : i.company_code === state.company);
+
+    return matchesSearch && matchesVerification && matchesStatus && matchesControlType && matchesCompany;
   });
 }
 
@@ -175,6 +179,7 @@ export async function renderCard(id, goList) {
         ${field('Модель', item.model)}
         ${field('Тип метрологического контроля', checkTypeText(item.check_type))}
         ${field('Классификация', controlTypeFull(item.control_type))}
+        ${field('Привязан', companyName(item.company_code))}
         ${field(dateFieldLabel(item.check_type), item.verification_date)}
         ${field(validUntilLabel(item.check_type), item.valid_until)}
       </div>
@@ -299,6 +304,8 @@ export function showInstrumentForm(item = null) {
       ])}
       ${select('control_type', 'Классификация', v.control_type || '',
         [['', 'Не указано'], ...getControlTypes().map(([code, full, short]) => [code, `${full} (${short})`])])}
+      ${select('company_code', 'Привязан', v.company_code || '',
+        [['', 'Не привязан'], ...getCompanies()])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
       ${input('comment', 'Комментарий', v.comment || '')}
@@ -568,6 +575,63 @@ function renderControlTypesManager(list) {
     if (result === null) return;
     await showControlTypesManager();
     window.dispatchEvent(new Event('app:control-types-changed'));
+  };
+}
+
+// ---------- Управление компаниями (только администратор) ----------
+
+export async function showCompaniesManager() {
+  openModal('Компании', '<p class="qr-caption">Загрузка...</p>');
+  let list;
+  try {
+    list = await api.listCompanies();
+  } catch (err) {
+    return openModal('Компании', `<p class="qr-caption">${escapeHtml(err.message)}</p>`);
+  }
+  renderCompaniesManager(list);
+}
+
+function renderCompaniesManager(list) {
+  const rows = list.map((c) => `
+    <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+      <div style="flex:1; min-width:0;">
+        <strong>${escapeHtml(c.name)}</strong>
+        <div style="font-size:12px; color:var(--muted);">код: ${escapeHtml(c.code)}</div>
+      </div>
+      <button type="button" class="danger" data-delete-code="${escapeHtml(c.code)}">Удалить</button>
+    </div>`).join('');
+
+  openModal('Компании', `
+    <div style="max-height:300px; overflow-y:auto;">${rows || '<p class="qr-caption">Пока пусто</p>'}</div>
+    <form id="addCompanyForm" class="form-grid" style="margin-top:16px;">
+      <div class="row-subtitle">Добавить новую</div>
+      ${input('code', 'Код (латиницей, без пробелов)', '')}
+      ${input('name', 'Название', '')}
+      <div class="modal-actions"><button class="primary" type="submit">Добавить</button></div>
+    </form>`);
+
+  document.querySelectorAll('[data-delete-code]').forEach((btn) => {
+    btn.onclick = async () => {
+      const code = btn.dataset.deleteCode;
+      if (!confirm(`Удалить компанию «${code}»?`)) return;
+      try {
+        await api.deleteCompany(code);
+        await showCompaniesManager();
+        window.dispatchEvent(new Event('app:companies-changed'));
+      } catch (err) {
+        alert('Не удалось удалить: ' + err.message);
+      }
+    };
+  });
+
+  document.getElementById('addCompanyForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const data = formData(event.target);
+    const result = await run(() => api.createCompany(data), { button, success: 'Компания добавлена' });
+    if (result === null) return;
+    await showCompaniesManager();
+    window.dispatchEvent(new Event('app:companies-changed'));
   };
 }
 

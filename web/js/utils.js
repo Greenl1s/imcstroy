@@ -121,3 +121,25 @@ export const controlTypeBadge = (code) =>
   ({ vik: 'ctrl-vik', ak: 'ctrl-ak', uzk: 'ctrl-uzk', kbt: 'ctrl-kbt',
      elk: 'ctrl-elk', rgk: 'ctrl-rgk',
      tk: 'ctrl-tk', gdz: 'ctrl-gdz' }[code] || 'muted');
+
+/**
+ * Компании, к которым привязаны приборы. Тоже хранится в базе и
+ * управляется администратором (см. showCompaniesManager в instruments.js).
+ * Заполняется один раз при входе через setCompanies().
+ */
+let COMPANIES_LIST = [];
+
+export function setCompanies(list) {
+  COMPANIES_LIST = Array.isArray(list) ? list : [];
+}
+
+/** Список в формате [code, name] — для формы/фильтра. */
+export function getCompanies() {
+  return COMPANIES_LIST.map((c) => [c.code, c.name]);
+}
+
+/** Название компании по коду, «Не привязан» — если код пустой/не найден. */
+export const companyName = (code) => {
+  const found = COMPANIES_LIST.find((c) => c.code === code);
+  return found ? found.name : 'Не привязан';
+};
