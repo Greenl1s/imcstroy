@@ -600,8 +600,8 @@ async function exportAllQrCodes() {
 }
 
 /**
- * Собирает QR-коды выбранных приборов в один Word-файл: лист альбомный,
- * сетка 4×4 (16 QR на странице), красные линии делят лист на 8 равных
+ * Собирает QR-коды выбранных приборов в один Word-файл: лист книжный
+ * (портретный), сетка 4×4 (16 QR на странице), красные линии делят лист на 8 равных
  * частей — только по границам строк и ровно по центру (между 2-й и 3-й
  * колонкой), внутри каждой половины QR-коды стоят по два без линии между
  * ними. Заполнение по порядку — сначала левый верхний, дальше по строке.
@@ -622,12 +622,11 @@ async function downloadSelectedQrAsWord() {
     AlignmentType, BorderStyle, WidthType, PageOrientation, HeightRule, VerticalAlign, PageBreak
   } = docx;
 
-  // Параметры листа A4 и сетки подобраны и проверены вручную (визуальным
-  // рендером), чтобы 4 строки гарантированно помещались на одной странице
-  // и картинки нигде не заезжали на красные линии.
-  const PAGE_W = 11906, PAGE_H = 16838; // "портретные" значения — библиотека
-  const MARGIN = 400;                   // сама переставляет их местами для альбомной ориентации
-  const usableW = PAGE_H - MARGIN * 2;
+  // Параметры листа A4 (книжная ориентация) и сетки подобраны и проверены
+  // вручную (визуальным рендером), чтобы 4 строки гарантированно помещались
+  // на одной странице и картинки нигде не заезжали на красные линии.
+  const PAGE_W = 11906, PAGE_H = 16838, MARGIN = 400;
+  const usableW = PAGE_W - MARGIN * 2;
   const COLS = 4, ROWS = 4;
   const PER_PAGE = COLS * ROWS;
   const COL_WIDTH = Math.floor(usableW / COLS);
@@ -699,7 +698,7 @@ async function downloadSelectedQrAsWord() {
       sections: [{
         properties: {
           page: {
-            size: { orientation: PageOrientation.LANDSCAPE, width: PAGE_W, height: PAGE_H },
+            size: { orientation: PageOrientation.PORTRAIT, width: PAGE_W, height: PAGE_H },
             margin: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
           },
         },
