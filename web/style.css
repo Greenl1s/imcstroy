@@ -217,27 +217,32 @@ body.dark-theme .warn  { background: #4a3115; color: #f0b96b; }
 body.dark-theme .bad   { background: #4a201c; color: #f0928a; }
 
 /* ---------- Классификация приборов ---------- */
-/* Три цветовые семьи, каждая — темнее внутри себя:
-   голубая: ВИК → АК → УЗК → КБТ; бирюзовая: ЭЛК → РГК; медно-коричневая: ТК → ГДЗ.
-   На самых тёмных ступенях фон становится насыщенным — там текст белый,
-   иначе тёмный текст перестаёт читаться на плотном цвете. */
-.badge.ctrl-vik { background: #cfe7f8; color: #0b5a90; }
-.badge.ctrl-ak  { background: #8ec3e4; color: #083a63; }
-.badge.ctrl-uzk { background: #4a93c9; color: #ffffff; }
-.badge.ctrl-kbt { background: #1f5c8f; color: #ffffff; }
-.badge.ctrl-elk { background: #c3ecdf; color: #0a6b52; }
-.badge.ctrl-rgk { background: #4fae8e; color: #ffffff; }
-.badge.ctrl-tk  { background: #f6ddb8; color: #8a5320; }
-.badge.ctrl-gdz { background: #c98a4a; color: #ffffff; }
+/* Единая палитра из 10 цветов — назначается автоматически по порядку
+   (первая по списку классификация/компания получает palette-0, вторая —
+   palette-1, и так далее, после десятой — снова с начала). Используется
+   и для классификаций, и для компаний, чтобы каждая новая запись сразу
+   получала свой цвет, а не оставалась серой. */
+.badge.palette-0 { background: #cfe7f8; color: #0b5a90; }
+.badge.palette-1 { background: #c3ecdf; color: #0a6b52; }
+.badge.palette-2 { background: #dcf3e3; color: #1e6b3f; }
+.badge.palette-3 { background: #e8f0c8; color: #5c6b1e; }
+.badge.palette-4 { background: #faf0c8; color: #8a6d0a; }
+.badge.palette-5 { background: #f6ddb8; color: #8a5320; }
+.badge.palette-6 { background: #f7dcda; color: #a3241c; }
+.badge.palette-7 { background: #f5dce9; color: #942f5f; }
+.badge.palette-8 { background: #e6e0f5; color: #5b3a94; }
+.badge.palette-9 { background: #dde2f5; color: #2e3d8a; }
 
-body.dark-theme .badge.ctrl-vik { background: #12314a; color: #7fb8e6; }
-body.dark-theme .badge.ctrl-ak  { background: #164166; color: #4fa0dd; }
-body.dark-theme .badge.ctrl-uzk { background: #1a5488; color: #bfe0f7; }
-body.dark-theme .badge.ctrl-kbt { background: #206aa8; color: #ffffff; }
-body.dark-theme .badge.ctrl-elk { background: #0f3327; color: #6fd4b0; }
-body.dark-theme .badge.ctrl-rgk { background: #16523d; color: #a8ecd3; }
-body.dark-theme .badge.ctrl-tk  { background: #3f2a12; color: #eab26e; }
-body.dark-theme .badge.ctrl-gdz { background: #6b4318; color: #fbdba9; }
+body.dark-theme .badge.palette-0 { background: #12314a; color: #7fb8e6; }
+body.dark-theme .badge.palette-1 { background: #0f3327; color: #6fd4b0; }
+body.dark-theme .badge.palette-2 { background: #123a25; color: #7fd9a0; }
+body.dark-theme .badge.palette-3 { background: #333f0f; color: #c3d97f; }
+body.dark-theme .badge.palette-4 { background: #40340a; color: #e0c064; }
+body.dark-theme .badge.palette-5 { background: #3f2a12; color: #eab26e; }
+body.dark-theme .badge.palette-6 { background: #3a1512; color: #e8887e; }
+body.dark-theme .badge.palette-7 { background: #3a1526; color: #e087b0; }
+body.dark-theme .badge.palette-8 { background: #251a3f; color: #b39ddb; }
+body.dark-theme .badge.palette-9 { background: #1a2140; color: #8fa0e0; }
 
 /* ---------- Карточка ---------- */
 .card { padding: 24px; }
