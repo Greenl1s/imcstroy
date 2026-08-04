@@ -86,11 +86,25 @@ export function readFileAsDataUrl(file) {
  * администратором (см. showControlTypesManager в instruments.js).
  * Заполняется один раз при входе через setControlTypes().
  */
+/**
+ * Единая палитра из 10 цветов на классификации и компании — назначается
+ * автоматически по порядку в списке (какой пришёл первым от сервера,
+ * тот и получает первый цвет). После 10-й записи цвета начинают
+ * повторяться — этого достаточно, вряд ли компаний/классификаций будет
+ * больше десятка одновременно.
+ */
+const PALETTE_SIZE = 10;
+function buildPalette(list) {
+  return Object.fromEntries(list.map((item, i) => [item.code, `palette-${i % PALETTE_SIZE}`]));
+}
+
 let CONTROL_TYPES_LIST = [];
+let CONTROL_TYPE_COLORS = {};
 
 /** Вызывается один раз при входе — после того как список получен с сервера. */
 export function setControlTypes(list) {
   CONTROL_TYPES_LIST = Array.isArray(list) ? list : [];
+  CONTROL_TYPE_COLORS = buildPalette(CONTROL_TYPES_LIST);
 }
 
 /** Список в старом формате [code, full_name, short_name] — для формы/фильтра. */
@@ -110,17 +124,8 @@ export const controlTypeFull = (code) => {
   return found ? found.full_name : 'Классификация не указана';
 };
 
-/**
- * CSS-класс цвета бейджа. У изначальных 8 классификаций — свои цвета
- * (три цветовые семьи, каждая темнее внутри себя). У новых, добавленных
- * администратором позже, отдельного цвета нет — используется нейтральный
- * "muted", как и для "не указано". Хотите свой цвет для новой классификации —
- * добавьте правило .ctrl-<код> в style.css и впишите его сюда.
- */
-export const controlTypeBadge = (code) =>
-  ({ vik: 'ctrl-vik', ak: 'ctrl-ak', uzk: 'ctrl-uzk', kbt: 'ctrl-kbt',
-     elk: 'ctrl-elk', rgk: 'ctrl-rgk',
-     tk: 'ctrl-tk', gdz: 'ctrl-gdz' }[code] || 'muted');
+/** CSS-класс цвета бейджа — свой у каждой классификации, «Не указано» остаётся серым. */
+export const controlTypeBadge = (code) => (code && CONTROL_TYPE_COLORS[code]) || 'muted';
 
 /**
  * Компании, к которым привязаны приборы. Тоже хранится в базе и
@@ -128,9 +133,11 @@ export const controlTypeBadge = (code) =>
  * Заполняется один раз при входе через setCompanies().
  */
 let COMPANIES_LIST = [];
+let COMPANY_COLORS = {};
 
 export function setCompanies(list) {
   COMPANIES_LIST = Array.isArray(list) ? list : [];
+  COMPANY_COLORS = buildPalette(COMPANIES_LIST);
 }
 
 /** Список в формате [code, name] — для формы/фильтра. */
@@ -143,3 +150,6 @@ export const companyName = (code) => {
   const found = COMPANIES_LIST.find((c) => c.code === code);
   return found ? found.name : 'Не привязан';
 };
+
+/** CSS-класс цвета бейджа — свой у каждой компании, «Не привязан» остаётся серым. */
+export const companyBadge = (code) => (code && COMPANY_COLORS[code]) || 'muted';

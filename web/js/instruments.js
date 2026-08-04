@@ -6,7 +6,7 @@ import {
   statusBadge, statusText, checkTypeText,
   dateFieldLabel, validUntilLabel, documentButtonLabel,
   getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge,
-  getCompanies, companyName
+  getCompanies, companyName, companyBadge
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
 
@@ -58,7 +58,7 @@ export function renderList(openCard) {
           <div class="row-status-group">
             ${item.company_name ? `
             <div class="row-status-col">
-              <span class="badge muted" title="Привязан: ${escapeAttr(item.company_name)}" style="max-width:140px;">
+              <span class="badge ${companyBadge(item.company_code)}" title="Привязан: ${escapeAttr(item.company_name)}" style="max-width:140px;">
                 <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name)}</span>
               </span>
             </div>` : ''}
