@@ -87,12 +87,10 @@
 
             <div class="filters-row">
               <div class="filter-chip">
-                <span class="filter-chip-label">Поверка/Калибровка</span>
-                <select id="verificationFilter">
+                <span class="filter-chip-label">Привязан</span>
+                <select id="companyFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
                   <option value="all">Все</option>
-                  <option value="valid">Есть</option>
-                  <option value="expired">Нет</option>
-                  <option value="none">Не требуется</option>
+                  <option value="none">Не привязан</option>
                 </select>
               </div>
 
@@ -115,10 +113,12 @@
               </div>
 
               <div class="filter-chip">
-                <span class="filter-chip-label">Привязан</span>
-                <select id="companyFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
+                <span class="filter-chip-label">Поверка/Калибровка</span>
+                <select id="verificationFilter">
                   <option value="all">Все</option>
-                  <option value="none">Не привязан</option>
+                  <option value="valid">Есть</option>
+                  <option value="expired">Нет</option>
+                  <option value="none">Не требуется</option>
                 </select>
               </div>
             </div>
