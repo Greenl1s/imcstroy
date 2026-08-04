@@ -108,6 +108,11 @@ function bindEvents() {
     showBulkTransferForm();
   };
 
+  document.getElementById('massQrWordBtn').onclick = () => {
+    closeMassActionsMenu();
+    downloadSelectedQrAsWord();
+  };
+
   // Сервер сказал, что сессия недействительна — возвращаемся ко входу
   window.addEventListener('app:unauthorized', () => {
     state.currentUser = null;
@@ -591,6 +596,90 @@ async function exportAllQrCodes() {
   } else {
     const details = failed.map((f) => `${f.name} (${f.message})`).join('; ');
     toast(`Выгружено: ${success}. Не удалось: ${failed.length} — ${details}`, true);
+  }
+}
+
+/**
+ * Собирает QR-коды выбранных приборов в один Word-файл — сеткой по 3
+ * в ряд, с красными линиями между ячейками (по ним удобно резать лист
+ * после печати) и зелёной рамкой вокруг самого QR-кода. Под каждым —
+ * номер прибора. Картинки в файле обычные, их можно потом менять/удалять
+ * прямо в Word.
+ */
+async function downloadSelectedQrAsWord() {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  const items = ids
+    .map((id) => (state.instruments || []).find((i) => i.id === id))
+    .filter(Boolean);
+  if (!items.length) return toast('Не удалось найти выбранные приборы', true);
+
+  const { Document, Packer, Table, TableRow, TableCell, Paragraph, ImageRun, TextRun, AlignmentType, BorderStyle, WidthType } = docx;
+
+  const COLUMNS = 3;
+  const CELL_WIDTH_DXA = 3100; // ширина колонки (примерно 5.5 см)
+  const QR_SIZE_PX = 140;
+  const redBorder = { style: BorderStyle.SINGLE, size: 12, color: 'FF0000' };
+  const greenBorder = { style: BorderStyle.SINGLE, size: 8, color: '00AA00' };
+
+  async function buildCell(item) {
+    const blob = await renderQrPng(item);
+    // Важно: docx-библиотека объявляет поддержку Blob напрямую, но на
+    // практике (проверено) это даёт ПУСТУЮ картинку без единой ошибки —
+    // поэтому переводим в Uint8Array сами, это гарантированно работает.
+    const data = new Uint8Array(await blob.arrayBuffer());
+    return new TableCell({
+      width: { size: CELL_WIDTH_DXA, type: WidthType.DXA },
+      borders: { top: redBorder, bottom: redBorder, left: redBorder, right: redBorder },
+      margins: { top: 150, bottom: 150, left: 100, right: 100 },
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          border: { top: greenBorder, bottom: greenBorder, left: greenBorder, right: greenBorder },
+          children: [new ImageRun({ data, transformation: { width: QR_SIZE_PX, height: QR_SIZE_PX }, type: 'png' })],
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: displayNo(item), bold: true })],
+        }),
+      ],
+    });
+  }
+
+  function emptyCell() {
+    return new TableCell({
+      width: { size: CELL_WIDTH_DXA, type: WidthType.DXA },
+      borders: { top: redBorder, bottom: redBorder, left: redBorder, right: redBorder },
+      children: [new Paragraph('')],
+    });
+  }
+
+  try {
+    const rows = [];
+    for (let i = 0; i < items.length; i += COLUMNS) {
+      const rowItems = items.slice(i, i + COLUMNS);
+      const cells = await Promise.all(rowItems.map(buildCell));
+      while (cells.length < COLUMNS) cells.push(emptyCell());
+      rows.push(new TableRow({ children: cells }));
+    }
+
+    const table = new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } });
+    const wordDoc = new Document({ sections: [{ children: [table] }] });
+    const blob = await Packer.toBlob(wordDoc);
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'QR-коды.docx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    toast(`Готово: ${items.length} QR-код(ов) в файле`);
+  } catch (err) {
+    toast('Не удалось собрать файл: ' + err.message, true);
   }
 }
 
