@@ -53,6 +53,7 @@ export function renderList(openCard) {
             <div class="row-subtitle">
               ${escapeHtml(item.model || 'Модель не указана')} ·
               ${escapeHtml(item.serial_number || 'Серийный номер не указан')}
+              ${item.company_name ? ` · Привязан: ${escapeHtml(item.company_name)}` : ''}
             </div>
           </div>
           <div class="row-status-group">
