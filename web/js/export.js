@@ -3,14 +3,14 @@ import { checkTypeText, today, controlTypeFull, companyName } from './utils.js';
 import { toast } from './ui.js';
 
 const HEADERS = [
-  '№ п/п', 'Наименование', 'Серийный номер', 'Модель', 'Классификация', 'Привязан',
+  '№ п/п', 'Наименование', 'Серийный номер', 'Модель',
   'Тип документа (Поверка/калибровка)', 'Дата поверки', 'Действительно до',
-  'Документ'
+  'Классификация', 'Владелец', 'Документ'
 ];
 
 const COLUMN_WIDTHS = [
-  { wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 30 }, { wch: 25 },
-  { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
+  { wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 22 },
+  { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 25 }, { wch: 12 }
 ];
 
 function toRows(items) {
@@ -19,11 +19,11 @@ function toRows(items) {
     item.name || '',
     item.serial_number || '',
     item.model || '',
-    controlTypeFull(item.control_type),
-    companyName(item.company_code),
     checkTypeText(item.check_type),
     item.verification_date || '',
     item.valid_until || '',
+    controlTypeFull(item.control_type),
+    companyName(item.company_code),
     item.has_document ? 'Есть' : '—'
   ]);
 }
