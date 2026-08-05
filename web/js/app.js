@@ -115,6 +115,11 @@ function bindEvents() {
     downloadSelectedQrAsWord();
   };
 
+  document.getElementById('massSetCompanyBtn').onclick = () => {
+    closeMassActionsMenu();
+    showBulkSetCompanyForm();
+  };
+
   // Сервер сказал, что сессия недействительна — возвращаемся ко входу
   window.addEventListener('app:unauthorized', () => {
     state.currentUser = null;
@@ -370,6 +375,39 @@ function showBulkTransferForm() {
     if (result === null) return;
     closeModal();
     reportBulkResult(result, 'предложено к передаче');
+    setMassMode(false);
+    await refresh();
+    renderRoute();
+  };
+}
+
+/** Назначает (или снимает) владельца сразу у нескольких выбранных приборов. */
+function showBulkSetCompanyForm() {
+  const ids = selectedIds();
+  if (!ids.length) return toast('Выберите приборы', true);
+
+  const companies = getCompanies();
+  if (!companies.length) return toast('Сначала добавьте хотя бы одну компанию (кнопка «Компании» в меню)', true);
+
+  openModal(`Назначить владельца (${ids.length})`, `
+    <form id="bulkSetCompanyForm" class="form-grid">
+      <label>Владелец
+        <select name="company_code">
+          <option value="">Не привязан</option>
+          ${companies.map(([code, name]) => `<option value="${escapeHtml(code)}">${escapeHtml(name)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="modal-actions"><button class="primary" type="submit">Назначить (${ids.length})</button></div>
+    </form>`);
+
+  document.getElementById('bulkSetCompanyForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const companyCode = new FormData(event.target).get('company_code') || null;
+    const result = await run(() => api.bulkSetCompany(ids, companyCode), { button });
+    if (result === null) return;
+    closeModal();
+    reportBulkResult(result, 'назначено');
     setMassMode(false);
     await refresh();
     renderRoute();

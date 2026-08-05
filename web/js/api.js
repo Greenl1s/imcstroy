@@ -115,6 +115,7 @@ export const api = {
   rejectTransfer: (id) => request(`/instruments/${id}/reject-transfer`, { method: 'POST', body: {} }),
   bulkAcceptTransfer: (ids) => request('/instruments/bulk/accept-transfer', { method: 'POST', body: { ids } }),
   bulkRejectTransfer: (ids) => request('/instruments/bulk/reject-transfer', { method: 'POST', body: { ids } }),
+  bulkSetCompany: (ids, company_code) => request('/instruments/bulk/set-company', { method: 'POST', body: { ids, company_code } }),
 
   // ---------- История ----------
   instrumentHistory: (id) => request(`/instruments/${id}/history`),

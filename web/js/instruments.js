@@ -56,21 +56,21 @@ export function renderList(openCard) {
             </div>
           </div>
           <div class="row-status-group">
-            ${item.company_name ? `
-            <div class="row-status-col">
-              <span class="badge ${companyBadge(item.company_code)}" title="Привязан: ${escapeAttr(item.company_name)}" style="max-width:140px;">
-                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name)}</span>
-              </span>
-            </div>` : ''}
-            <div class="row-status-col">
-              <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-            </div>
             <div class="row-status-col">
               <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
             </div>
             <div class="row-status-col">
               <span class="badge ${controlTypeBadge(item.control_type)}" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
             </div>
+            <div class="row-status-col">
+              <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
+            </div>
+            ${item.company_name ? `
+            <div class="row-status-col">
+              <span class="badge ${companyBadge(item.company_code)}" title="Владелец: ${escapeAttr(item.company_name)}" style="max-width:140px;">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name)}</span>
+              </span>
+            </div>` : ''}
           </div>
         </a>
       </div>`).join('')
@@ -177,7 +177,6 @@ export async function renderCard(id, goList) {
       <h1>${escapeHtml(item.name)}</h1>
       <div class="badges badges-left">
         <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-        <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
       </div>
       <div class="card-grid">
         ${field('Номер', displayNo(item))}
@@ -185,7 +184,7 @@ export async function renderCard(id, goList) {
         ${field('Модель', item.model)}
         ${field('Тип метрологического контроля', checkTypeText(item.check_type))}
         ${field('Классификация', controlTypeFull(item.control_type))}
-        ${field('Привязан', companyName(item.company_code))}
+        ${field('Владелец', companyName(item.company_code))}
         ${field(dateFieldLabel(item.check_type), item.verification_date)}
         ${field(validUntilLabel(item.check_type), item.valid_until)}
       </div>
@@ -310,7 +309,7 @@ export function showInstrumentForm(item = null) {
       ])}
       ${select('control_type', 'Классификация', v.control_type || '',
         [['', 'Не указано'], ...getControlTypes().map(([code, full, short]) => [code, `${full} (${short})`])])}
-      ${select('company_code', 'Привязан', v.company_code || '',
+      ${select('company_code', 'Владелец', v.company_code || '',
         [['', 'Не привязан'], ...getCompanies()])}
       ${input('verification_date', 'Дата поверки/калибровки', v.verification_date || '', 'date')}
       ${input('valid_until', 'Действительно до', v.valid_until || '', 'date')}
