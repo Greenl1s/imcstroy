@@ -692,6 +692,50 @@ instruments.post('/bulk/book', async (req, res) => {
 // ---------- Массовые операции (списание/удаление) ----------
 // Выполняются одной транзакцией: либо обрабатываются все приборы, либо ни одного.
 
+/**
+ * Привязать (или отвязать) сразу несколько приборов к компании-владельцу.
+ * Работает независимо от текущего статуса прибора — это просто смена
+ * учётного поля, а не операция выдачи/возврата.
+ */
+instruments.post('/bulk/set-company', async (req, res) => {
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
+
+  const companyCode = req.body?.company_code ? String(req.body.company_code) : null;
+
+  const succeeded = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const instrument = await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE instruments SET company_code = $2 WHERE id = $1 RETURNING *`,
+          [id, companyCode]
+        );
+        if (!rows.length) {
+          const err = new Error('Прибор не найден');
+          err.status = 404;
+          throw err;
+        }
+        const row = rows[0];
+        await logEvent(client, {
+          instrument: row, action: 'update', actor: req.user,
+          note: companyCode
+            ? `Назначен владелец (групповая операция)`
+            : `Владелец снят (групповая операция)`
+        });
+        return row;
+      });
+      succeeded.push({ id, name: instrument.name });
+    } catch (err) {
+      failed.push({ id, message: humanize(err) });
+    }
+  }
+
+  res.json({ ok: true, succeeded, failed });
+});
+
 instruments.post('/bulk/retire', requireAdmin, async (req, res) => {
   const ids = (req.body?.ids || []).map(Number).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
