@@ -174,9 +174,6 @@ export async function renderCard(id, goList) {
     <article class="panel card">
       ${item.has_photo ? '<div class="photo-box" id="photoBox">Загрузка фото...</div>' : ''}
       <h1>${escapeHtml(item.name)}</h1>
-      <div class="badges badges-left">
-        <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-      </div>
       <div class="card-grid">
         ${field('Номер', displayNo(item))}
         ${field('Серийный номер', item.serial_number)}
