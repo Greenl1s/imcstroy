@@ -79,6 +79,13 @@ export function renderList(openCard) {
   document.querySelectorAll('[data-open-id]').forEach((node) => {
     node.onclick = (event) => {
       event.preventDefault();
+      if (showCheckboxes) {
+        // В режиме "Выбрать" клик по любому месту строки переключает
+        // галочку — не обязательно попадать точно в маленький квадратик.
+        const checkbox = node.closest('.row')?.querySelector('.instrument-checkbox');
+        if (checkbox) checkbox.checked = !checkbox.checked;
+        return;
+      }
       openCard(node.dataset.openId);
     };
   });
