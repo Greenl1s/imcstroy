@@ -65,12 +65,11 @@ export function renderList(openCard) {
             <div class="row-status-col">
               <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
             </div>
-            ${item.company_name ? `
             <div class="row-status-col">
-              <span class="badge ${companyBadge(item.company_code)}" title="Владелец: ${escapeAttr(item.company_name)}" style="max-width:140px;">
-                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name)}</span>
+              <span class="badge ${item.company_code ? companyBadge(item.company_code) : 'muted'}" title="Владелец: ${escapeAttr(item.company_name || 'Не привязан')}" style="max-width:140px;">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name || 'Не привязан')}</span>
               </span>
-            </div>` : ''}
+            </div>
           </div>
         </a>
       </div>`).join('')
