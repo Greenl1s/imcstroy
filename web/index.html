@@ -78,6 +78,7 @@
                   <button id="massTransferBtn" type="button">Передать выбранные</button>
                   <div class="menu-divider"></div>
                   <button id="massQrWordBtn" type="button">Скачать QR-коды (Word)</button>
+                  <button id="massSetCompanyBtn" type="button">Назначить владельца</button>
                   <div class="menu-divider admin-only"></div>
                   <button id="massRetireBtn" class="admin-only" type="button">Списать выбранные</button>
                   <button id="massDeleteBtn" class="admin-only" type="button">Удалить выбранные</button>
@@ -86,14 +87,6 @@
             </div>
 
             <div class="filters-row">
-              <div class="filter-chip">
-                <span class="filter-chip-label">Привязан</span>
-                <select id="companyFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
-                  <option value="all">Все</option>
-                  <option value="none">Не привязан</option>
-                </select>
-              </div>
-
               <div class="filter-chip">
                 <span class="filter-chip-label">Состояние</span>
                 <select id="conditionFilter">
@@ -119,6 +112,14 @@
                   <option value="valid">Есть</option>
                   <option value="expired">Нет</option>
                   <option value="none">Не требуется</option>
+                </select>
+              </div>
+
+              <div class="filter-chip">
+                <span class="filter-chip-label">Владелец</span>
+                <select id="companyFilter" style="max-width:170px; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;">
+                  <option value="all">Все</option>
+                  <option value="none">Не привязан</option>
                 </select>
               </div>
             </div>
