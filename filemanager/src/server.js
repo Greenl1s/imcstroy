@@ -7,6 +7,7 @@ const path = require("path");
 const { ZipArchive } = require("archiver");
 
 const auth = require("./auth");
+const db = require("./db");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
@@ -270,23 +271,33 @@ app.get("/api/experts", auth.requireAuth, async (req, res) => {
   }
 });
 
-const GP_OUTPUT_DIR = "/Дела/Планы";
-
 app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
   try {
-    // Готовый файл всегда уходит строго в "Дела/Планы" — проверяем право
-    // на запись именно туда, а не на путь, присланный в запросе.
+    const body = req.body || {};
+
+    // ГП теперь всегда привязано к конкретному проекту — сохраняется
+    // прямо в его "Планирование проекта/ГП", а не в общую фиксированную папку.
+    const caseId = Number(body.caseId);
+    if (!caseId) {
+      return res.status(400).json({ message: "Выберите проект, к которому относится ГП" });
+    }
+    const { rows: caseRows } = await db.query("SELECT * FROM cases WHERE id = $1", [caseId]);
+    if (!caseRows.length) {
+      return res.status(404).json({ message: "Проект не найден" });
+    }
+    const kase = caseRows[0];
+    const gpOutputDir = `${kase.folder_path}/Планирование проекта/ГП`;
+
     if (req.user.role !== "admin") {
       if (!req.user.can_cases) {
         return res.status(403).json({ message: "Нет доступа к этому разделу" });
       }
       const rules = await folderAccess.getUserRules(req.user.id);
-      if (folderAccess.resolveAccess(rules, GP_OUTPUT_DIR) !== "write") {
-        return res.status(403).json({ message: "Нет прав на создание файлов в «Дела/Планы»" });
+      if (folderAccess.resolveAccess(rules, kase.folder_path) !== "write") {
+        return res.status(403).json({ message: "Нет прав на создание файлов в этом проекте" });
       }
     }
 
-    const body = req.body || {};
     const questions = Array.isArray(body.questions) ? body.questions.map((q) => String(q || "").trim()).filter(Boolean) : [];
     const expertPaths = Array.isArray(body.expertPaths) ? body.expertPaths : [];
 
@@ -329,16 +340,16 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
 
     const safeCaseNumber = String(body.caseNumber || "без номера").replace(/[\\/]/g, "-");
     const fileName = `ГП по делу № ${safeCaseNumber}.docx`;
-    const destDir = filesLib.safeResolve(GP_OUTPUT_DIR);
+    const destDir = filesLib.safeResolve(gpOutputDir);
     await fs.promises.mkdir(destDir, { recursive: true });
     const destPath = path.join(destDir, fileName);
 
     if (fs.existsSync(destPath)) {
-      return res.status(400).json({ message: "Файл с таким названием уже существует в «Дела/Планы»" });
+      return res.status(400).json({ message: "Файл с таким названием уже существует в этом проекте" });
     }
 
     await fs.promises.writeFile(destPath, buffer);
-    res.json({ ok: true, name: fileName, path: GP_OUTPUT_DIR + "/" + fileName });
+    res.json({ ok: true, name: fileName, path: gpOutputDir + "/" + fileName, caseFolderPath: kase.folder_path });
   } catch (err) {
     console.error("Не удалось создать ГП:", err);
     res.status(500).json({ message: "Не удалось создать документ: " + err.message });
