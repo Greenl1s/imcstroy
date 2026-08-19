@@ -297,13 +297,20 @@
         <label>Номер дела
           <input type="text" id="gpCaseNumber" placeholder="А40-000000/2026" required>
         </label>
-        <label>Суд, родительный падеж (для текста письма)
-          <input type="text" id="gpCourtGenitive" placeholder="Арбитражного суда города Москвы" required>
-        </label>
+        <!-- Суд в родительном падеже больше не заполняется руками — считается
+             автоматически из "Суд (шапка письма)". Поле оставлено в разметке
+             (скрыто), чтобы его значение по-прежнему уходило вместе с формой. -->
+        <input type="hidden" id="gpCourtGenitive">
       </div>
       <div class="add-user-row">
         <label style="flex:1 1 100%;">Вид экспертизы
-          <input type="text" id="gpExpertiseType" placeholder="строительно-технической" required>
+          <select id="gpExpertiseType" required>
+            <option value="">Выберите вид…</option>
+            <option value="строительно-технической">Строительно-техническая</option>
+            <option value="пожарно-технической">Пожарно-техническая</option>
+            <option value="землеустроительной">Землеустроительная</option>
+            <option value="почерковедческой">Почерковедческая</option>
+          </select>
         </label>
       </div>
 
@@ -315,18 +322,18 @@
 
       <div class="add-user-row">
         <label>Стоимость, цифрами
-          <input type="text" id="gpCostAmount" placeholder="6 400 000" required>
+          <input type="text" inputmode="numeric" id="gpCostAmount" placeholder="6400000" required>
         </label>
-        <label>Стоимость, прописью
-          <input type="text" id="gpCostWords" placeholder="Шесть миллионов четыреста тысяч" required>
+        <label>Стоимость, прописью (заполняется само)
+          <input type="text" id="gpCostWords" readonly tabindex="-1">
         </label>
       </div>
       <div class="add-user-row">
         <label>Срок, рабочих дней
-          <input type="text" id="gpTermDays" placeholder="60" required>
+          <input type="text" inputmode="numeric" id="gpTermDays" placeholder="20" required>
         </label>
-        <label>Срок, прописью
-          <input type="text" id="gpTermWords" placeholder="Шестьдесят" required>
+        <label>Срок, прописью (заполняется само)
+          <input type="text" id="gpTermWords" readonly tabindex="-1">
         </label>
       </div>
 

@@ -861,6 +861,84 @@ function renumberGpQuestions() {
 
 els.gpAddQuestionBtn.addEventListener("click", () => gpAddQuestionRow());
 
+/**
+ * Грубое, но практичное склонение названия суда в родительный падеж —
+ * покрывает подавляющее большинство реальных названий (они устроены
+ * очень единообразно: "[прилагательное(-ые)] суд [города Х]").
+ * Правила: "суд" -> "суда"; прилагательные на "-ый"/"-ой"/"-ий" -> "-ого"/"-его"
+ * (у нас в судебных названиях это почти всегда твёрдый вариант -> "-ого",
+ * включая "-ский" -> "-ского"). "города Х" не трогаем — оно уже в нужном
+ * виде, а имена городов эта функция сознательно не склоняет (отдельная,
+ * гораздо менее предсказуемая задача).
+ */
+function toGenitiveCourtName(nominative) {
+  const words = String(nominative || "").trim().split(/\s+/).filter(Boolean);
+  return words
+    .map((word, i) => {
+      const prevIsGorod = i > 0 && /^город[а]?$/i.test(words[i - 1]);
+      if (prevIsGorod || /^город[а]?$/i.test(word)) return word;
+      if (/^суд$/i.test(word)) return "суда";
+      if (/(ый|ой|ий)$/i.test(word)) return word.slice(0, -2) + "ого";
+      return word;
+    })
+    .join(" ");
+}
+
+/** Число прописью на русском (кардинальное числительное, именительный падеж). */
+function numberToWordsRu(num) {
+  num = Math.floor(Math.abs(Number(num) || 0));
+  if (!num) return "";
+
+  const ONES = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
+  const ONES_F = ["", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
+  const TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"];
+  const TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
+  const HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"];
+
+  function pluralForm(n, one, few, many) {
+    const n100 = Math.abs(n) % 100;
+    const n10 = n100 % 10;
+    if (n100 > 10 && n100 < 20) return many;
+    if (n10 > 1 && n10 < 5) return few;
+    if (n10 === 1) return one;
+    return many;
+  }
+
+  function threeDigits(n, feminine) {
+    const words = [];
+    const h = Math.floor(n / 100);
+    const t = n % 100;
+    if (h) words.push(HUNDREDS[h]);
+    if (t >= 10 && t < 20) {
+      words.push(TEENS[t - 10]);
+    } else {
+      const tens = Math.floor(t / 10);
+      const ones = t % 10;
+      if (tens) words.push(TENS[tens]);
+      if (ones) words.push(feminine ? ONES_F[ones] : ONES[ones]);
+    }
+    return words;
+  }
+
+  const scales = [
+    { div: 1000000000, one: "миллиард", few: "миллиарда", many: "миллиардов", feminine: false },
+    { div: 1000000, one: "миллион", few: "миллиона", many: "миллионов", feminine: false },
+    { div: 1000, one: "тысяча", few: "тысячи", many: "тысяч", feminine: true },
+    { div: 1, one: "", few: "", many: "", feminine: false },
+  ];
+
+  let remaining = num;
+  const parts = [];
+  for (const scale of scales) {
+    const value = Math.floor(remaining / scale.div);
+    remaining %= scale.div;
+    if (!value) continue;
+    parts.push(...threeDigits(value, scale.feminine));
+    if (scale.div > 1) parts.push(pluralForm(value, scale.one, scale.few, scale.many));
+  }
+  return parts.join(" ");
+}
+
 async function openGpForm() {
   els.gpForm.reset();
   els.gpQuestionsList.innerHTML = "";
@@ -870,7 +948,10 @@ async function openGpForm() {
   els.gpCaseSelect.innerHTML = '<option value="">Загрузка проектов…</option>';
   try {
     const allCases = await apiFetch("/api/cases");
-    const active = allCases.filter((c) => !c.is_cancelled);
+    // В список ГП не включаем архив целиком — ни отменённые, ни уже
+    // завершённые проекты (гарантийное письмо имеет смысл только для
+    // тех, что ещё в работе).
+    const active = allCases.filter((c) => !c.is_cancelled && c.stage !== "done");
     els.gpCaseSelect.innerHTML = '<option value="">Выберите проект…</option>' + active
       .map((c) => `<option value="${c.id}" data-court="${escapeHtml(c.court_or_customer || "")}" data-case-number="${escapeHtml(c.case_number || "")}">${escapeHtml(c.name)}</option>`)
       .join("");
@@ -899,19 +980,41 @@ async function openGpForm() {
   }
 }
 
+/** Суд для родительного падежа — тот же текст, что и в шапке, но без "В " спереди. */
+function updateCourtGenitive() {
+  const nominative = els.gpCourtHeader.value.replace(/^В\s+/i, "").trim();
+  els.gpCourtGenitive.value = toGenitiveCourtName(nominative);
+}
+
+function capitalizeFirst(s) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 // При выборе проекта подтягиваем то, что уже известно — суд и номер дела,
-// чтобы меньше вписывать вручную. Родительный падеж суда предзаполняем
-// тем же значением как черновик — падеж часто нужно поправить руками.
+// чтобы меньше вписывать вручную. Родительный падеж суда для текста письма
+// считается сам (см. toGenitiveCourtName) — отдельного поля для него в
+// форме больше нет.
 els.gpCaseSelect.addEventListener("change", () => {
   const opt = els.gpCaseSelect.selectedOptions[0];
   if (!opt || !opt.value) return;
   const court = opt.dataset.court || "";
   const caseNumber = opt.dataset.caseNumber || "";
-  if (court) {
-    els.gpCourtHeader.value = `В ${court}`;
-    els.gpCourtGenitive.value = court;
-  }
+  if (court) els.gpCourtHeader.value = `В ${court}`;
   if (caseNumber) els.gpCaseNumber.value = caseNumber;
+  updateCourtGenitive();
+});
+
+// Пересчитываем и при ручном редактировании шапки — на случай, если суд,
+// подставленный из проекта, нужно было поправить.
+els.gpCourtHeader.addEventListener("input", updateCourtGenitive);
+
+// Стоимость и срок — пользователь вводит только цифры, текстовая форма
+// (для документа) пишется сама, поле для неё нередактируемое.
+els.gpCostAmount.addEventListener("input", () => {
+  els.gpCostWords.value = capitalizeFirst(numberToWordsRu(els.gpCostAmount.value));
+});
+els.gpTermDays.addEventListener("input", () => {
+  els.gpTermWords.value = capitalizeFirst(numberToWordsRu(els.gpTermDays.value));
 });
 
 els.addGpBtn.addEventListener("click", openGpForm);
@@ -921,6 +1024,7 @@ els.gpCloseBtn.addEventListener("click", () => {
 
 els.gpForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  updateCourtGenitive();
 
   const caseId = els.gpCaseSelect.value;
   if (!caseId) {
