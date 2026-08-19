@@ -281,6 +281,14 @@
     </div>
     <form id="gpForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
       <div class="add-user-row">
+        <label style="flex:1 1 100%;">Проект
+          <select id="gpCaseSelect" required>
+            <option value="">Выберите проект…</option>
+          </select>
+        </label>
+      </div>
+      <p class="row-subtitle" style="margin:-6px 0 0;">Файл сохранится прямо в этот проект («Планирование проекта / ГП»). Суд и номер дела подставятся из карточки проекта — их можно поправить вручную.</p>
+      <div class="add-user-row">
         <label style="flex:1 1 100%;">Суд (шапка письма)
           <input type="text" id="gpCourtHeader" placeholder="В Арбитражный суд г. Москвы Судье Иванову И.И." required>
         </label>

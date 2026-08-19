@@ -117,6 +117,7 @@ const els = {
   gpOverlay: document.getElementById("gpOverlay"),
   gpCloseBtn: document.getElementById("gpCloseBtn"),
   gpForm: document.getElementById("gpForm"),
+  gpCaseSelect: document.getElementById("gpCaseSelect"),
   gpCourtHeader: document.getElementById("gpCourtHeader"),
   gpCaseNumber: document.getElementById("gpCaseNumber"),
   gpCourtGenitive: document.getElementById("gpCourtGenitive"),
@@ -866,6 +867,17 @@ async function openGpForm() {
   gpQuestionCount = 0;
   gpAddQuestionRow();
 
+  els.gpCaseSelect.innerHTML = '<option value="">Загрузка проектов…</option>';
+  try {
+    const allCases = await apiFetch("/api/cases");
+    const active = allCases.filter((c) => !c.is_cancelled);
+    els.gpCaseSelect.innerHTML = '<option value="">Выберите проект…</option>' + active
+      .map((c) => `<option value="${c.id}" data-court="${escapeHtml(c.court_or_customer || "")}" data-case-number="${escapeHtml(c.case_number || "")}">${escapeHtml(c.name)}</option>`)
+      .join("");
+  } catch {
+    els.gpCaseSelect.innerHTML = '<option value="">Не удалось загрузить список проектов</option>';
+  }
+
   els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
   els.gpOverlay.classList.remove("hidden");
 
@@ -887,6 +899,21 @@ async function openGpForm() {
   }
 }
 
+// При выборе проекта подтягиваем то, что уже известно — суд и номер дела,
+// чтобы меньше вписывать вручную. Родительный падеж суда предзаполняем
+// тем же значением как черновик — падеж часто нужно поправить руками.
+els.gpCaseSelect.addEventListener("change", () => {
+  const opt = els.gpCaseSelect.selectedOptions[0];
+  if (!opt || !opt.value) return;
+  const court = opt.dataset.court || "";
+  const caseNumber = opt.dataset.caseNumber || "";
+  if (court) {
+    els.gpCourtHeader.value = `В ${court}`;
+    els.gpCourtGenitive.value = court;
+  }
+  if (caseNumber) els.gpCaseNumber.value = caseNumber;
+});
+
 els.addGpBtn.addEventListener("click", openGpForm);
 els.gpCloseBtn.addEventListener("click", () => {
   els.gpOverlay.classList.add("hidden");
@@ -894,6 +921,12 @@ els.gpCloseBtn.addEventListener("click", () => {
 
 els.gpForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  const caseId = els.gpCaseSelect.value;
+  if (!caseId) {
+    alert("Выберите проект, к которому относится ГП");
+    return;
+  }
 
   const questions = [...els.gpQuestionsList.querySelectorAll(".gp-question-input")]
     .map((t) => t.value.trim())
@@ -918,6 +951,7 @@ els.gpForm.addEventListener("submit", async (e) => {
     const result = await apiFetch("/api/gp/generate", {
       method: "POST",
       body: JSON.stringify({
+        caseId,
         courtHeader: els.gpCourtHeader.value.trim(),
         caseNumber: els.gpCaseNumber.value.trim(),
         courtGenitive: els.gpCourtGenitive.value.trim(),
@@ -931,9 +965,9 @@ els.gpForm.addEventListener("submit", async (e) => {
       }),
     });
     els.gpOverlay.classList.add("hidden");
-    alert(`Готово! Файл «${result.name}» создан в «Дела/Планы».`);
-    // Обновим колонку "Дела" на случай, если сейчас открыта именно "Планы"
-    if (currentPath === CASES_PATH + "/Планы" || currentPath === "/Дела/Планы") {
+    alert(`Готово! Файл «${result.name}» создан в проекте.`);
+    // Обновим колонку "Дела", если сейчас открыта именно папка этого проекта
+    if (currentPath === result.caseFolderPath) {
       renderFolder(currentPath);
     } else {
       loadColumnList("cases");
