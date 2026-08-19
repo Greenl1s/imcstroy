@@ -121,6 +121,7 @@ const els = {
   gpCourtHeader: document.getElementById("gpCourtHeader"),
   gpCaseNumber: document.getElementById("gpCaseNumber"),
   gpCourtGenitive: document.getElementById("gpCourtGenitive"),
+  gpCourtRaw: document.getElementById("gpCourtRaw"),
   gpExpertiseType: document.getElementById("gpExpertiseType"),
   gpQuestionsList: document.getElementById("gpQuestionsList"),
   gpAddQuestionBtn: document.getElementById("gpAddQuestionBtn"),
@@ -872,11 +873,28 @@ els.gpAddQuestionBtn.addEventListener("click", () => gpAddQuestionRow());
  * гораздо менее предсказуемая задача).
  */
 function toGenitiveCourtName(nominative) {
+  // Эти слова в названии суда почти всегда уже стоят в родительном падеже
+  // ("суд Калужской ОБЛАСТИ", "суд Приморского КРАЯ") — то есть и они сами,
+  // и прилагательное перед ними трогать не нужно, иначе род собьётся
+  // (у "область"/"республика" — женский род, а не как у "суда" мужской).
+  const ADMIN_NOUN = /^(области|края|округа|района|республики|города)$/i;
+
   const words = String(nominative || "").trim().split(/\s+/).filter(Boolean);
+  const skip = new Array(words.length).fill(false);
+  words.forEach((w, i) => {
+    if (ADMIN_NOUN.test(w)) {
+      skip[i] = true;
+      // Прилагательное перед административной единицей ("Калужской") не
+      // трогаем — а вот если перед ней стоит "суд" (не прилагательное),
+      // его по-прежнему нужно нормально просклонять в "суда".
+      if (i > 0 && /(ый|ой|ий)$/i.test(words[i - 1])) skip[i - 1] = true;
+      if (i < words.length - 1) skip[i + 1] = true; // имя после него ("Москвы")
+    }
+  });
+
   return words
     .map((word, i) => {
-      const prevIsGorod = i > 0 && /^город[а]?$/i.test(words[i - 1]);
-      if (prevIsGorod || /^город[а]?$/i.test(word)) return word;
+      if (skip[i]) return word;
       if (/^суд$/i.test(word)) return "суда";
       if (/(ый|ой|ий)$/i.test(word)) return word.slice(0, -2) + "ого";
       return word;
@@ -980,9 +998,15 @@ async function openGpForm() {
   }
 }
 
-/** Суд для родительного падежа — тот же текст, что и в шапке, но без "В " спереди. */
+/**
+ * Суд для родительного падежа. Предпочитаем "чистое" название, сохранённое
+ * при выборе проекта (gpCourtRaw) — так склонение не зависит от того, что
+ * ещё дописано в шапку (заказчик, судья). Если проект не выбирали и шапка
+ * заполнена вручную — берём первую строку шапки без "В " в начале.
+ */
 function updateCourtGenitive() {
-  const nominative = els.gpCourtHeader.value.replace(/^В\s+/i, "").trim();
+  const raw = els.gpCourtRaw.value.trim();
+  const nominative = raw || els.gpCourtHeader.value.split("\n")[0].replace(/^В\s+/i, "").trim();
   els.gpCourtGenitive.value = toGenitiveCourtName(nominative);
 }
 
@@ -999,14 +1023,20 @@ els.gpCaseSelect.addEventListener("change", () => {
   if (!opt || !opt.value) return;
   const court = opt.dataset.court || "";
   const caseNumber = opt.dataset.caseNumber || "";
-  if (court) els.gpCourtHeader.value = `В ${court}`;
+  if (court) {
+    els.gpCourtHeader.value = `В ${court}`;
+    els.gpCourtRaw.value = court;
+  }
   if (caseNumber) els.gpCaseNumber.value = caseNumber;
   updateCourtGenitive();
 });
 
-// Пересчитываем и при ручном редактировании шапки — на случай, если суд,
-// подставленный из проекта, нужно было поправить.
-els.gpCourtHeader.addEventListener("input", updateCourtGenitive);
+// Пересчитываем и при ручном редактировании шапки — но только если
+// пользователь стёр "чистое" название (иначе правки в остальных строках
+// шапки — заказчик, судья — никак не должны сбивать уже верное склонение).
+els.gpCourtHeader.addEventListener("input", () => {
+  if (!els.gpCourtRaw.value.trim()) updateCourtGenitive();
+});
 
 // Стоимость и срок — пользователь вводит только цифры, текстовая форма
 // (для документа) пишется сама, поле для неё нередактируемое.

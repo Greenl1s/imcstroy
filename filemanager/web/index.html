@@ -289,8 +289,8 @@
       </div>
       <p class="row-subtitle" style="margin:-6px 0 0;">Файл сохранится прямо в этот проект («Планирование проекта / ГП»). Суд и номер дела подставятся из карточки проекта — их можно поправить вручную.</p>
       <div class="add-user-row">
-        <label style="flex:1 1 100%;">Суд (шапка письма)
-          <input type="text" id="gpCourtHeader" placeholder="В Арбитражный суд г. Москвы Судье Иванову И.И." required>
+        <label style="flex:1 1 100%;">Суд (шапка письма) — можно несколько строк
+          <textarea id="gpCourtHeader" rows="3" placeholder="В ООО «Заказчик»&#10;В Арбитражный суд Калужской области&#10;Судье Ивановой Е.В." required style="resize:vertical; font-family:inherit; font-size:inherit; padding:8px 10px; border:1px solid var(--border); border-radius:8px;"></textarea>
         </label>
       </div>
       <div class="add-user-row">
@@ -301,6 +301,10 @@
              автоматически из "Суд (шапка письма)". Поле оставлено в разметке
              (скрыто), чтобы его значение по-прежнему уходило вместе с формой. -->
         <input type="hidden" id="gpCourtGenitive">
+        <!-- "Чистое" название суда (без "В", без судьи/заказчика) — источник
+             для автоматического склонения, не зависит от того, что ещё
+             дописано в многострочную шапку письма. -->
+        <input type="hidden" id="gpCourtRaw">
       </div>
       <div class="add-user-row">
         <label style="flex:1 1 100%;">Вид экспертизы
