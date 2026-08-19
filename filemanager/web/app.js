@@ -46,21 +46,11 @@ const els = {
   backBtn: document.getElementById("backBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   equipmentBtn: document.getElementById("equipmentBtn"),
-  projectsBtn: document.getElementById("projectsBtn"),
-  projectsView: document.getElementById("projectsView"),
-  projectsBackBtn: document.getElementById("projectsBackBtn"),
-  projectsCount: document.getElementById("projectsCount"),
-  projectsTable: document.getElementById("projectsTable"),
-  projectStageFilter: document.getElementById("projectStageFilter"),
-  projectTypeFilter: document.getElementById("projectTypeFilter"),
   addProjectBtn: document.getElementById("addProjectBtn"),
   projectFormOverlay: document.getElementById("projectFormOverlay"),
   projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
   projectForm: document.getElementById("projectForm"),
   projectFormError: document.getElementById("projectFormError"),
-  projectDetailOverlay: document.getElementById("projectDetailOverlay"),
-  projectDetailCloseBtn: document.getElementById("projectDetailCloseBtn"),
-  projectDetailError: document.getElementById("projectDetailError"),
   uploadInput: document.getElementById("uploadInput"),
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
@@ -248,7 +238,6 @@ function applyPermissionsUI() {
   document.querySelector('[data-col="tools"]').classList.toggle("hidden", !p.can_tools);
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
-  els.projectsBtn.classList.toggle("hidden", !p.can_cases);
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
@@ -1031,7 +1020,6 @@ function escapeHtml(str) {
 
 const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
 const NEXT_STAGE = { plan: "active", active: "control", control: "done" };
-const TYPE_LABEL = { expertise: "Экспертиза", research: "НИ" };
 
 function stageBadgeHtml(project) {
   if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
@@ -1039,69 +1027,86 @@ function stageBadgeHtml(project) {
   return `<span class="stage-badge ${cls}">${STAGE_LABEL[project.stage]}</span>`;
 }
 
-function showProjectsUI() {
-  els.columnsView.classList.add("hidden");
-  els.folderView.classList.add("hidden");
-  els.projectsView.classList.remove("hidden");
-  loadProjects();
-}
-
-els.projectsBtn.addEventListener("click", showProjectsUI);
-els.projectsBackBtn.addEventListener("click", () => {
-  els.projectsView.classList.add("hidden");
-  showColumnsUI();
-});
-
-let allProjects = [];
-
-async function loadProjects() {
-  try {
-    allProjects = await apiFetch("/api/cases");
-    renderProjectsList();
-  } catch (err) {
-    els.projectsTable.innerHTML = `<div class="empty-hint" style="padding:2rem;">${err.message}</div>`;
-  }
-}
-
-function renderProjectsList() {
-  const stageFilter = els.projectStageFilter.value;
-  const typeFilter = els.projectTypeFilter.value;
-
-  const filtered = allProjects.filter((p) => {
-    const matchesStage = stageFilter === "all"
-      ? true
-      : stageFilter === "cancelled" ? p.is_cancelled : (!p.is_cancelled && p.stage === stageFilter);
-    const matchesType = typeFilter === "all" || p.type === typeFilter;
-    return matchesStage && matchesType;
-  });
-
-  els.projectsCount.textContent = `Всего проектов: ${allProjects.length} · Показано: ${filtered.length}`;
-
-  if (!filtered.length) {
-    els.projectsTable.innerHTML = `<div class="empty-hint" style="padding:2rem;">Проектов пока нет</div>`;
+/**
+ * Проверяет, является ли открытая сейчас в "Дела" папка отслеживаемым
+ * проектом (экспертизой/НИ) — и если да, показывает баннер прямо в шапке
+ * папки с кнопками "Перевести на стадию" / "Отменить". Если это обычная
+ * папка (или мы вне "Дела" вообще) — баннер скрыт, всё выглядит как
+ * обычный файловый менеджер, ничего лишнего не мешает.
+ */
+async function updateCaseBanner(path) {
+  const banner = document.getElementById("caseBanner");
+  if (!path.startsWith(CASES_PATH)) {
+    banner.classList.add("hidden");
     return;
   }
-
-  els.projectsTable.innerHTML = filtered
-    .map((p) => `
-      <div class="project-row" data-id="${p.id}">
-        <div>
-          <div class="proj-name">${escapeHtml(p.name)}</div>
-          <div class="proj-sub">${p.case_number ? escapeHtml(p.case_number) + " · " : ""}${p.year || ""}</div>
-        </div>
-        <div>${stageBadgeHtml(p)}</div>
-        <div>${escapeHtml(p.court_or_customer || "—")}</div>
-        <div>${escapeHtml(p.manager_name || "—")}</div>
-      </div>`)
-    .join("");
-
-  els.projectsTable.querySelectorAll(".project-row").forEach((row) => {
-    row.addEventListener("click", () => openProjectDetail(Number(row.dataset.id)));
-  });
+  try {
+    const project = await apiFetch(`/api/cases/by-path?path=${encodeURIComponent(path)}`);
+    renderCaseBanner(project);
+  } catch {
+    banner.classList.add("hidden");
+  }
 }
 
-els.projectStageFilter.addEventListener("change", renderProjectsList);
-els.projectTypeFilter.addEventListener("change", renderProjectsList);
+function renderCaseBanner(project) {
+  const banner = document.getElementById("caseBanner");
+  const next = NEXT_STAGE[project.stage];
+
+  const actions = [];
+  if (!project.is_cancelled && next) {
+    actions.push(`<button class="upload-btn" id="caseAdvanceBtn" type="button">Перевести на стадию «${STAGE_LABEL[next]}» →</button>`);
+  }
+  if (!project.is_cancelled) {
+    actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
+  }
+
+  banner.innerHTML = `
+    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong></div>
+    <div class="case-banner-actions">${actions.join("")}</div>
+  `;
+  banner.classList.remove("hidden");
+  banner.dataset.caseId = project.id;
+
+  const advanceBtn = document.getElementById("caseAdvanceBtn");
+  if (advanceBtn) {
+    advanceBtn.addEventListener("click", async () => {
+      advanceBtn.disabled = true;
+      try {
+        await apiFetch(`/api/cases/${project.id}/advance`, { method: "POST" });
+        // Баннер виден только когда стоишь ровно в папке проекта — значит
+        // этот самый путь только что переехал и больше не существует.
+        // Поднимаемся к колонкам и обновляем список "Дела".
+        goToColumns(true);
+        loadColumnList("cases");
+      } catch (err) {
+        alert("Не удалось перевести на следующую стадию: " + err.message);
+      } finally {
+        advanceBtn.disabled = false;
+      }
+    });
+  }
+
+  const cancelBtn = document.getElementById("caseCancelBtn");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", async () => {
+      const reason = prompt("Причина отмены проекта:");
+      if (!reason || !reason.trim()) return;
+      cancelBtn.disabled = true;
+      try {
+        await apiFetch(`/api/cases/${project.id}/cancel`, {
+          method: "POST",
+          body: JSON.stringify({ reason: reason.trim() }),
+        });
+        goToColumns(true);
+        loadColumnList("cases");
+      } catch (err) {
+        alert("Не удалось отменить проект: " + err.message);
+      } finally {
+        cancelBtn.disabled = false;
+      }
+    });
+  }
+}
 
 /* ---- Форма создания проекта ---- */
 
@@ -1151,84 +1156,15 @@ els.projectForm.addEventListener("submit", async (event) => {
   try {
     await apiFetch("/api/cases", { method: "POST", body: JSON.stringify(body) });
     els.projectFormOverlay.classList.add("hidden");
-    await loadProjects();
+    // Обновляем список: если мы сейчас внутри "Дела" — перерисовываем
+    // открытую папку, иначе (на экране колонок) — саму колонку "Дела".
+    if (currentPath && currentPath.startsWith(CASES_PATH)) {
+      renderFolder(currentPath);
+    } else {
+      loadColumnList("cases");
+    }
   } catch (err) {
     els.projectFormError.textContent = err.message;
-  }
-});
-
-/* ---- Карточка проекта (детали, смена стадии, отмена) ---- */
-
-let currentProjectId = null;
-
-async function openProjectDetail(id) {
-  currentProjectId = id;
-  els.projectDetailError.textContent = "";
-  await refreshProjectDetail();
-  els.projectDetailOverlay.classList.remove("hidden");
-}
-
-async function refreshProjectDetail() {
-  const project = await apiFetch(`/api/cases/${currentProjectId}`);
-  const history = await apiFetch(`/api/cases/${currentProjectId}/history`);
-
-  document.getElementById("pdName").textContent = project.name;
-  document.getElementById("pdStageBadge").innerHTML = stageBadgeHtml(project);
-  document.getElementById("pdCourt").textContent = project.court_or_customer || "—";
-  document.getElementById("pdCaseNumber").textContent = project.case_number || "—";
-  document.getElementById("pdManager").textContent = project.manager_name || "—";
-  document.getElementById("pdExperts").textContent = project.experts || "—";
-  document.getElementById("pdYear").textContent = project.year || "—";
-  document.getElementById("pdFolder").textContent = project.folder_path || "—";
-  document.getElementById("pdDescription").textContent = project.description || "";
-
-  document.getElementById("pdHistory").innerHTML = history
-    .map((h) => `<div class="proj-sub">${new Date(h.created_at).toLocaleString("ru")} — ${escapeHtml(h.note || h.action)}${h.actor_name ? " (" + escapeHtml(h.actor_name) + ")" : ""}</div>`)
-    .join("") || '<div class="proj-sub">Пока пусто</div>';
-
-  const advanceBtn = document.getElementById("pdAdvanceBtn");
-  const cancelBtn = document.getElementById("pdCancelBtn");
-  if (project.is_cancelled) {
-    advanceBtn.classList.add("hidden");
-    cancelBtn.classList.add("hidden");
-  } else {
-    const next = NEXT_STAGE[project.stage];
-    if (next) {
-      advanceBtn.classList.remove("hidden");
-      advanceBtn.textContent = `Перевести на стадию «${STAGE_LABEL[next]}» →`;
-    } else {
-      advanceBtn.classList.add("hidden");
-    }
-    cancelBtn.classList.remove("hidden");
-  }
-}
-
-els.projectDetailCloseBtn.addEventListener("click", () => els.projectDetailOverlay.classList.add("hidden"));
-
-document.getElementById("pdAdvanceBtn").addEventListener("click", async () => {
-  els.projectDetailError.textContent = "";
-  try {
-    await apiFetch(`/api/cases/${currentProjectId}/advance`, { method: "POST" });
-    await refreshProjectDetail();
-    await loadProjects();
-  } catch (err) {
-    els.projectDetailError.textContent = err.message;
-  }
-});
-
-document.getElementById("pdCancelBtn").addEventListener("click", async () => {
-  const reason = prompt("Причина отмены проекта:");
-  if (!reason || !reason.trim()) return;
-  els.projectDetailError.textContent = "";
-  try {
-    await apiFetch(`/api/cases/${currentProjectId}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({ reason: reason.trim() }),
-    });
-    await refreshProjectDetail();
-    await loadProjects();
-  } catch (err) {
-    els.projectDetailError.textContent = err.message;
   }
 });
 
@@ -1278,6 +1214,7 @@ async function renderFolder(path) {
   if (els.folderSearchInput) els.folderSearchInput.value = "";
   renderBreadcrumbs();
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  updateCaseBanner(path);
   try {
     const data = await apiFetch(`/api/resources?path=${encodeURIComponent(path)}`);
     currentFolderEntries = [

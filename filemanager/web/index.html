@@ -31,9 +31,6 @@
     <button class="rail-btn" id="equipmentBtn" title="Учёт оборудования" aria-label="Учёт оборудования">
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     </button>
-    <button class="rail-btn" id="projectsBtn" title="Проекты (экспертизы и НИ)" aria-label="Проекты">
-      <svg viewBox="0 0 24 24"><path d="M9 2h6l1 3h4a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4z"/><path d="M9 12l2 2 4-4"/></svg>
-    </button>
     <button class="rail-btn" id="logoutBtn" title="Выйти" aria-label="Выйти">
       <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
     </button>
@@ -82,6 +79,7 @@
         <span>Дела</span>
         <div style="display:flex; gap:6px;">
           <button class="add-btn" id="addGpBtn" title="Добавить гарантийное письмо" aria-label="Добавить ГП" style="width:auto; padding:0 8px; font-size:11px;">ГП</button>
+          <button class="add-btn" id="addProjectBtn" title="Новый проект (экспертиза/НИ)" aria-label="Новый проект" style="width:auto; padding:0 8px; font-size:11px;">Проект</button>
           <button class="add-btn" id="selectCasesBtn" title="Выбрать" aria-label="Выбрать">☑</button>
           <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
         </div>
@@ -111,6 +109,7 @@
   <div id="folderView" class="folder-view hidden">
     <div class="folder-header">
       <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div id="caseBanner" class="case-banner hidden"></div>
       <div class="folder-actions" id="folderActions">
         <div class="add-menu-wrap">
           <button class="upload-btn" id="addMenuBtn" type="button">Добавить</button>
@@ -157,38 +156,6 @@
       </div>
     </div>
     <div class="folder-body" id="folderList"></div>
-  </div>
-
-  <div id="projectsView" class="projects-view hidden">
-    <div class="projects-header">
-      <div>
-        <h1>Проекты (экспертизы и НИ)</h1>
-        <p class="row-subtitle" id="projectsCount"></p>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button class="back-btn" id="projectsBackBtn" type="button">
-          <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-          На главную
-        </button>
-        <button class="upload-btn" id="addProjectBtn" type="button">+ Добавить проект</button>
-      </div>
-    </div>
-    <div class="projects-filters">
-      <select id="projectStageFilter">
-        <option value="all">Стадия: все</option>
-        <option value="plan">План</option>
-        <option value="active">Активный</option>
-        <option value="control">Контроль</option>
-        <option value="done">Завершён</option>
-        <option value="cancelled">Отменён</option>
-      </select>
-      <select id="projectTypeFilter">
-        <option value="all">Тип: все</option>
-        <option value="expertise">Экспертиза</option>
-        <option value="research">НИ</option>
-      </select>
-    </div>
-    <div class="projects-table" id="projectsTable"></div>
   </div>
 
 </div>
@@ -422,39 +389,6 @@
         <button class="primary" type="submit">Создать проект</button>
       </div>
     </form>
-  </div>
-</div>
-
-<div id="projectDetailOverlay" class="modal-overlay hidden">
-  <div class="modal-panel" style="max-width:640px;">
-    <div class="modal-header">
-      <span id="pdName">Проект</span>
-      <button class="back-btn" id="projectDetailCloseBtn" type="button">
-        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        Закрыть
-      </button>
-    </div>
-    <div id="pdStageBadge" style="margin-bottom:14px;"></div>
-    <div class="add-user-row" style="row-gap:14px;">
-      <div><span class="row-subtitle">Суд / заказчик</span><div id="pdCourt">—</div></div>
-      <div><span class="row-subtitle">Номер дела/договора</span><div id="pdCaseNumber">—</div></div>
-      <div><span class="row-subtitle">Руководитель</span><div id="pdManager">—</div></div>
-      <div><span class="row-subtitle">Эксперты</span><div id="pdExperts">—</div></div>
-      <div><span class="row-subtitle">Год начала</span><div id="pdYear">—</div></div>
-      <div><span class="row-subtitle">Папка на диске</span><div id="pdFolder" style="word-break:break-all;">—</div></div>
-    </div>
-    <p id="pdDescription" class="row-subtitle" style="margin-top:10px;"></p>
-
-    <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
-      <span class="row-subtitle">История</span>
-      <div id="pdHistory" style="margin-top:8px; display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto;"></div>
-    </div>
-
-    <p id="projectDetailError" class="error-text"></p>
-    <div class="modal-actions" style="justify-content:space-between;">
-      <button class="back-btn" id="pdCancelBtn" type="button" style="color:var(--danger); border-color:var(--danger);">Отменить проект</button>
-      <button class="primary" id="pdAdvanceBtn" type="button">Перевести на следующую стадию →</button>
-    </div>
   </div>
 </div>
 
