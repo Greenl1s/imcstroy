@@ -68,6 +68,35 @@ async function renameEntry(relPath, newName) {
   return parentRel === "/" ? "/" + cleanName : parentRel + "/" + cleanName;
 }
 
+/**
+ * Перемещает файл/папку в ДРУГУЮ родительскую папку (в отличие от
+ * renameEntry, которая работает только внутри той же самой). Имя
+ * остаётся прежним — меняется только родитель. Нужна для смены стадии
+ * проекта: папка физически переезжает из "01. Планы" в "02. Активные
+ * проекты" и т.д., со всем содержимым сразу (fs.rename переносит
+ * директорию целиком за одну операцию на уровне файловой системы,
+ * без обхода и копирования файлов по одному).
+ * Возвращает новый относительный путь.
+ */
+async function moveEntry(relPath, newParentRelPath) {
+  const oldAbs = safeResolve(relPath);
+  const name = path.basename(oldAbs);
+  const newParentAbs = safeResolve(newParentRelPath);
+  const newAbs = path.join(newParentAbs, name);
+
+  if (fs.existsSync(newAbs)) {
+    throw new Error("Папка или файл с таким именем уже существует в целевой папке");
+  }
+
+  // Целевая корневая папка (например "02. Активные проекты") могла ещё
+  // не существовать физически — создаём её по пути, если нужно.
+  await fsp.mkdir(newParentAbs, { recursive: true });
+  await fsp.rename(oldAbs, newAbs);
+
+  const cleanNewParent = "/" + String(newParentRelPath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  return cleanNewParent === "/" ? "/" + name : cleanNewParent + "/" + name;
+}
+
 // Рекурсивно ищет файлы и папки по подстроке в имени (без учёта регистра),
 // начиная от relPath и ниже по всем вложенным папкам.
 // Возвращает плоский список с относительным путём каждого совпадения.
@@ -139,4 +168,7 @@ async function buildTree(relPath) {
   return { name: path.basename(abs), isDir: true, children };
 }
 
-module.exports = { DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, searchTree, buildTree, absolutePathFor };
+module.exports = {
+  DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry,
+  searchTree, buildTree, absolutePathFor,
+};
