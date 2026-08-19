@@ -46,6 +46,21 @@ const els = {
   backBtn: document.getElementById("backBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   equipmentBtn: document.getElementById("equipmentBtn"),
+  projectsBtn: document.getElementById("projectsBtn"),
+  projectsView: document.getElementById("projectsView"),
+  projectsBackBtn: document.getElementById("projectsBackBtn"),
+  projectsCount: document.getElementById("projectsCount"),
+  projectsTable: document.getElementById("projectsTable"),
+  projectStageFilter: document.getElementById("projectStageFilter"),
+  projectTypeFilter: document.getElementById("projectTypeFilter"),
+  addProjectBtn: document.getElementById("addProjectBtn"),
+  projectFormOverlay: document.getElementById("projectFormOverlay"),
+  projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
+  projectForm: document.getElementById("projectForm"),
+  projectFormError: document.getElementById("projectFormError"),
+  projectDetailOverlay: document.getElementById("projectDetailOverlay"),
+  projectDetailCloseBtn: document.getElementById("projectDetailCloseBtn"),
+  projectDetailError: document.getElementById("projectDetailError"),
   uploadInput: document.getElementById("uploadInput"),
   mkdirDbBtn: document.getElementById("mkdirDbBtn"),
   mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
@@ -233,6 +248,7 @@ function applyPermissionsUI() {
   document.querySelector('[data-col="tools"]').classList.toggle("hidden", !p.can_tools);
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
+  els.projectsBtn.classList.toggle("hidden", !p.can_cases);
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
@@ -1004,6 +1020,217 @@ function showFolderUI() {
   els.columnsView.classList.add("hidden");
   els.folderView.classList.remove("hidden");
 }
+
+/* ---------- Проекты (экспертизы и НИ) ---------- */
+
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
+const NEXT_STAGE = { plan: "active", active: "control", control: "done" };
+const TYPE_LABEL = { expertise: "Экспертиза", research: "НИ" };
+
+function stageBadgeHtml(project) {
+  if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
+  const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[project.stage];
+  return `<span class="stage-badge ${cls}">${STAGE_LABEL[project.stage]}</span>`;
+}
+
+function showProjectsUI() {
+  els.columnsView.classList.add("hidden");
+  els.folderView.classList.add("hidden");
+  els.projectsView.classList.remove("hidden");
+  loadProjects();
+}
+
+els.projectsBtn.addEventListener("click", showProjectsUI);
+els.projectsBackBtn.addEventListener("click", () => {
+  els.projectsView.classList.add("hidden");
+  showColumnsUI();
+});
+
+let allProjects = [];
+
+async function loadProjects() {
+  try {
+    allProjects = await apiFetch("/api/cases");
+    renderProjectsList();
+  } catch (err) {
+    els.projectsTable.innerHTML = `<div class="empty-hint" style="padding:2rem;">${err.message}</div>`;
+  }
+}
+
+function renderProjectsList() {
+  const stageFilter = els.projectStageFilter.value;
+  const typeFilter = els.projectTypeFilter.value;
+
+  const filtered = allProjects.filter((p) => {
+    const matchesStage = stageFilter === "all"
+      ? true
+      : stageFilter === "cancelled" ? p.is_cancelled : (!p.is_cancelled && p.stage === stageFilter);
+    const matchesType = typeFilter === "all" || p.type === typeFilter;
+    return matchesStage && matchesType;
+  });
+
+  els.projectsCount.textContent = `Всего проектов: ${allProjects.length} · Показано: ${filtered.length}`;
+
+  if (!filtered.length) {
+    els.projectsTable.innerHTML = `<div class="empty-hint" style="padding:2rem;">Проектов пока нет</div>`;
+    return;
+  }
+
+  els.projectsTable.innerHTML = filtered
+    .map((p) => `
+      <div class="project-row" data-id="${p.id}">
+        <div>
+          <div class="proj-name">${escapeHtml(p.name)}</div>
+          <div class="proj-sub">${p.case_number ? escapeHtml(p.case_number) + " · " : ""}${p.year || ""}</div>
+        </div>
+        <div>${stageBadgeHtml(p)}</div>
+        <div>${escapeHtml(p.court_or_customer || "—")}</div>
+        <div>${escapeHtml(p.manager_name || "—")}</div>
+      </div>`)
+    .join("");
+
+  els.projectsTable.querySelectorAll(".project-row").forEach((row) => {
+    row.addEventListener("click", () => openProjectDetail(Number(row.dataset.id)));
+  });
+}
+
+els.projectStageFilter.addEventListener("change", renderProjectsList);
+els.projectTypeFilter.addEventListener("change", renderProjectsList);
+
+/* ---- Форма создания проекта ---- */
+
+async function openProjectForm() {
+  els.projectFormError.textContent = "";
+  els.projectForm.reset();
+
+  const managerSelect = document.getElementById("pfManager");
+  managerSelect.innerHTML = '<option value="">Не выбран</option>';
+  try {
+    const { users } = await apiFetch("/api/users");
+    for (const u of users) {
+      const opt = document.createElement("option");
+      opt.value = u.id;
+      opt.textContent = u.username;
+      managerSelect.appendChild(opt);
+    }
+  } catch { /* без списка руководителей форма всё равно рабочая */ }
+
+  els.projectFormOverlay.classList.remove("hidden");
+}
+
+els.addProjectBtn.addEventListener("click", openProjectForm);
+els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
+
+els.projectForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  els.projectFormError.textContent = "";
+
+  const type = document.getElementById("pfType").value;
+  const stage = document.getElementById("pfStage").value;
+  const rawName = document.getElementById("pfName").value.trim();
+  const prefix = type === "expertise" ? "ЭКС." : "НИ.";
+  const name = rawName.startsWith(prefix) ? rawName : prefix + rawName;
+
+  const body = {
+    type, stage, name,
+    direct_assignment: stage === "active",
+    court_or_customer: document.getElementById("pfCourt").value.trim() || null,
+    case_number: document.getElementById("pfCaseNumber").value.trim() || null,
+    manager_id: document.getElementById("pfManager").value || null,
+    year: document.getElementById("pfYear").value || null,
+    experts: document.getElementById("pfExperts").value.trim() || null,
+    description: document.getElementById("pfDescription").value.trim() || null,
+  };
+
+  try {
+    await apiFetch("/api/cases", { method: "POST", body: JSON.stringify(body) });
+    els.projectFormOverlay.classList.add("hidden");
+    await loadProjects();
+  } catch (err) {
+    els.projectFormError.textContent = err.message;
+  }
+});
+
+/* ---- Карточка проекта (детали, смена стадии, отмена) ---- */
+
+let currentProjectId = null;
+
+async function openProjectDetail(id) {
+  currentProjectId = id;
+  els.projectDetailError.textContent = "";
+  await refreshProjectDetail();
+  els.projectDetailOverlay.classList.remove("hidden");
+}
+
+async function refreshProjectDetail() {
+  const project = await apiFetch(`/api/cases/${currentProjectId}`);
+  const history = await apiFetch(`/api/cases/${currentProjectId}/history`);
+
+  document.getElementById("pdName").textContent = project.name;
+  document.getElementById("pdStageBadge").innerHTML = stageBadgeHtml(project);
+  document.getElementById("pdCourt").textContent = project.court_or_customer || "—";
+  document.getElementById("pdCaseNumber").textContent = project.case_number || "—";
+  document.getElementById("pdManager").textContent = project.manager_name || "—";
+  document.getElementById("pdExperts").textContent = project.experts || "—";
+  document.getElementById("pdYear").textContent = project.year || "—";
+  document.getElementById("pdFolder").textContent = project.folder_path || "—";
+  document.getElementById("pdDescription").textContent = project.description || "";
+
+  document.getElementById("pdHistory").innerHTML = history
+    .map((h) => `<div class="proj-sub">${new Date(h.created_at).toLocaleString("ru")} — ${escapeHtml(h.note || h.action)}${h.actor_name ? " (" + escapeHtml(h.actor_name) + ")" : ""}</div>`)
+    .join("") || '<div class="proj-sub">Пока пусто</div>';
+
+  const advanceBtn = document.getElementById("pdAdvanceBtn");
+  const cancelBtn = document.getElementById("pdCancelBtn");
+  if (project.is_cancelled) {
+    advanceBtn.classList.add("hidden");
+    cancelBtn.classList.add("hidden");
+  } else {
+    const next = NEXT_STAGE[project.stage];
+    if (next) {
+      advanceBtn.classList.remove("hidden");
+      advanceBtn.textContent = `Перевести на стадию «${STAGE_LABEL[next]}» →`;
+    } else {
+      advanceBtn.classList.add("hidden");
+    }
+    cancelBtn.classList.remove("hidden");
+  }
+}
+
+els.projectDetailCloseBtn.addEventListener("click", () => els.projectDetailOverlay.classList.add("hidden"));
+
+document.getElementById("pdAdvanceBtn").addEventListener("click", async () => {
+  els.projectDetailError.textContent = "";
+  try {
+    await apiFetch(`/api/cases/${currentProjectId}/advance`, { method: "POST" });
+    await refreshProjectDetail();
+    await loadProjects();
+  } catch (err) {
+    els.projectDetailError.textContent = err.message;
+  }
+});
+
+document.getElementById("pdCancelBtn").addEventListener("click", async () => {
+  const reason = prompt("Причина отмены проекта:");
+  if (!reason || !reason.trim()) return;
+  els.projectDetailError.textContent = "";
+  try {
+    await apiFetch(`/api/cases/${currentProjectId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    await refreshProjectDetail();
+    await loadProjects();
+  } catch (err) {
+    els.projectDetailError.textContent = err.message;
+  }
+});
 
 // Переход в колонки. pushHistory=false используется при обработке
 // кнопки "назад" браузера, чтобы не создавать новую запись в истории.

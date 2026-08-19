@@ -12,6 +12,39 @@
   --danger: #d84c3e;
 }
 
+/* Бейджи стадий проекта (экспертизы/НИ) */
+.stage-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.stage-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.stage-plan { background: #fdf3d9; color: #8a6d0a; }
+.stage-active { background: #dceaf8; color: #1a5488; }
+.stage-control { background: #f6ddb8; color: #8a5320; }
+.stage-done { background: #dcf3e3; color: #1e6b3f; }
+.stage-cancelled { background: #f7dcda; color: #a3241c; }
+
+/* Экран "Проекты" — список/журнал */
+.projects-view { padding: 24px; max-width: 1100px; margin: 0 auto; }
+.projects-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+.projects-header h1 { font-size: 20px; margin: 0; }
+.projects-filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.projects-filters select {
+  padding: 8px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg-card); font-size: 13px; color: var(--text-primary);
+}
+.projects-table { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.project-row {
+  display: grid; grid-template-columns: 2fr 1fr 1.3fr 1fr; gap: 10px;
+  padding: 14px 18px; border-top: 1px solid var(--border); align-items: center;
+  cursor: pointer; text-decoration: none; color: inherit;
+}
+.project-row:first-child { border-top: none; }
+.project-row:hover { background: #faf9f6; }
+.project-row .proj-name { font-weight: 700; }
+.project-row .proj-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
 * { box-sizing: border-box; }
 
 body {
