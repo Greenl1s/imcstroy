@@ -15,7 +15,6 @@ const fileLink = require("./fileLink");
 const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
-const { cases: caseRoutes } = require("./cases");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -171,10 +170,6 @@ app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, a
     res.status(500).json({ message: "Не удалось удалить право доступа" });
   }
 });
-
-/* ---------------- Проекты (экспертизы и НИ) ---------------- */
-
-app.use("/api/cases", caseRoutes);
 
 /* ---------------- Пользователи и права доступа (только администратор) ---------------- */
 
