@@ -10,6 +10,20 @@ const attachments = require("./caseAttachments");
 const fileTextExtract = require("./fileTextExtract");
 const aiExtract = require("./aiExtract");
 const auth = require("./auth");
+const journalExcel = require("./journalExcel");
+
+/**
+ * Пересобирает журнал и никогда не мешает основной операции — если
+ * вдруг не получится, ошибка просто пишется в лог. Само дело в базе
+ * уже сохранено к этому моменту, это лишь его проекция в Excel.
+ */
+async function refreshJournalSafely() {
+  try {
+    await journalExcel.regenerateJournal();
+  } catch (err) {
+    console.error("Не удалось обновить журнал регистрации:", err.message);
+  }
+}
 
 const UPLOAD_TMP_DIR = "/tmp/fm-uploads";
 fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
@@ -215,6 +229,7 @@ cases.post("/", async (req, res) => {
     }
 
     res.status(201).json(created);
+    refreshJournalSafely();
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({ message: "Проект с таким наименованием уже существует" });
@@ -245,6 +260,7 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
     values
   );
   res.json(rows[0]);
+  refreshJournalSafely();
 });
 
 // Строгий порядок движения по стадиям — без пропусков, как в инструкции.
@@ -278,6 +294,7 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
     );
 
     res.json(updated[0]);
+    refreshJournalSafely();
   } catch (err) {
     console.error("Не удалось изменить стадию:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось изменить стадию" });
@@ -312,6 +329,7 @@ cases.post("/:id/cancel", loadCase, requireWriteOnCaseFolder, async (req, res) =
     );
 
     res.json(updated[0]);
+    refreshJournalSafely();
   } catch (err) {
     console.error("Не удалось отменить проект:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось отменить проект" });
