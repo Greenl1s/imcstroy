@@ -36,16 +36,6 @@
 .case-banner button.danger-outline {
   color: var(--danger); border-color: var(--danger); background: transparent;
 }
-.pf-file-row {
-  display: flex; align-items: center; gap: 8px; font-size: 13px;
-  padding: 6px 8px; background: var(--bg-page); border-radius: 6px;
-}
-.pf-file-row .pf-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-file-row select { font-size: 12px; padding: 3px 6px; }
-.pf-file-row .pf-file-error { color: var(--danger); font-size: 12px; }
-.pf-conflict-box { padding: 8px 10px; background: #fff8e6; border-radius: 6px; font-size: 13px; }
-.pf-conflict-box .pf-conflict-label { font-weight: 600; margin-bottom: 4px; }
-.pf-conflict-box label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; cursor: pointer; padding: 2px 0; }
 
 * { box-sizing: border-box; }
 
