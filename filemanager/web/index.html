@@ -398,6 +398,26 @@
           <input type="number" id="pfYear">
         </label>
       </div>
+      <label>Структура (организация)
+        <input type="text" id="pfOrganization" placeholder="Например: АО «НИЦ Строительство»">
+      </label>
+      <div class="add-user-row">
+        <label>Сторона 1
+          <input type="text" id="pfParty1">
+        </label>
+        <label>Сторона 2
+          <input type="text" id="pfParty2">
+        </label>
+      </div>
+      <label>Судья
+        <input type="text" id="pfJudgeName">
+      </label>
+      <label>Эксперты <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfExperts" placeholder="Через запятую">
+      </label>
+      <label>Описание <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfDescription">
+      </label>
       <p id="projectFormError" class="error-text"></p>
       <div class="modal-actions">
         <button class="primary" type="submit">Создать проект</button>

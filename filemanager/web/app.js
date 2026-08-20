@@ -1317,6 +1317,12 @@ els.projectForm.addEventListener("submit", async (event) => {
     case_number: document.getElementById("pfCaseNumber").value.trim() || null,
     manager_id: document.getElementById("pfManager").value || null,
     year: document.getElementById("pfYear").value || null,
+    organization: document.getElementById("pfOrganization").value.trim() || null,
+    party1: document.getElementById("pfParty1").value.trim() || null,
+    party2: document.getElementById("pfParty2").value.trim() || null,
+    judge_name: document.getElementById("pfJudgeName").value.trim() || null,
+    experts: document.getElementById("pfExperts").value.trim() || null,
+    description: document.getElementById("pfDescription").value.trim() || null,
   };
 
   try {
