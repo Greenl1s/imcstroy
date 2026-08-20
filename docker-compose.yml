@@ -72,8 +72,46 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+      OMNIROUTE_URL: http://omniroute:20129
     expose:
       - "3000"
+
+  # ИИ-шлюз OmniRoute — используется для распознавания вложенных при
+  # создании проекта файлов (номер дела, суд, судья и т.д.). Доступен
+  # ТОЛЬКО изнутри docker-сети (из filemanager) — как и db, наружу не
+  # смотрит: у собственной панели OmniRoute нет пароля по умолчанию.
+  omniroute-redis:
+    image: redis:7-alpine
+    container_name: omniroute-redis
+    restart: unless-stopped
+    volumes:
+      - omniroute-redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: omniroute
+    restart: unless-stopped
+    depends_on:
+      omniroute-redis:
+        condition: service_healthy
+    environment:
+      DATA_DIR: /app/data
+      PORT: 20128
+      DASHBOARD_PORT: 20128
+      API_PORT: 20129
+      API_HOST: 0.0.0.0
+      REDIS_URL: redis://omniroute-redis:6379
+    volumes:
+      - omniroute-data:/app/data
+    expose:
+      - "20128"
+      - "20129"
 
   caddy:
     image: caddy:2-alpine
@@ -117,3 +155,5 @@ volumes:
   onlyoffice-log:
   onlyoffice-lib:
   onlyoffice-db:
+  omniroute-data:
+  omniroute-redis-data:
