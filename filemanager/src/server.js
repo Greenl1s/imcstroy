@@ -17,6 +17,7 @@ const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
 const { cases: caseRoutes } = require("./cases");
+const { organizations: organizationRoutes } = require("./organizations");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -176,6 +177,7 @@ app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, a
 /* ---------------- Проекты (экспертизы и НИ) ---------------- */
 
 app.use("/api/cases", caseRoutes);
+app.use("/api/organizations", organizationRoutes);
 
 /* ---------------- Пользователи и права доступа (только администратор) ---------------- */
 
