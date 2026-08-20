@@ -1,10 +1,19 @@
 const { Router } = require("express");
+const fs = require("fs");
+const multer = require("multer");
 const db = require("./db");
 const files = require("./files");
 const caseFolders = require("./caseFolders");
 const folderPermissions = require("./folderPermissions");
 const folderAccess = require("./folderAccess");
+const attachments = require("./caseAttachments");
+const fileTextExtract = require("./fileTextExtract");
+const aiExtract = require("./aiExtract");
 const auth = require("./auth");
+
+const UPLOAD_TMP_DIR = "/tmp/fm-uploads";
+fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+const upload = multer({ dest: UPLOAD_TMP_DIR });
 
 const cases = Router();
 cases.use(auth.requireAuth);
@@ -94,11 +103,68 @@ cases.get("/:id", loadCase, async (req, res) => {
 });
 
 /** Создать новый проект — сразу с папкой и структурой на диске. */
+/** Куда внутри новой папки проекта кладём файл в зависимости от того, что определил ИИ. */
+function categoryToSubpath(category, projectName) {
+  switch (category) {
+    case "запрос":
+      return "Планирование проекта/Запрос";
+    case "организационные_документы":
+      return `${projectName}/Организационные документы`;
+    case "первичные_материалы":
+    case "определение_суда":
+    case "иное":
+    default:
+      return "Планирование проекта/Первичные материалы для ознакомления";
+  }
+}
+
+/**
+ * Принимает один или несколько файлов, сразу же анализирует каждый через
+ * ИИ и складывает их во временный черновик (ещё не внутри "Дела" —
+ * туда они переедут только после того, как человек подтвердит форму).
+ * Возвращает batchId и результат разбора по каждому файлу — если
+ * какой-то конкретный файл не удалось разобрать, это не валит весь
+ * запрос, просто у него будет поле error вместо analysis.
+ */
+cases.post("/analyze-files", upload.array("files", 10), async (req, res) => {
+  if (!req.files || !req.files.length) {
+    return res.status(400).json({ message: "Файлы не получены" });
+  }
+
+  const batchId = attachments.newBatchId();
+  const results = [];
+
+  for (const file of req.files) {
+    const filename = Buffer.from(file.originalname, "latin1").toString("utf8");
+    try {
+      const buffer = await fs.promises.readFile(file.path);
+      const prepared = await fileTextExtract.prepareFileForAnalysis(buffer, filename);
+      const analysis = await aiExtract.analyzeDocument(prepared, filename);
+      const key = await attachments.stageFile(batchId, filename, file.path);
+      results.push({ key, filename, analysis });
+    } catch (err) {
+      console.error(`Не удалось разобрать файл "${filename}":`, err.message);
+      results.push({ key: null, filename, error: err.message });
+    } finally {
+      await fs.promises.unlink(file.path).catch(() => {});
+    }
+  }
+
+  res.json({ batchId, results });
+});
+
+/** Отменить черновик — удаляет все временные файлы, если создание проекта не подтвердили. */
+cases.post("/analyze-files/:batchId/discard", async (req, res) => {
+  await attachments.discardBatch(req.params.batchId);
+  res.json({ ok: true });
+});
+
 cases.post("/", async (req, res) => {
   try {
     const {
       type, name, stage, direct_assignment,
       court_or_customer, case_number, manager_id, experts, year, description,
+      batchId, fileAssignments,
     } = req.body || {};
 
     if (!["expertise", "research"].includes(type)) {
@@ -128,6 +194,22 @@ cases.post("/", async (req, res) => {
        VALUES ($1, 'created', $2, $3, 'Проект создан')`,
       [created.id, stage, req.user.id]
     );
+
+    // Раскладываем заранее проанализированные и подтверждённые вложения —
+    // делаем это ПОСЛЕ успешной записи в базу: если запись в базу вдруг
+    // не удастся, файлы останутся целыми в черновике, а не потеряются
+    // где-то на полпути к папке несуществующего проекта.
+    if (batchId && Array.isArray(fileAssignments)) {
+      for (const item of fileAssignments) {
+        try {
+          const subPath = categoryToSubpath(item.category, cleanName);
+          await attachments.commitStagedFile(batchId, item.key, `${folderPath}/${subPath}`);
+        } catch (err) {
+          console.error(`Не удалось разместить файл "${item.key}":`, err.message);
+        }
+      }
+      await attachments.discardBatch(batchId);
+    }
 
     res.status(201).json(created);
   } catch (err) {
