@@ -1278,9 +1278,154 @@ function renderCaseBanner(project) {
 
 /* ---- Форма создания проекта ---- */
 
+/* ---- Материалы проекта: загрузка, распознавание ИИ, слияние результатов ---- */
+
+let pfSelectedFiles = [];   // File[] — выбраны, но ещё не отправлены на анализ
+let pfBatchId = null;       // id черновика на сервере после анализа
+let pfAnalyzed = [];        // [{key, filename, analysis} | {key:null, filename, error}]
+let pfConflictChoices = {}; // {fieldName: выбранное значение} — когда файлы расходятся
+
+function resetProjectAttachments() {
+  pfSelectedFiles = [];
+  pfBatchId = null;
+  pfAnalyzed = [];
+  pfConflictChoices = {};
+  document.getElementById("pfFileInput").value = "";
+  document.getElementById("pfFilesList").innerHTML = "";
+  document.getElementById("pfConflicts").innerHTML = "";
+  document.getElementById("pfAnalyzeBtn").disabled = true;
+  document.getElementById("pfAnalyzeBtn").textContent = "Распознать";
+}
+
+async function discardProjectAttachments() {
+  if (pfBatchId) {
+    apiFetch(`/api/cases/analyze-files/${pfBatchId}/discard`, { method: "POST" }).catch(() => {});
+  }
+}
+
+document.getElementById("pfChooseFilesBtn").addEventListener("click", () => {
+  document.getElementById("pfFileInput").click();
+});
+
+document.getElementById("pfFileInput").addEventListener("change", (event) => {
+  pfSelectedFiles = Array.from(event.target.files || []);
+  renderPfFilesList();
+  document.getElementById("pfAnalyzeBtn").disabled = pfSelectedFiles.length === 0;
+});
+
+function renderPfFilesList() {
+  const list = document.getElementById("pfFilesList");
+  if (pfAnalyzed.length) {
+    // После распознавания показываем результат по каждому файлу
+    list.innerHTML = pfAnalyzed.map((f, i) => {
+      if (f.error) {
+        return `<div class="pf-file-row"><span class="pf-file-name">${escapeHtml(f.filename)}</span><span class="pf-file-error">не удалось: ${escapeHtml(f.error)}</span></div>`;
+      }
+      const cat = f.analysis.document_category || "иное";
+      return `
+        <div class="pf-file-row">
+          <span class="pf-file-name">${escapeHtml(f.filename)}</span>
+          <select data-file-index="${i}" class="pf-category-select">
+            <option value="запрос" ${cat === "запрос" ? "selected" : ""}>Запрос</option>
+            <option value="первичные_материалы" ${cat === "первичные_материалы" ? "selected" : ""}>Первичные материалы</option>
+            <option value="определение_суда" ${cat === "определение_суда" ? "selected" : ""}>Определение суда</option>
+            <option value="организационные_документы" ${cat === "организационные_документы" ? "selected" : ""}>Организационные документы</option>
+            <option value="иное" ${cat === "иное" ? "selected" : ""}>Иное</option>
+          </select>
+        </div>`;
+    }).join("");
+    list.querySelectorAll(".pf-category-select").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        pfAnalyzed[Number(sel.dataset.fileIndex)].category = sel.value;
+      });
+    });
+  } else {
+    // До распознавания — просто список выбранных файлов
+    list.innerHTML = pfSelectedFiles
+      .map((f) => `<div class="pf-file-row"><span class="pf-file-name">${escapeHtml(f.name)}</span></div>`)
+      .join("");
+  }
+}
+
+document.getElementById("pfAnalyzeBtn").addEventListener("click", async () => {
+  if (!pfSelectedFiles.length) return;
+  const btn = document.getElementById("pfAnalyzeBtn");
+  btn.disabled = true;
+  btn.textContent = "Распознаём…";
+
+  const formData = new FormData();
+  for (const f of pfSelectedFiles) formData.append("files", f);
+
+  try {
+    const res = await fetch("/api/cases/analyze-files", { method: "POST", credentials: "include", body: formData });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Ошибка распознавания");
+    const data = await res.json();
+    pfBatchId = data.batchId;
+    pfAnalyzed = data.results.map((r) => ({ ...r, category: r.analysis ? r.analysis.document_category || "иное" : null }));
+    renderPfFilesList();
+    applyAnalysisToForm();
+  } catch (err) {
+    alert("Не удалось распознать файлы: " + err.message);
+  } finally {
+    btn.textContent = "Готово";
+  }
+});
+
+/** Сводит результаты по всем файлам в одну карточку; при расхождениях — предлагает выбрать. */
+function applyAnalysisToForm() {
+  const successful = pfAnalyzed.filter((f) => f.analysis);
+  if (!successful.length) return;
+
+  const fieldMap = {
+    case_number: "pfCaseNumber",
+    court_or_customer: "pfCourt",
+    year: "pfYear",
+  };
+
+  pfConflictChoices = {};
+  const conflictsBox = document.getElementById("pfConflicts");
+  conflictsBox.innerHTML = "";
+
+  for (const [aiField, formId] of Object.entries(fieldMap)) {
+    const values = [...new Set(successful.map((f) => f.analysis[aiField]).filter((v) => v !== null && v !== undefined && v !== ""))];
+    if (values.length === 0) continue;
+    if (values.length === 1) {
+      document.getElementById(formId).value = values[0];
+    } else {
+      // Разные файлы дали разные значения — не выбираем за человека, показываем выбор.
+      pfConflictChoices[aiField] = null;
+      const box = document.createElement("div");
+      box.className = "pf-conflict-box";
+      const fieldLabel = { case_number: "Номер дела/договора", court_or_customer: "Суд/заказчик", year: "Год" }[aiField];
+      box.innerHTML = `<div class="pf-conflict-label">⚠ В файлах разные значения — «${escapeHtml(fieldLabel)}»:</div>` +
+        values.map((v, i) => `<label><input type="radio" name="pf-conflict-${aiField}" value="${escapeHtml(v)}"> ${escapeHtml(v)}</label>`).join("");
+      conflictsBox.appendChild(box);
+      box.querySelectorAll("input[type=radio]").forEach((radio) => {
+        radio.addEventListener("change", () => {
+          document.getElementById(formId).value = radio.value;
+        });
+      });
+    }
+  }
+
+  // Тип проекта (ЭКС./НИ.) — тоже подтягиваем, если все файлы сходятся.
+  const typeGuesses = [...new Set(successful.map((f) => f.analysis.project_type_guess).filter(Boolean))];
+  if (typeGuesses.length === 1) {
+    document.getElementById("pfType").value = typeGuesses[0];
+  }
+
+  // Описание — короткая сводка из первого файла с summary, если поле ещё пустое.
+  const descField = document.getElementById("pfDescription");
+  if (!descField.value.trim()) {
+    const firstSummary = successful.find((f) => f.analysis.summary)?.analysis.summary;
+    if (firstSummary) descField.value = firstSummary;
+  }
+}
+
 async function openProjectForm() {
   els.projectFormError.textContent = "";
   els.projectForm.reset();
+  resetProjectAttachments();
 
   const managerSelect = document.getElementById("pfManager");
   managerSelect.innerHTML = '<option value="">Не выбран</option>';
@@ -1298,7 +1443,10 @@ async function openProjectForm() {
 }
 
 els.addProjectBtn.addEventListener("click", openProjectForm);
-els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
+els.projectFormCloseBtn.addEventListener("click", () => {
+  els.projectFormOverlay.classList.add("hidden");
+  discardProjectAttachments();
+});
 
 els.projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1319,11 +1467,14 @@ els.projectForm.addEventListener("submit", async (event) => {
     year: document.getElementById("pfYear").value || null,
     experts: document.getElementById("pfExperts").value.trim() || null,
     description: document.getElementById("pfDescription").value.trim() || null,
+    batchId: pfBatchId || undefined,
+    fileAssignments: pfAnalyzed.filter((f) => f.key).map((f) => ({ key: f.key, category: f.category })),
   };
 
   try {
     await apiFetch("/api/cases", { method: "POST", body: JSON.stringify(body) });
     els.projectFormOverlay.classList.add("hidden");
+    resetProjectAttachments();
     // Обновляем список: если мы сейчас внутри "Дела" — перерисовываем
     // открытую папку, иначе (на экране колонок) — саму колонку "Дела".
     if (currentPath && currentPath.startsWith(CASES_PATH)) {

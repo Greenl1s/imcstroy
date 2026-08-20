@@ -363,6 +363,23 @@
       </button>
     </div>
     <p class="row-subtitle">Папка и запись в журнале создадутся автоматически</p>
+
+    <div id="pfAttachBox" style="margin-top:10px; padding:12px; border:1px dashed var(--border); border-radius:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:600; font-size:13px;">Материалы (необязательно)</div>
+          <div class="row-subtitle" style="font-size:12px;">Приложите файлы — ИИ сам прочитает их и подставит номер дела, суд и т.д.</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <input type="file" id="pfFileInput" multiple style="display:none;" accept=".docx,.pdf,.png,.jpg,.jpeg,.webp">
+          <button type="button" class="upload-btn" id="pfChooseFilesBtn">Выбрать файлы</button>
+          <button type="button" class="primary" id="pfAnalyzeBtn" disabled>Распознать</button>
+        </div>
+      </div>
+      <div id="pfFilesList" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
+      <div id="pfConflicts" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
     <form id="projectForm" style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
       <div class="add-user-row">
         <label>Тип проекта
