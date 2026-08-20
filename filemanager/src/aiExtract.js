@@ -66,6 +66,7 @@ async function analyzeDocument(prepared, filename) {
   const body = {
     model: MODEL,
     temperature: 0,
+    stream: false,
     max_tokens: 800,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -84,8 +85,8 @@ async function analyzeDocument(prepared, filename) {
     throw new Error(`OmniRoute ответил ошибкой ${res.status}: ${errText.slice(0, 300)}`);
   }
 
-  const data = await res.json();
-  const rawContent = data?.choices?.[0]?.message?.content;
+  const rawBody = await res.text();
+  const rawContent = parseChatCompletionContent(rawBody);
   if (!rawContent) {
     throw new Error("ИИ не вернул содержимого ответа");
   }
@@ -94,4 +95,35 @@ async function analyzeDocument(prepared, filename) {
   return { ...parsed, source_file: filename };
 }
 
-module.exports = { analyzeDocument, extractJson, buildUserContent, SYSTEM_PROMPT };
+/**
+ * Достаёт текст ответа модели из тела HTTP-ответа. В норме это обычный
+ * JSON (choices[0].message.content), но некоторые провайдеры за OmniRoute
+ * иногда присылают поток server-sent events (строки "data: {...}") даже
+ * при stream:false — на этот случай собираем текст по кусочкам сами,
+ * а не просто падаем с ошибкой парсинга JSON.
+ */
+function parseChatCompletionContent(rawBody) {
+  const trimmed = rawBody.trim();
+
+  if (!trimmed.startsWith("data:")) {
+    const data = JSON.parse(trimmed);
+    return data?.choices?.[0]?.message?.content || "";
+  }
+
+  // Поток SSE: несколько строк "data: {...}", последняя обычно "data: [DONE]".
+  let combined = "";
+  for (const line of trimmed.split("\n")) {
+    const clean = line.trim();
+    if (!clean.startsWith("data:")) continue;
+    const payload = clean.slice(5).trim();
+    if (payload === "[DONE]") continue;
+    try {
+      const chunk = JSON.parse(payload);
+      const piece = chunk?.choices?.[0]?.delta?.content ?? chunk?.choices?.[0]?.message?.content ?? "";
+      combined += piece;
+    } catch { /* пропускаем нечитаемый кусок потока */ }
+  }
+  return combined;
+}
+
+module.exports = { analyzeDocument, extractJson, buildUserContent, parseChatCompletionContent, SYSTEM_PROMPT };
