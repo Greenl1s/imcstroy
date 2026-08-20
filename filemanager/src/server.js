@@ -246,6 +246,10 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
 /* ---------------- Гарантийные письма (ГП) ---------------- */
 
 const EXPERTS_DIR = "/База данных/Эксперты";
+// У каждого эксперта — своя папка, а сведения для ГП берутся из одного
+// файла с фиксированным именем внутри неё. Остальное (фото, сертификаты
+// и т.д.) можно класть туда же свободно — система их не трогает.
+const EXPERT_INFO_FILENAME = "Сведения.docx";
 
 app.get("/api/experts", auth.requireAuth, async (req, res) => {
   try {
@@ -259,13 +263,19 @@ app.get("/api/experts", auth.requireAuth, async (req, res) => {
     } catch (err) {
       return res.json({ experts: [] }); // папки с экспертами ещё нет — просто пустой список
     }
-    const experts = entries
-      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".docx"))
-      .map((e) => ({
-        name: e.name.replace(/\.docx$/i, ""),
-        path: EXPERTS_DIR + "/" + e.name,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+
+    const experts = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const infoAbs = path.join(dirAbs, entry.name, EXPERT_INFO_FILENAME);
+      try {
+        await fs.promises.access(infoAbs);
+      } catch {
+        continue; // в папке эксперта нет "Сведения.docx" — пока нечего выбрать, пропускаем
+      }
+      experts.push({ name: entry.name, path: EXPERTS_DIR + "/" + entry.name });
+    }
+    experts.sort((a, b) => a.name.localeCompare(b.name, "ru"));
     res.json({ experts });
   } catch (err) {
     console.error("Не удалось получить список экспертов:", err);
@@ -313,17 +323,17 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
     const experts = [];
     for (const p of expertPaths) {
       if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/")) {
-        return res.status(400).json({ message: "Недопустимый путь к файлу эксперта" });
+        return res.status(400).json({ message: "Недопустимый путь к папке эксперта" });
       }
-      const abs = filesLib.safeResolve(p);
+      const infoAbs = filesLib.safeResolve(p + "/" + EXPERT_INFO_FILENAME);
       let buffer;
       try {
-        buffer = await fs.promises.readFile(abs);
+        buffer = await fs.promises.readFile(infoAbs);
       } catch (err) {
-        return res.status(400).json({ message: `Не удалось прочитать файл эксперта: ${p}` });
+        return res.status(400).json({ message: `Не удалось прочитать файл «${EXPERT_INFO_FILENAME}» в папке: ${p}` });
       }
       const descLines = gpGenerate.extractParagraphTexts(buffer);
-      const name = path.basename(p).replace(/\.docx$/i, "");
+      const name = path.basename(p); // имя папки эксперта — как он подписывается в письме
       experts.push({ name, descLines });
     }
 
