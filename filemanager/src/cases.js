@@ -164,6 +164,7 @@ cases.post("/", async (req, res) => {
     const {
       type, name, stage, direct_assignment,
       court_or_customer, case_number, manager_id, experts, year, description,
+      organization, party1, party2, judge_name,
       batchId, fileAssignments,
     } = req.body || {};
 
@@ -181,11 +182,13 @@ cases.post("/", async (req, res) => {
 
     const { rows } = await db.query(
       `INSERT INTO cases
-         (type, name, stage, status, court_or_customer, case_number, manager_id, experts, year, description, folder_path)
-       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10)
+         (type, name, stage, status, court_or_customer, case_number, manager_id, experts, year, description,
+          organization, party1, party2, judge_name, folder_path)
+       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
       [type, cleanName, stage, court_or_customer || null, case_number || null,
-       manager_id || null, experts || null, year || null, description || null, folderPath]
+       manager_id || null, experts || null, year || null, description || null,
+       organization || null, party1 || null, party2 || null, judge_name || null, folderPath]
     );
     const created = rows[0];
 
@@ -223,7 +226,10 @@ cases.post("/", async (req, res) => {
 
 /** Обновить редактируемые поля карточки (без смены стадии). */
 cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
-  const fields = ["court_or_customer", "case_number", "manager_id", "experts", "year", "description", "status"];
+  const fields = [
+    "court_or_customer", "case_number", "manager_id", "experts", "year", "description", "status",
+    "organization", "party1", "party2", "judge_name",
+  ];
   const sets = [];
   const values = [req.params.id];
   for (const f of fields) {
