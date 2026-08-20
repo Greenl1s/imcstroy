@@ -1278,9 +1278,27 @@ function renderCaseBanner(project) {
 
 /* ---- Форма создания проекта ---- */
 
+/** Заполняет выпадающий список "Структура" из справочника организаций. */
+async function loadOrganizationsSelect() {
+  const select = document.getElementById("pfOrganization");
+  const current = select.value;
+  select.innerHTML = '<option value="">Не выбрана</option>';
+  try {
+    const orgs = await apiFetch("/api/organizations");
+    for (const o of orgs) {
+      const opt = document.createElement("option");
+      opt.value = o.name;
+      opt.textContent = o.name;
+      select.appendChild(opt);
+    }
+    if (current) select.value = current;
+  } catch { /* список организаций необязателен для работы формы */ }
+}
+
 async function openProjectForm() {
   els.projectFormError.textContent = "";
   els.projectForm.reset();
+  await loadOrganizationsSelect();
 
   const managerSelect = document.getElementById("pfManager");
   managerSelect.innerHTML = '<option value="">Не выбран</option>';
@@ -1299,6 +1317,66 @@ async function openProjectForm() {
 
 els.addProjectBtn.addEventListener("click", openProjectForm);
 els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
+
+/* ---- Управление списком организаций ("Структура") ---- */
+
+const orgManageOverlay = document.getElementById("orgManageOverlay");
+const orgList = document.getElementById("orgList");
+const orgManageError = document.getElementById("orgManageError");
+
+async function renderOrgList() {
+  orgManageError.textContent = "";
+  orgList.innerHTML = '<div class="row-subtitle">Загрузка…</div>';
+  try {
+    const orgs = await apiFetch("/api/organizations");
+    if (!orgs.length) {
+      orgList.innerHTML = '<div class="row-subtitle">Список пока пуст</div>';
+      return;
+    }
+    orgList.innerHTML = orgs.map((o) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:var(--bg-page); border-radius:6px; font-size:13px;">
+        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(o.name)}</span>
+        <button type="button" class="back-btn danger-outline" data-org-delete="${escapeHtml(o.name)}" style="padding:2px 8px; font-size:12px;">Удалить</button>
+      </div>`).join("");
+    orgList.querySelectorAll("[data-org-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm(`Удалить организацию «${btn.dataset.orgDelete}»?`)) return;
+        try {
+          await apiFetch(`/api/organizations/${encodeURIComponent(btn.dataset.orgDelete)}`, { method: "DELETE" });
+          await renderOrgList();
+          await loadOrganizationsSelect();
+        } catch (err) {
+          orgManageError.textContent = err.message;
+        }
+      });
+    });
+  } catch (err) {
+    orgList.innerHTML = "";
+    orgManageError.textContent = err.message;
+  }
+}
+
+document.getElementById("pfManageOrgBtn").addEventListener("click", () => {
+  orgManageOverlay.classList.remove("hidden");
+  renderOrgList();
+});
+document.getElementById("orgManageCloseBtn").addEventListener("click", () => orgManageOverlay.classList.add("hidden"));
+
+document.getElementById("orgAddForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  orgManageError.textContent = "";
+  const input = document.getElementById("orgAddName");
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    await apiFetch("/api/organizations", { method: "POST", body: JSON.stringify({ name }) });
+    input.value = "";
+    await renderOrgList();
+    await loadOrganizationsSelect();
+  } catch (err) {
+    orgManageError.textContent = err.message;
+  }
+});
 
 els.projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
