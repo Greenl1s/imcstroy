@@ -532,6 +532,83 @@ app.post("/api/rename", auth.requireAuth, requireColumnAccess({ write: true }), 
   }
 });
 
+/**
+ * Перемещает файл/папку в другую папку — в отличие от переименования,
+ * тут родитель меняется. requireColumnAccess проверил права на исходный
+ * путь (req.body.path); права на папку назначения проверяем сами ниже,
+ * потому что назначение может быть в совсем другом месте "Дела" со
+ * своими персональными правилами доступа.
+ */
+app.post("/api/move", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
+  try {
+    const { path: sourcePath, destination } = req.body || {};
+    if (!sourcePath || !destination) {
+      return res.status(400).json({ message: "Укажите путь и папку назначения" });
+    }
+
+    const sourceColumn = columnForPath(sourcePath);
+    const destColumn = columnForPath(destination);
+    if (!sourceColumn || sourceColumn !== destColumn) {
+      return res.status(400).json({ message: "Перемещать можно только внутри одного и того же раздела" });
+    }
+
+    const sourceAbs = filesLib.safeResolve(sourcePath);
+    const destAbs = filesLib.safeResolve(destination);
+    if (destAbs === sourceAbs || destAbs.startsWith(sourceAbs + path.sep)) {
+      return res.status(400).json({ message: "Нельзя переместить папку саму в себя" });
+    }
+
+    if (req.user.role !== "admin" && sourceColumn === "cases") {
+      const rules = await folderAccess.getUserRules(req.user.id);
+      if (folderAccess.resolveAccess(rules, destination) !== "write") {
+        return res.status(403).json({ message: "Нет прав на запись в папку назначения" });
+      }
+    }
+
+    const newPath = await filesLib.moveEntry(sourcePath, destination);
+    if (sourceColumn === "cases") {
+      await folderPermissions.renamePath(sourcePath, newPath);
+    }
+    res.json({ ok: true, path: newPath });
+  } catch (err) {
+    res.status(400).json({ message: "Не удалось переместить: " + err.message });
+  }
+});
+
+/** Копирует файл/папку целиком в другую папку — оригинал остаётся на месте. */
+app.post("/api/copy", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
+  try {
+    const { path: sourcePath, destination } = req.body || {};
+    if (!sourcePath || !destination) {
+      return res.status(400).json({ message: "Укажите путь и папку назначения" });
+    }
+
+    const sourceColumn = columnForPath(sourcePath);
+    const destColumn = columnForPath(destination);
+    if (!sourceColumn || sourceColumn !== destColumn) {
+      return res.status(400).json({ message: "Копировать можно только внутри одного и того же раздела" });
+    }
+
+    const sourceAbs = filesLib.safeResolve(sourcePath);
+    const destAbs = filesLib.safeResolve(destination);
+    if (destAbs === sourceAbs || destAbs.startsWith(sourceAbs + path.sep)) {
+      return res.status(400).json({ message: "Нельзя скопировать папку саму в себя" });
+    }
+
+    if (req.user.role !== "admin" && sourceColumn === "cases") {
+      const rules = await folderAccess.getUserRules(req.user.id);
+      if (folderAccess.resolveAccess(rules, destination) !== "write") {
+        return res.status(403).json({ message: "Нет прав на запись в папку назначения" });
+      }
+    }
+
+    const newPath = await filesLib.copyEntry(sourcePath, destination);
+    res.json({ ok: true, path: newPath });
+  } catch (err) {
+    res.status(400).json({ message: "Не удалось скопировать: " + err.message });
+  }
+});
+
 // Убирает ".." и пустые сегменты из относительного пути, присланного
 // клиентом при загрузке папки — чтобы нельзя было вылезти за пределы
 // целевой директории через специально сформированный путь.

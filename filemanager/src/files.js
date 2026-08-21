@@ -168,7 +168,37 @@ async function buildTree(relPath) {
   return { name: path.basename(abs), isDir: true, children };
 }
 
+/**
+ * Копирует файл или папку целиком (рекурсивно, со всем содержимым) в
+ * другую родительскую папку. Если в целевой папке уже есть что-то с
+ * таким же именем — не перезаписывает, а сама подбирает свободное имя
+ * (добавляет "(копия)", "(копия 2)" и так далее).
+ * Возвращает новый относительный путь.
+ */
+async function copyEntry(relPath, newParentRelPath) {
+  const srcAbs = safeResolve(relPath);
+  const name = path.basename(srcAbs);
+  const destParentAbs = safeResolve(newParentRelPath);
+  await fsp.mkdir(destParentAbs, { recursive: true });
+
+  let destAbs = path.join(destParentAbs, name);
+  let suffix = 0;
+  while (fs.existsSync(destAbs)) {
+    suffix++;
+    const ext = path.extname(name);
+    const base = path.basename(name, ext);
+    const candidateName = suffix === 1 ? `${base} (копия)${ext}` : `${base} (копия ${suffix})${ext}`;
+    destAbs = path.join(destParentAbs, candidateName);
+  }
+
+  await fsp.cp(srcAbs, destAbs, { recursive: true });
+
+  const cleanNewParent = "/" + String(newParentRelPath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const finalName = path.basename(destAbs);
+  return cleanNewParent === "/" ? "/" + finalName : cleanNewParent + "/" + finalName;
+}
+
 module.exports = {
-  DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry,
+  DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry, copyEntry,
   searchTree, buildTree, absolutePathFor,
 };
