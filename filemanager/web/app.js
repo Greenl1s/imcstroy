@@ -1207,7 +1207,6 @@ function escapeHtml(str) {
 }
 
 const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
-const NEXT_STAGE = { plan: "active", active: "control", control: "done" };
 
 function stageBadgeHtml(project) {
   if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
@@ -1238,11 +1237,16 @@ async function updateCaseBanner(path) {
 
 function renderCaseBanner(project) {
   const banner = document.getElementById("caseBanner");
-  const next = NEXT_STAGE[project.stage];
+  const otherStages = ["plan", "active", "control", "done"].filter((s) => s !== project.stage);
 
   const actions = [];
-  if (!project.is_cancelled && next) {
-    actions.push(`<button class="upload-btn" id="caseAdvanceBtn" type="button">Перевести на стадию «${STAGE_LABEL[next]}» →</button>`);
+  if (!project.is_cancelled && otherStages.length) {
+    actions.push(`
+      <select id="caseStageSelect" style="padding:6px 10px; border-radius:8px; border:1px solid var(--border);">
+        ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
+      </select>
+      <button class="upload-btn" id="caseAdvanceBtn" type="button">Переместить</button>
+    `);
   }
   if (!project.is_cancelled) {
     actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
@@ -1258,16 +1262,20 @@ function renderCaseBanner(project) {
   const advanceBtn = document.getElementById("caseAdvanceBtn");
   if (advanceBtn) {
     advanceBtn.addEventListener("click", async () => {
+      const targetStage = document.getElementById("caseStageSelect").value;
       advanceBtn.disabled = true;
       try {
-        await apiFetch(`/api/cases/${project.id}/advance`, { method: "POST" });
+        await apiFetch(`/api/cases/${project.id}/advance`, {
+          method: "POST",
+          body: JSON.stringify({ stage: targetStage }),
+        });
         // Баннер виден только когда стоишь ровно в папке проекта — значит
         // этот самый путь только что переехал и больше не существует.
         // Поднимаемся к колонкам и обновляем список "Дела".
         goToColumns(true);
         loadColumnList("cases");
       } catch (err) {
-        alert("Не удалось перевести на следующую стадию: " + err.message);
+        alert("Не удалось перевести на выбранную стадию: " + err.message);
       } finally {
         advanceBtn.disabled = false;
       }
