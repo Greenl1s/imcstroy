@@ -548,6 +548,12 @@ app.post("/api/move", auth.requireAuth, requireColumnAccess({ write: true }), as
 
     const sourceColumn = columnForPath(sourcePath);
     const destColumn = columnForPath(destination);
+
+    if (sourceColumn === "cases") {
+      return res.status(400).json({
+        message: "В разделе «Дела» перемещение вручную отключено — папки переезжают сами при смене стадии проекта",
+      });
+    }
     if (!sourceColumn || sourceColumn !== destColumn) {
       return res.status(400).json({ message: "Перемещать можно только внутри одного и того же раздела" });
     }
