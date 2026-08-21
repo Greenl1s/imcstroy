@@ -130,6 +130,8 @@ const els = {
   gpTermDays: document.getElementById("gpTermDays"),
   gpTermWords: document.getElementById("gpTermWords"),
   gpExpertsList: document.getElementById("gpExpertsList"),
+  gpExpertsOrderBox: document.getElementById("gpExpertsOrderBox"),
+  gpExpertsOrderList: document.getElementById("gpExpertsOrderList"),
 };
 
 const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
@@ -957,6 +959,44 @@ function numberToWordsRu(num) {
   return parts.join(" ");
 }
 
+// Порядок экспертов в письме — отдельно от порядка в списке галочек
+// (который всегда алфавитный). Пополняется/укорачивается по мере
+// отметки галочек, а переставить местами можно стрелками.
+let gpExpertOrder = [];
+
+function renderGpExpertsOrder() {
+  if (!gpExpertOrder.length) {
+    els.gpExpertsOrderBox.classList.add("hidden");
+    els.gpExpertsOrderList.innerHTML = "";
+    return;
+  }
+  els.gpExpertsOrderBox.classList.remove("hidden");
+  els.gpExpertsOrderList.innerHTML = gpExpertOrder
+    .map((e, i) => `
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:var(--bg-page); border-radius:6px; font-size:13px;">
+        <span style="flex:0 0 20px; color:var(--text-secondary);">${i + 1}.</span>
+        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(e.name)}</span>
+        <button type="button" class="back-btn" data-move-up="${i}" ${i === 0 ? "disabled" : ""} style="padding:2px 8px; font-size:12px;">↑</button>
+        <button type="button" class="back-btn" data-move-down="${i}" ${i === gpExpertOrder.length - 1 ? "disabled" : ""} style="padding:2px 8px; font-size:12px;">↓</button>
+      </div>`)
+    .join("");
+
+  els.gpExpertsOrderList.querySelectorAll("[data-move-up]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.moveUp);
+      [gpExpertOrder[i - 1], gpExpertOrder[i]] = [gpExpertOrder[i], gpExpertOrder[i - 1]];
+      renderGpExpertsOrder();
+    });
+  });
+  els.gpExpertsOrderList.querySelectorAll("[data-move-down]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.moveDown);
+      [gpExpertOrder[i], gpExpertOrder[i + 1]] = [gpExpertOrder[i + 1], gpExpertOrder[i]];
+      renderGpExpertsOrder();
+    });
+  });
+}
+
 async function openGpForm() {
   els.gpForm.reset();
   els.gpQuestionsList.innerHTML = "";
@@ -980,6 +1020,9 @@ async function openGpForm() {
   els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
   els.gpOverlay.classList.remove("hidden");
 
+  gpExpertOrder = [];
+  renderGpExpertsOrder();
+
   try {
     const { experts } = await apiFetch("/api/experts");
     if (!experts || experts.length === 0) {
@@ -991,6 +1034,15 @@ async function openGpForm() {
       const label = document.createElement("label");
       label.style.cssText = "display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;";
       label.innerHTML = `<input type="checkbox" value="${expert.path}"> <span>${expert.name}</span>`;
+      const checkbox = label.querySelector("input");
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          gpExpertOrder.push({ path: expert.path, name: expert.name });
+        } else {
+          gpExpertOrder = gpExpertOrder.filter((e) => e.path !== expert.path);
+        }
+        renderGpExpertsOrder();
+      });
       els.gpExpertsList.appendChild(label);
     }
   } catch (err) {
@@ -1065,8 +1117,7 @@ els.gpForm.addEventListener("submit", async (e) => {
   const questions = [...els.gpQuestionsList.querySelectorAll(".gp-question-input")]
     .map((t) => t.value.trim())
     .filter(Boolean);
-  const expertPaths = [...els.gpExpertsList.querySelectorAll('input[type="checkbox"]:checked')]
-    .map((cb) => cb.value);
+  const expertPaths = gpExpertOrder.map((e) => e.path);
 
   if (questions.length === 0) {
     alert("Добавьте хотя бы один вопрос экспертизы");
