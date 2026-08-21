@@ -110,7 +110,6 @@ const els = {
   casesSelectionBar: document.getElementById("casesSelectionBar"),
   casesSelectionCount: document.getElementById("casesSelectionCount"),
   casesDownloadSelectedBtn: document.getElementById("casesDownloadSelectedBtn"),
-  casesMoveSelectedBtn: document.getElementById("casesMoveSelectedBtn"),
   casesDeleteSelectedBtn: document.getElementById("casesDeleteSelectedBtn"),
   casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
   addGpBtn: document.getElementById("addGpBtn"),
@@ -1612,6 +1611,10 @@ function enterFolderSelectMode() {
   selectedPaths = new Set();
   els.folderActions.classList.add("hidden");
   els.selectionBar.classList.remove("hidden");
+  // В "Дела" перемещение вручную отключено — папки переезжают сами при
+  // смене стадии проекта. Кнопку показываем только для "База данных".
+  const inCases = currentTrail[0] && currentTrail[0].path === CASES_PATH;
+  els.moveSelectedBtn.classList.toggle("hidden", inCases);
   updateSelectionBar();
   renderFolderRows();
 }
@@ -1679,6 +1682,12 @@ const ctxMenuEl = document.getElementById("itemContextMenu");
 
 function showContextMenu(event, path, name, isDir, context) {
   ctxMenuTarget = { path, name, isDir, context };
+
+  // В "Дела" перемещение вручную отключено — папки переезжают сами при
+  // смене стадии проекта. Пункт меню показываем только вне "Дела".
+  const inCases = context === "cases" || path.startsWith(CASES_PATH);
+  ctxMenuEl.querySelector('[data-ctx-action="move"]').classList.toggle("hidden", inCases);
+
   const menuWidth = 190, menuHeight = 230; // с запасом, чтобы не вылезало за край экрана
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
@@ -1876,7 +1885,6 @@ function moveColumnSelected(key) {
 }
 
 els.dbMoveSelectedBtn.addEventListener("click", () => moveColumnSelected("db"));
-els.casesMoveSelectedBtn.addEventListener("click", () => moveColumnSelected("cases"));
 
 els.moveSelectedBtn.addEventListener("click", () => {
   if (selectedPaths.size === 0) return;
