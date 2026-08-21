@@ -37,6 +37,29 @@
   color: var(--danger); border-color: var(--danger); background: transparent;
 }
 
+/* Контекстное меню (правый клик по файлу/папке) */
+.context-menu {
+  position: fixed; z-index: 1000; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 6px; min-width: 180px;
+  display: flex; flex-direction: column;
+}
+.context-menu button {
+  background: none; border: none; text-align: left; padding: 8px 12px;
+  font-size: 13px; border-radius: 6px; cursor: pointer; color: var(--text-primary);
+}
+.context-menu button:hover { background: var(--bg-page); }
+.context-menu button.danger-item { color: var(--danger); }
+
+/* Список папок в окне "Куда переместить" */
+.move-folder-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.move-folder-row:last-child { border-bottom: none; }
+.move-folder-row:hover { background: var(--bg-page); }
+.move-folder-row.disabled { color: var(--text-muted); cursor: not-allowed; }
+
 * { box-sizing: border-box; }
 
 body {

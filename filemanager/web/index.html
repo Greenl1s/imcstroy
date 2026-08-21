@@ -50,7 +50,6 @@
       <div class="col-header">
         <span>База данных</span>
         <div style="display:flex; gap:6px;">
-          <button class="add-btn" id="selectDbBtn" title="Выбрать" aria-label="Выбрать">☑</button>
           <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
         </div>
       </div>
@@ -67,6 +66,7 @@
         <span id="dbSelectionCount">Выбрано: 0</span>
         <div class="selection-actions">
           <button class="back-btn" id="dbDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="dbMoveSelectedBtn" type="button">Переместить</button>
           <button class="back-btn" id="dbDeleteSelectedBtn" type="button">Удалить</button>
           <button class="back-btn" id="dbCancelSelectBtn" type="button">Отмена</button>
         </div>
@@ -80,7 +80,6 @@
         <div style="display:flex; gap:6px;">
           <button class="add-btn" id="addGpBtn" title="Добавить гарантийное письмо" aria-label="Добавить ГП" style="width:auto; padding:0 8px; font-size:11px;">ГП</button>
           <button class="add-btn" id="addProjectBtn" title="Новый проект (экспертиза/НИ)" aria-label="Новый проект" style="width:auto; padding:0 8px; font-size:11px;">Проект</button>
-          <button class="add-btn" id="selectCasesBtn" title="Выбрать" aria-label="Выбрать">☑</button>
           <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
         </div>
       </div>
@@ -97,6 +96,7 @@
         <span id="casesSelectionCount">Выбрано: 0</span>
         <div class="selection-actions">
           <button class="back-btn" id="casesDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="casesMoveSelectedBtn" type="button">Переместить</button>
           <button class="back-btn" id="casesDeleteSelectedBtn" type="button">Удалить</button>
           <button class="back-btn" id="casesCancelSelectBtn" type="button">Отмена</button>
         </div>
@@ -131,7 +131,6 @@
         <button class="upload-btn" id="uploadTriggerBtn" type="button">Загрузить</button>
         <input type="file" id="uploadInput" multiple hidden>
         <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
-        <button class="back-btn" id="selectModeBtn" type="button">Выбрать</button>
         <button class="back-btn" id="backBtn">
           <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           На главную
@@ -141,6 +140,7 @@
         <span id="selectionCount">Выбрано: 0</span>
         <div class="selection-actions">
           <button class="back-btn" id="downloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="moveSelectedBtn" type="button">Переместить</button>
           <button class="back-btn" id="deleteSelectedBtn" type="button">Удалить</button>
           <button class="back-btn" id="cancelSelectBtn" type="button">Отмена</button>
         </div>
@@ -451,6 +451,34 @@
       <button class="primary" type="submit">Добавить</button>
     </form>
     <p id="orgManageError" class="error-text"></p>
+  </div>
+</div>
+
+<div id="itemContextMenu" class="context-menu hidden">
+  <button type="button" data-ctx-action="select">Выбрать</button>
+  <button type="button" data-ctx-action="download">Скачать</button>
+  <button type="button" data-ctx-action="rename">Переименовать</button>
+  <button type="button" data-ctx-action="move">Переместить</button>
+  <button type="button" data-ctx-action="copy">Копировать</button>
+  <button type="button" class="danger-item" data-ctx-action="delete">Удалить</button>
+</div>
+
+<div id="moveOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:480px;">
+    <div class="modal-header">
+      <span>Куда переместить?</span>
+      <button class="back-btn" id="moveCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div id="moveBreadcrumbs" class="breadcrumbs" style="margin-top:8px; font-size:13px;"></div>
+    <div id="moveFolderList" style="max-height:280px; overflow-y:auto; margin-top:10px; border:1px solid var(--border); border-radius:8px;"></div>
+    <button type="button" class="upload-btn" id="moveNewFolderBtn" style="margin-top:10px;">+ Новая папка</button>
+    <p id="moveError" class="error-text"></p>
+    <div class="modal-actions">
+      <button class="primary" id="moveConfirmBtn" type="button" disabled>Переместить</button>
+    </div>
   </div>
 </div>
 

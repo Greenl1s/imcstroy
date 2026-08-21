@@ -70,10 +70,10 @@ const els = {
   chooseFilesBtn: document.getElementById("chooseFilesBtn"),
   chooseFolderBtn: document.getElementById("chooseFolderBtn"),
   folderActions: document.getElementById("folderActions"),
-  selectModeBtn: document.getElementById("selectModeBtn"),
   selectionBar: document.getElementById("selectionBar"),
   selectionCount: document.getElementById("selectionCount"),
   downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
+  moveSelectedBtn: document.getElementById("moveSelectedBtn"),
   deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
   cancelSelectBtn: document.getElementById("cancelSelectBtn"),
   dbSearchInput: document.getElementById("dbSearchInput"),
@@ -99,18 +99,18 @@ const els = {
   downloadAsZipBtn: document.getElementById("downloadAsZipBtn"),
   downloadAsFolderBtn: document.getElementById("downloadAsFolderBtn"),
   downloadFolderHint: document.getElementById("downloadFolderHint"),
-  selectDbBtn: document.getElementById("selectDbBtn"),
   dbToolbar: document.getElementById("dbToolbar"),
   dbSelectionBar: document.getElementById("dbSelectionBar"),
   dbSelectionCount: document.getElementById("dbSelectionCount"),
   dbDownloadSelectedBtn: document.getElementById("dbDownloadSelectedBtn"),
+  dbMoveSelectedBtn: document.getElementById("dbMoveSelectedBtn"),
   dbDeleteSelectedBtn: document.getElementById("dbDeleteSelectedBtn"),
   dbCancelSelectBtn: document.getElementById("dbCancelSelectBtn"),
-  selectCasesBtn: document.getElementById("selectCasesBtn"),
   casesToolbar: document.getElementById("casesToolbar"),
   casesSelectionBar: document.getElementById("casesSelectionBar"),
   casesSelectionCount: document.getElementById("casesSelectionCount"),
   casesDownloadSelectedBtn: document.getElementById("casesDownloadSelectedBtn"),
+  casesMoveSelectedBtn: document.getElementById("casesMoveSelectedBtn"),
   casesDeleteSelectedBtn: document.getElementById("casesDeleteSelectedBtn"),
   casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
   addGpBtn: document.getElementById("addGpBtn"),
@@ -671,8 +671,6 @@ function downloadColumnSelected(key) {
   requestDownload(items);
 }
 
-els.selectDbBtn.addEventListener("click", () => enterColumnSelectMode("db"));
-els.selectCasesBtn.addEventListener("click", () => enterColumnSelectMode("cases"));
 els.dbCancelSelectBtn.addEventListener("click", () => exitColumnSelectMode("db"));
 els.casesCancelSelectBtn.addEventListener("click", () => exitColumnSelectMode("cases"));
 els.dbDeleteSelectedBtn.addEventListener("click", () => deleteColumnSelected("db"));
@@ -728,11 +726,13 @@ function renderColumnList(key) {
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
         ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
-      ${selState.active ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
-      ${selState.active ? "" : `<button class="rename-btn" title="Переименовать" aria-label="Переименовать">${svgRename}</button>`}
       ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
-      ${selState.active ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
     `;
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e, entry.fullPath, entry.name, entry.isDir, key);
+    });
     row.addEventListener("click", () => {
       if (selState.active) {
         toggleColumnSelect(key, entry.fullPath);
@@ -745,40 +745,10 @@ function renderColumnList(key) {
         openFile(entry.fullPath, entry.name);
       }
     });
-    if (!selState.active) {
-      row.querySelector(".download-btn").addEventListener("click", (e) => {
+    if (!selState.active && canManagePerms) {
+      row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
         e.stopPropagation();
-        requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
-      });
-      row.querySelector('[title="Переименовать"]').addEventListener("click", (e) => {
-        e.stopPropagation();
-        promptRename(entry.fullPath, entry.name, () => {
-          if (state.searching) {
-            searchColumn(key, colRefs(key).searchInput.value.trim());
-          } else {
-            loadColumnList(key);
-          }
-        }, entry.isDir);
-      });
-      if (canManagePerms) {
-        row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
-          e.stopPropagation();
-          openFolderPermissions(entry.fullPath, entry.name);
-        });
-      }
-      row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (!confirm(`Удалить «${entry.name}»?`)) return;
-        try {
-          await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
-          if (state.searching) {
-            searchColumn(key, colRefs(key).searchInput.value.trim());
-          } else {
-            loadColumnList(key);
-          }
-        } catch (err) {
-          alert("Не удалось удалить: " + err.message);
-        }
+        openFolderPermissions(entry.fullPath, entry.name);
       });
     }
     container.appendChild(row);
@@ -1557,12 +1527,14 @@ function renderFolderRows() {
       <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
-        ${selectMode ? "" : `<button class="download-btn" title="Скачать" aria-label="Скачать">${svgDownload}</button>`}
-        ${selectMode ? "" : `<button class="rename-btn" title="Переименовать" aria-label="Переименовать">${svgRename}</button>`}
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
-        ${selectMode ? "" : `<button class="delete-btn" title="Удалить" aria-label="Удалить">${svgTrash}</button>`}
       </div>
     `;
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e, entry.fullPath, entry.name, entry.isDir, "folder");
+    });
     row.addEventListener("click", (e) => {
       if (selectMode) {
         toggleSelect(entry.fullPath);
@@ -1575,42 +1547,10 @@ function renderFolderRows() {
         openFile(entry.fullPath, entry.name);
       }
     });
-    if (!selectMode) {
-      row.querySelector(".download-btn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        requestDownload([{ path: entry.fullPath, isDir: entry.isDir }]);
-      });
-      row.querySelector('[title="Переименовать"]').addEventListener("click", (e) => {
-        e.stopPropagation();
-        promptRename(entry.fullPath, entry.name, () => {
-          if (folderSearching) {
-            searchFolder(els.folderSearchInput.value.trim());
-          } else {
-            renderFolder(currentPath);
-          }
-        }, entry.isDir);
-      });
-    }
     if (!selectMode && canManagePerms) {
       row.querySelector('[title="Доступ"]').addEventListener("click", (e) => {
         e.stopPropagation();
         openFolderPermissions(entry.fullPath, entry.name);
-      });
-    }
-    if (!selectMode) {
-      row.querySelector('[title="Удалить"]').addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (!confirm(`Удалить «${entry.name}»?`)) return;
-        try {
-          await apiFetch(`/api/resources?path=${encodeURIComponent(entry.fullPath)}`, { method: "DELETE" });
-          if (folderSearching) {
-            searchFolder(els.folderSearchInput.value.trim());
-          } else {
-            renderFolder(currentPath);
-          }
-        } catch (err) {
-          alert("Не удалось удалить: " + err.message);
-        }
       });
     }
     els.folderList.appendChild(row);
@@ -1665,16 +1605,16 @@ els.backBtn.addEventListener("click", () => {
   goToColumns(true);
 });
 
-/* ---------- Режим выбора (массовое удаление / скачивание) ---------- */
+/* ---------- Режим выбора (массовое удаление / скачивание / перемещение) ---------- */
 
-els.selectModeBtn.addEventListener("click", () => {
+function enterFolderSelectMode() {
   selectMode = true;
   selectedPaths = new Set();
   els.folderActions.classList.add("hidden");
   els.selectionBar.classList.remove("hidden");
   updateSelectionBar();
   renderFolderRows();
-});
+}
 
 els.cancelSelectBtn.addEventListener("click", () => {
   exitSelectMode(true);
@@ -1730,6 +1670,225 @@ els.downloadSelectedBtn.addEventListener("click", () => {
     return { path: p, isDir: found ? found.isDir : false };
   });
   requestDownload(items);
+});
+
+/* ---------- Контекстное меню (правый клик по файлу/папке) ---------- */
+
+let ctxMenuTarget = null; // { path, name, isDir, context }
+const ctxMenuEl = document.getElementById("itemContextMenu");
+
+function showContextMenu(event, path, name, isDir, context) {
+  ctxMenuTarget = { path, name, isDir, context };
+  const menuWidth = 190, menuHeight = 230; // с запасом, чтобы не вылезало за край экрана
+  const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
+  const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+  ctxMenuEl.style.left = `${Math.max(8, x)}px`;
+  ctxMenuEl.style.top = `${Math.max(8, y)}px`;
+  ctxMenuEl.classList.remove("hidden");
+}
+
+function hideContextMenu() {
+  ctxMenuEl.classList.add("hidden");
+  ctxMenuTarget = null;
+}
+
+document.addEventListener("click", hideContextMenu);
+document.addEventListener("contextmenu", (e) => {
+  if (!ctxMenuEl.contains(e.target)) hideContextMenu();
+});
+
+/** Обновляет список после действия — учитывает, что мы сейчас смотрим (колонка/папка) и поиск ли активен. */
+function refreshContext(context) {
+  if (context === "db" || context === "cases") {
+    const state = columnState[context];
+    if (state.searching) searchColumn(context, colRefs(context).searchInput.value.trim());
+    else loadColumnList(context);
+  } else {
+    if (folderSearching) searchFolder(els.folderSearchInput.value.trim());
+    else renderFolder(currentPath);
+  }
+}
+
+/** "Выбрать" из контекстного меню — включает нужный режим выбора (их три разных) и сразу отмечает объект. */
+function enterSelectModeFor(context, fullPath) {
+  if (context === "db" || context === "cases") {
+    if (!columnSelectState[context].active) enterColumnSelectMode(context);
+    toggleColumnSelect(context, fullPath);
+  } else {
+    if (!selectMode) enterFolderSelectMode();
+    toggleSelect(fullPath);
+  }
+}
+
+async function copyItemInPlace(sourcePath, context) {
+  const parent = sourcePath.slice(0, sourcePath.lastIndexOf("/")) || "/";
+  try {
+    await apiFetch("/api/copy", { method: "POST", body: JSON.stringify({ path: sourcePath, destination: parent }) });
+    refreshContext(context);
+  } catch (err) {
+    alert("Не удалось скопировать: " + err.message);
+  }
+}
+
+ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const target = ctxMenuTarget;
+    hideContextMenu();
+    if (!target) return;
+    const action = btn.dataset.ctxAction;
+
+    if (action === "select") {
+      enterSelectModeFor(target.context, target.path);
+    } else if (action === "download") {
+      requestDownload([{ path: target.path, isDir: target.isDir }]);
+    } else if (action === "rename") {
+      promptRename(target.path, target.name, () => refreshContext(target.context), target.isDir);
+    } else if (action === "move") {
+      openMoveModal([{ path: target.path, isDir: target.isDir }], () => refreshContext(target.context));
+    } else if (action === "copy") {
+      await copyItemInPlace(target.path, target.context);
+    } else if (action === "delete") {
+      if (!confirm(`Удалить «${target.name}»?`)) return;
+      try {
+        await apiFetch(`/api/resources?path=${encodeURIComponent(target.path)}`, { method: "DELETE" });
+        refreshContext(target.context);
+      } catch (err) {
+        alert("Не удалось удалить: " + err.message);
+      }
+    }
+  });
+});
+
+/* ---------- Окно "Куда переместить" ---------- */
+
+let moveState = null;
+
+function rootForPath(fullPath) {
+  return fullPath.startsWith(CASES_PATH) ? { path: CASES_PATH, label: "Дела" } : { path: DB_PATH, label: "База данных" };
+}
+
+async function openMoveModal(items, onDone) {
+  if (!items.length) return;
+  const root = rootForPath(items[0].path);
+  moveState = { items, root, currentPath: root.path, onDone };
+  document.getElementById("moveError").textContent = "";
+  document.getElementById("moveOverlay").classList.remove("hidden");
+  await loadMoveFolder(root.path);
+}
+
+async function loadMoveFolder(targetPath) {
+  moveState.currentPath = targetPath;
+  renderMoveBreadcrumbs();
+  const list = document.getElementById("moveFolderList");
+  list.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const data = await apiFetch(`/api/resources?path=${encodeURIComponent(targetPath)}`);
+    const folders = (data.folders || []).map((f) => ({ name: f.name, fullPath: joinPath(targetPath, f.name) }));
+
+    // Папку(и), которую(ые) перемещаем, и всё, что внутри них, — делаем
+    // недоступными для захода/выбора: нельзя переместить папку саму в себя.
+    const movingPaths = moveState.items.filter((it) => it.isDir).map((it) => it.path);
+    const isBlocked = (p) => movingPaths.some((mp) => p === mp || p.startsWith(mp + "/"));
+
+    if (!folders.length) {
+      list.innerHTML = '<div class="empty-hint">Здесь нет вложенных папок</div>';
+    } else {
+      list.innerHTML = folders.map((f) => {
+        const disabled = isBlocked(f.fullPath);
+        return `<div class="move-folder-row${disabled ? " disabled" : ""}" data-move-path="${escapeHtml(f.fullPath)}">
+          ${svgFolder} <span>${escapeHtml(f.name)}</span>
+        </div>`;
+      }).join("");
+      list.querySelectorAll(".move-folder-row:not(.disabled)").forEach((row) => {
+        row.addEventListener("click", () => loadMoveFolder(row.dataset.movePath));
+      });
+    }
+  } catch (err) {
+    list.innerHTML = `<div class="empty-hint">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderMoveBreadcrumbs() {
+  const rel = moveState.currentPath.slice(moveState.root.path.length);
+  const parts = rel.split("/").filter(Boolean);
+  const crumbs = [{ label: moveState.root.label, path: moveState.root.path }];
+  let acc = moveState.root.path;
+  for (const part of parts) {
+    acc = acc + "/" + part;
+    crumbs.push({ label: part, path: acc });
+  }
+  document.getElementById("moveBreadcrumbs").innerHTML = crumbs
+    .map((c, i) => `<span data-move-crumb="${escapeHtml(c.path)}" style="cursor:pointer; ${i === crumbs.length - 1 ? "font-weight:600;" : "color:var(--accent);"}">${escapeHtml(c.label)}</span>`)
+    .join(' <span style="color:var(--text-muted);">/</span> ');
+  document.querySelectorAll("[data-move-crumb]").forEach((el) => {
+    el.addEventListener("click", () => loadMoveFolder(el.dataset.moveCrumb));
+  });
+}
+
+document.getElementById("moveCloseBtn").addEventListener("click", () => {
+  document.getElementById("moveOverlay").classList.add("hidden");
+  moveState = null;
+});
+
+document.getElementById("moveNewFolderBtn").addEventListener("click", async () => {
+  const name = prompt("Название новой папки:");
+  if (!name || !name.trim()) return;
+  try {
+    await apiFetch("/api/folder", { method: "POST", body: JSON.stringify({ path: joinPath(moveState.currentPath, name.trim()) }) });
+    await loadMoveFolder(moveState.currentPath);
+  } catch (err) {
+    document.getElementById("moveError").textContent = err.message;
+  }
+});
+
+document.getElementById("moveConfirmBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("moveConfirmBtn");
+  btn.disabled = true;
+  document.getElementById("moveError").textContent = "";
+  try {
+    for (const item of moveState.items) {
+      await apiFetch("/api/move", { method: "POST", body: JSON.stringify({ path: item.path, destination: moveState.currentPath }) });
+    }
+    document.getElementById("moveOverlay").classList.add("hidden");
+    const onDone = moveState.onDone;
+    moveState = null;
+    if (onDone) onDone();
+  } catch (err) {
+    document.getElementById("moveError").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/** Перемещение сразу нескольких отмеченных объектов — из панели массовых действий. */
+function moveColumnSelected(key) {
+  const st = columnSelectState[key];
+  if (st.selected.size === 0) return;
+  const state = columnState[key];
+  const items = [...st.selected].map((p) => {
+    const found = state.entries.find((e) => e.fullPath === p);
+    return { path: p, isDir: found ? found.isDir : false };
+  });
+  openMoveModal(items, () => {
+    exitColumnSelectMode(key);
+    loadColumnList(key);
+  });
+}
+
+els.dbMoveSelectedBtn.addEventListener("click", () => moveColumnSelected("db"));
+els.casesMoveSelectedBtn.addEventListener("click", () => moveColumnSelected("cases"));
+
+els.moveSelectedBtn.addEventListener("click", () => {
+  if (selectedPaths.size === 0) return;
+  const source = folderSearching ? folderSearchResults : currentFolderEntries;
+  const items = [...selectedPaths].map((p) => {
+    const found = source.find((e) => e.fullPath === p);
+    return { path: p, isDir: found ? found.isDir : false };
+  });
+  openMoveModal(items, () => {
+    exitSelectMode(false);
+    renderFolder(currentPath);
+  });
 });
 
 /* ---------- Upload (с наглядным прогрессом) ---------- */
