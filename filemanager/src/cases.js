@@ -272,10 +272,18 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
   try {
     const kase = req.case;
     if (kase.is_cancelled) return res.status(409).json({ message: "Проект отменён" });
-    const nextStage = NEXT_STAGE[kase.stage];
-    if (!nextStage) return res.status(409).json({ message: "Проект уже на последней стадии" });
 
-    const newParent = caseFolders.stageRootPath(nextStage);
+    // Стадию можно указать явно (выбор из списка на карточке) — если не
+    // указана, используем прежнее поведение "на следующую по порядку".
+    const targetStage = req.body?.stage || NEXT_STAGE[kase.stage];
+    if (!targetStage || !STAGE_LABEL[targetStage]) {
+      return res.status(400).json({ message: "Некорректная стадия" });
+    }
+    if (targetStage === kase.stage) {
+      return res.status(409).json({ message: "Проект уже на этой стадии" });
+    }
+
+    const newParent = caseFolders.stageRootPath(targetStage);
     const newPath = await files.moveEntry(kase.folder_path, newParent);
     await folderPermissions.renamePath(kase.folder_path, newPath);
 
@@ -284,13 +292,13 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
           SET stage = $2, folder_path = $3, status = 'waiting', updated_at = now(),
               archived_at = CASE WHEN $2 = 'done' THEN now() ELSE archived_at END
         WHERE id = $1 RETURNING *`,
-      [kase.id, nextStage, newPath]
+      [kase.id, targetStage, newPath]
     );
 
     await db.query(
       `INSERT INTO case_history (case_id, action, from_stage, to_stage, actor_id, note)
        VALUES ($1, 'stage_changed', $2, $3, $4, $5)`,
-      [kase.id, kase.stage, nextStage, req.user.id, `Переведён на стадию «${STAGE_LABEL[nextStage]}»`]
+      [kase.id, kase.stage, targetStage, req.user.id, `Переведён на стадию «${STAGE_LABEL[targetStage]}»`]
     );
 
     res.json(updated[0]);
