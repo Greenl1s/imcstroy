@@ -9,6 +9,7 @@ const folderAccess = require("./folderAccess");
 const attachments = require("./caseAttachments");
 const fileTextExtract = require("./fileTextExtract");
 const aiExtract = require("./aiExtract");
+const caseChat = require("./caseChat");
 const auth = require("./auth");
 const journalExcel = require("./journalExcel");
 
@@ -355,6 +356,45 @@ cases.get("/:id/history", loadCase, async (req, res) => {
     [req.params.id]
   );
   res.json(rows);
+});
+
+/** История переписки с ИИ-ассистентом по этому проекту — от старых к новым. */
+cases.get("/:id/chat", loadCase, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT id, role, content, created_at FROM case_chat_messages WHERE case_id = $1 ORDER BY created_at ASC`,
+    [req.params.id]
+  );
+  res.json(rows);
+});
+
+/**
+ * Отправить сообщение ИИ-ассистенту по этому проекту. Право на само
+ * общение с ассистентом — то же, что и на запись в проект (write) —
+ * ассистент ведь может и менять данные проекта по просьбе.
+ */
+cases.post("/:id/chat", loadCase, requireWriteOnCaseFolder, async (req, res) => {
+  const message = String(req.body?.message || "").trim();
+  if (!message) return res.status(400).json({ message: "Пустое сообщение" });
+
+  try {
+    const { rows: history } = await db.query(
+      `SELECT role, content FROM case_chat_messages WHERE case_id = $1 ORDER BY created_at ASC LIMIT 30`,
+      [req.case.id]
+    );
+
+    const answer = await caseChat.chatWithProject(req.case, history, message, req.user.id);
+
+    await db.query(
+      `INSERT INTO case_chat_messages (case_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
+      [req.case.id, message, answer]
+    );
+
+    res.json({ answer });
+    refreshJournalSafely(); // на случай, если ассистент поменял стадию/поля по просьбе
+  } catch (err) {
+    console.error("Ошибка чата с ассистентом:", err);
+    res.status(500).json({ message: "Не удалось получить ответ: " + err.message });
+  }
 });
 
 module.exports = { cases };
