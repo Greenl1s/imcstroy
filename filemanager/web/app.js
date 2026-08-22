@@ -1223,15 +1223,19 @@ function stageBadgeHtml(project) {
  */
 async function updateCaseBanner(path) {
   const banner = document.getElementById("caseBanner");
+  const chatBox = document.getElementById("caseChatBox");
   if (!path.startsWith(CASES_PATH)) {
     banner.classList.add("hidden");
+    chatBox.classList.add("hidden");
     return;
   }
   try {
     const project = await apiFetch(`/api/cases/by-path?path=${encodeURIComponent(path)}`);
     renderCaseBanner(project);
+    openCaseChatFor(project.id);
   } catch {
     banner.classList.add("hidden");
+    chatBox.classList.add("hidden");
   }
 }
 
@@ -1303,6 +1307,86 @@ function renderCaseBanner(project) {
     });
   }
 }
+
+/* ---- Чат-ассистент внутри карточки проекта ---- */
+
+let caseChatCurrentId = null;
+
+function openCaseChatFor(caseId) {
+  const chatBox = document.getElementById("caseChatBox");
+  chatBox.classList.remove("hidden");
+  if (caseChatCurrentId === caseId) return; // уже открыт этот же проект — не перезагружаем зря
+  caseChatCurrentId = caseId;
+  document.getElementById("caseChatMessages").innerHTML = "";
+  // Сворачиваем при переходе к новому проекту — раскроется, если понадобится.
+  document.getElementById("caseChatBody").classList.add("hidden");
+  document.getElementById("caseChatArrow").textContent = "▾";
+}
+
+document.getElementById("caseChatToggle").addEventListener("click", async () => {
+  const body = document.getElementById("caseChatBody");
+  const arrow = document.getElementById("caseChatArrow");
+  const opening = body.classList.contains("hidden");
+  body.classList.toggle("hidden");
+  arrow.textContent = opening ? "▴" : "▾";
+  if (opening && caseChatCurrentId) {
+    await loadCaseChatHistory(caseChatCurrentId);
+  }
+});
+
+async function loadCaseChatHistory(caseId) {
+  const container = document.getElementById("caseChatMessages");
+  try {
+    const history = await apiFetch(`/api/cases/${caseId}/chat`);
+    if (!history.length) {
+      container.innerHTML = '<div class="row-subtitle" style="text-align:center;">Пока пусто — задайте вопрос по проекту</div>';
+      return;
+    }
+    container.innerHTML = "";
+    for (const m of history) appendCaseChatMessage(m.role, m.content);
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    container.innerHTML = `<div class="row-subtitle">Не удалось загрузить историю: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function appendCaseChatMessage(role, text, pending) {
+  const container = document.getElementById("caseChatMessages");
+  const bubble = document.createElement("div");
+  bubble.className = `case-chat-msg ${role}${pending ? " pending" : ""}`;
+  bubble.textContent = text;
+  container.appendChild(bubble);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+document.getElementById("caseChatForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("caseChatInput");
+  const text = input.value.trim();
+  if (!text || !caseChatCurrentId) return;
+
+  input.value = "";
+  const sendBtn = document.getElementById("caseChatSendBtn");
+  sendBtn.disabled = true;
+
+  appendCaseChatMessage("user", text);
+  const pendingBubble = appendCaseChatMessage("assistant", "Думаю…", true);
+
+  try {
+    const { answer } = await apiFetch(`/api/cases/${caseChatCurrentId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+    pendingBubble.textContent = answer;
+    pendingBubble.classList.remove("pending");
+  } catch (err) {
+    pendingBubble.textContent = "Не удалось получить ответ: " + err.message;
+    pendingBubble.classList.remove("pending");
+  } finally {
+    sendBtn.disabled = false;
+  }
+});
 
 /* ---- Форма создания проекта ---- */
 

@@ -109,6 +109,19 @@
     <div class="folder-header">
       <div class="breadcrumbs" id="breadcrumbs"></div>
       <div id="caseBanner" class="case-banner hidden"></div>
+      <div id="caseChatBox" class="case-chat-box hidden">
+        <div class="case-chat-header" id="caseChatToggle">
+          <span>💬 Спросить ассистента по проекту</span>
+          <span id="caseChatArrow">▾</span>
+        </div>
+        <div id="caseChatBody" class="hidden">
+          <div id="caseChatMessages" class="case-chat-messages"></div>
+          <form id="caseChatForm" class="case-chat-form">
+            <input type="text" id="caseChatInput" placeholder="Например: составь отказное письмо" autocomplete="off">
+            <button type="submit" class="primary" id="caseChatSendBtn">Отправить</button>
+          </form>
+        </div>
+      </div>
       <div class="folder-actions" id="folderActions">
         <div class="add-menu-wrap">
           <button class="upload-btn" id="addMenuBtn" type="button">Добавить</button>
