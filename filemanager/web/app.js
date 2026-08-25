@@ -1469,7 +1469,7 @@ async function loadPlanfixTasksList() {
     const { tasks } = await apiFetch(`/api/cases/planfix/stage-tasks/${planfixTasksCurrentProject.stage}`);
 
     list.innerHTML = tasks.length
-      ? tasks.map((name) => buildPlanfixTaskRowHtml(name, false)).join("")
+      ? tasks.map((t) => buildPlanfixTaskRowHtml(t.name, false)).join("")
       : '<div class="row-subtitle">Для этой стадии типовых задач не предусмотрено</div>';
 
     list.querySelectorAll(".pf-task-row").forEach(wirePlanfixTaskRow);
@@ -1479,10 +1479,28 @@ async function loadPlanfixTasksList() {
   }
 }
 
-document.getElementById("planfixCustomTaskAddBtn").addEventListener("click", () => {
+document.getElementById("planfixCustomTaskAddBtn").addEventListener("click", async () => {
   const input = document.getElementById("planfixCustomTaskInput");
   const name = input.value.trim();
-  if (!name) return;
+  if (!name || !planfixTasksCurrentProject) return;
+
+  const errorEl = document.getElementById("planfixTasksError");
+  errorEl.textContent = "";
+
+  // Сохраняем в общий справочник — чтобы задача появилась у всех
+  // проектов на этой же стадии, а не только в этом одном месте.
+  try {
+    await apiFetch("/api/cases/planfix/stage-tasks", {
+      method: "POST",
+      body: JSON.stringify({ stage: planfixTasksCurrentProject.stage, name }),
+    });
+  } catch (err) {
+    // "уже есть в списке" — не страшно, просто добавляем в форму как обычно.
+    if (!/уже есть/.test(err.message)) {
+      errorEl.textContent = "Не удалось сохранить в общий список: " + err.message;
+      return;
+    }
+  }
 
   const list = document.getElementById("planfixTasksList");
   // Если список сейчас пуст/показывает подсказку "нет задач" — очищаем перед вставкой первой своей.
@@ -1573,10 +1591,89 @@ async function loadOrganizationsSelect() {
   } catch { /* список организаций необязателен для работы формы */ }
 }
 
+/* ---- Материалы при создании проекта (без ИИ — просто выбор папки) ---- */
+
+// Файлы копятся здесь локально (браузер), реально загружаются на сервер
+// только в момент отправки формы — чтобы не заливать лишнее, если
+// передумали и убрали файл до создания проекта.
+let pfPendingFiles = { zapros: [], materials: [] };
+
+function resetPendingProjectFiles() {
+  pfPendingFiles = { zapros: [], materials: [] };
+  document.getElementById("pfAttachZapros").value = "";
+  document.getElementById("pfAttachMaterials").value = "";
+  renderPendingFileList("zapros");
+  renderPendingFileList("materials");
+}
+
+function renderPendingFileList(zone) {
+  const container = document.getElementById(zone === "zapros" ? "pfAttachZaprosList" : "pfAttachMaterialsList");
+  container.innerHTML = pfPendingFiles[zone]
+    .map((f, i) => `
+      <div class="pf-attach-file-row">
+        <span>${escapeHtml(f.name)}</span>
+        <button type="button" data-remove-zone="${zone}" data-remove-index="${i}">✕</button>
+      </div>`)
+    .join("");
+  container.querySelectorAll("[data-remove-index]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pfPendingFiles[btn.dataset.removeZone].splice(Number(btn.dataset.removeIndex), 1);
+      renderPendingFileList(btn.dataset.removeZone);
+    });
+  });
+}
+
+function wireAttachZone(zone, buttonId, inputId) {
+  const button = document.getElementById(buttonId);
+  const input = document.getElementById(inputId);
+  button.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    for (const file of input.files) pfPendingFiles[zone].push(file);
+    input.value = ""; // чтобы можно было выбрать тот же файл повторно, если удалили и передумали
+    renderPendingFileList(zone);
+  });
+}
+wireAttachZone("zapros", "pfAttachZaprosBtn", "pfAttachZapros");
+wireAttachZone("materials", "pfAttachMaterialsBtn", "pfAttachMaterials");
+
+/**
+ * Загружает выбранные файлы на сервер (обе зоны — в один и тот же
+ * черновик) и возвращает {batchId, fileAssignments} для отправки вместе
+ * с созданием проекта. Если файлов вообще не было — возвращает null.
+ */
+async function uploadPendingProjectFiles() {
+  const hasFiles = pfPendingFiles.zapros.length || pfPendingFiles.materials.length;
+  if (!hasFiles) return null;
+
+  let batchId = null;
+  const fileAssignments = [];
+
+  async function uploadZone(files, category) {
+    if (!files.length) return;
+    const formData = new FormData();
+    for (const f of files) formData.append("files", f);
+    const url = batchId ? `/api/cases/stage-files?batchId=${encodeURIComponent(batchId)}` : "/api/cases/stage-files";
+    const res = await fetch(url, { method: "POST", credentials: "include", body: formData });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Не удалось загрузить файлы");
+    const data = await res.json();
+    batchId = data.batchId;
+    for (const r of data.results) {
+      if (r.key) fileAssignments.push({ key: r.key, category });
+      else throw new Error(`Не удалось загрузить файл «${r.filename}»: ${r.error}`);
+    }
+  }
+
+  await uploadZone(pfPendingFiles.zapros, "запрос");
+  await uploadZone(pfPendingFiles.materials, "первичные_материалы");
+
+  return { batchId, fileAssignments };
+}
+
 async function openProjectForm() {
   els.projectFormError.textContent = "";
   els.projectForm.reset();
   await loadOrganizationsSelect();
+  resetPendingProjectFiles();
 
   const managerSelect = document.getElementById("pfManager");
   managerSelect.innerHTML = '<option value="">Не выбран</option>';
@@ -1666,6 +1763,21 @@ els.projectForm.addEventListener("submit", async (event) => {
   const prefix = type === "expertise" ? "ЭКС." : "НИ.";
   const name = rawName.startsWith(prefix) ? rawName : prefix + rawName;
 
+  const submitBtn = els.projectForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+
+  let uploaded = null;
+  try {
+    submitBtn.textContent = "Загружаем файлы…";
+    uploaded = await uploadPendingProjectFiles();
+  } catch (err) {
+    els.projectFormError.textContent = "Не удалось загрузить файлы: " + err.message;
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Создать проект";
+    return;
+  }
+  submitBtn.textContent = "Создать проект";
+
   const body = {
     type, stage, name,
     direct_assignment: stage === "active",
@@ -1679,11 +1791,13 @@ els.projectForm.addEventListener("submit", async (event) => {
     judge_name: document.getElementById("pfJudgeName").value.trim() || null,
     experts: document.getElementById("pfExperts").value.trim() || null,
     description: document.getElementById("pfDescription").value.trim() || null,
+    ...(uploaded ? { batchId: uploaded.batchId, fileAssignments: uploaded.fileAssignments } : {}),
   };
 
   try {
     await apiFetch("/api/cases", { method: "POST", body: JSON.stringify(body) });
     els.projectFormOverlay.classList.add("hidden");
+    resetPendingProjectFiles();
     // Обновляем список: если мы сейчас внутри "Дела" — перерисовываем
     // открытую папку, иначе (на экране колонок) — саму колонку "Дела".
     if (currentPath && currentPath.startsWith(CASES_PATH)) {
@@ -1693,6 +1807,13 @@ els.projectForm.addEventListener("submit", async (event) => {
     }
   } catch (err) {
     els.projectFormError.textContent = err.message;
+    // Файлы уже загружены на сервер (в черновик), а сам проект — нет.
+    // Подчищаем черновик, чтобы он не остался висеть без дела.
+    if (uploaded?.batchId) {
+      apiFetch(`/api/cases/analyze-files/${uploaded.batchId}/discard`, { method: "POST" }).catch(() => {});
+    }
+  } finally {
+    submitBtn.disabled = false;
   }
 });
 
