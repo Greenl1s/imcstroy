@@ -2595,12 +2595,20 @@ async function writeFileToHandle(relPath, parentHandle) {
 /* ---------- Init ---------- */
 
 /** Виджет места на диске в боковой панели — грузится один раз при входе. */
+/** "9.4" -> "9.4ГБ", "1234" (ГБ) -> "1.2ТБ" — компактно, чтобы влезло в узкую колонку. */
+function formatCompactSize(bytes) {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1000) return `${(gb / 1024).toFixed(1)}ТБ`;
+  if (gb >= 10) return `${Math.round(gb)}ГБ`;
+  return `${gb.toFixed(1)}ГБ`;
+}
+
 async function loadDiskUsage() {
   try {
     const data = await apiFetch("/api/disk-usage");
     const gb = (bytes) => (bytes / 1024 ** 3).toFixed(1);
     const fill = document.getElementById("diskUsageFill");
-    const percentEl = document.getElementById("diskUsagePercent");
+    const freeEl = document.getElementById("diskUsageFree");
     const widget = document.getElementById("diskUsageWidget");
 
     fill.style.height = `${data.percentUsed}%`;
@@ -2608,8 +2616,9 @@ async function loadDiskUsage() {
     if (data.percentUsed >= 90) fill.classList.add("rail-disk-danger");
     else if (data.percentUsed >= 75) fill.classList.add("rail-disk-warn");
 
-    percentEl.textContent = `${data.percentUsed}%`;
-    widget.title = `Занято ${gb(data.used)} ГБ из ${gb(data.total)} ГБ (свободно ${gb(data.free)} ГБ)`;
+    // Под полоской — сколько СВОБОДНО (самое нужное число), в компактном виде.
+    freeEl.textContent = formatCompactSize(data.free);
+    widget.title = `Свободно: ${gb(data.free)} ГБ\nЗанято: ${gb(data.used)} ГБ\nВсего: ${gb(data.total)} ГБ (${data.percentUsed}%)`;
   } catch {
     // Виджет необязателен для работы — просто оставляем плейсхолдер, если не получилось.
   }

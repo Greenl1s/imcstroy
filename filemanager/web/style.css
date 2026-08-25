@@ -217,7 +217,7 @@ button.primary:hover { background: #2569c9; }
 .rail-disk-fill { width: 100%; background: var(--accent); transition: height 0.4s ease; }
 .rail-disk-fill.rail-disk-warn { background: #e0a020; }
 .rail-disk-fill.rail-disk-danger { background: var(--danger); }
-.rail-disk-percent { font-size: 10px; color: var(--text-secondary); font-weight: 600; }
+.rail-disk-percent { font-size: 9px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
 
 /* Columns view */
 .columns-view { flex: 1; display: flex; gap: 12px; flex-wrap: wrap; }
