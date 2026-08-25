@@ -137,30 +137,54 @@ cases.get("/by-path", async (req, res) => {
 // Типовые задачи по стадиям — Приложение 1 рабочей инструкции.
 // Живут прямо в коде: это фиксированный по инструкции список, редко
 // меняется, а держать отдельную таблицу под него было бы избыточно.
-const STAGE_TASKS = {
-  plan: ["Принять решение о направлении ГП", "Отправка ГП", "Контроль определения о назначении"],
-  active: [
-    "Получение материалов дела",
-    "Отправка ходатайства о получении материалов дела и продлении срока",
-    "Крайний срок сдачи экспертизы",
-    "Доложить статус формирования заключения",
-    "Сдать итоговое заключение",
-    "Согласовать заключение эксперта",
-    "Сформировать сопроводительное письмо",
-    "Направить заключение в суд",
-  ],
-  control: [
-    "Контроль судебного процесса",
-    "Контроль оплаты",
-    "Ходатайство об ознакомлении с материалами дела",
-    "Ходатайство на участие в электронном заседании",
-    "Принять участие в заседании",
-  ],
-};
+const PLANFIX_STAGES_WITH_TASKS = ["plan", "active", "control"];
 
-/** Список типовых задач для стадии — используется формой выбора задач в интерфейсе. */
-cases.get("/planfix/stage-tasks/:stage", (req, res) => {
-  res.json({ tasks: STAGE_TASKS[req.params.stage] || [] });
+/** Список типовых задач для стадии — теперь из общего справочника, а не зашит в код. */
+cases.get("/planfix/stage-tasks/:stage", async (req, res) => {
+  if (!PLANFIX_STAGES_WITH_TASKS.includes(req.params.stage)) {
+    return res.json({ tasks: [] });
+  }
+  const { rows } = await db.query(
+    "SELECT id, name FROM planfix_task_templates WHERE stage = $1 ORDER BY position, id",
+    [req.params.stage]
+  );
+  res.json({ tasks: rows });
+});
+
+/**
+ * Добавить новую задачу в общий справочник для стадии — доступно всем
+ * с правом на "Дела" (не только админу): это рабочий, а не настроечный
+ * список, добавлять туда должен уметь любой делопроизводитель.
+ */
+cases.post("/planfix/stage-tasks", async (req, res) => {
+  const stage = req.body?.stage;
+  const name = String(req.body?.name || "").trim();
+  if (!PLANFIX_STAGES_WITH_TASKS.includes(stage)) {
+    return res.status(400).json({ message: "Некорректная стадия" });
+  }
+  if (!name) return res.status(400).json({ message: "Укажите название задачи" });
+
+  try {
+    const { rows: maxPos } = await db.query(
+      "SELECT COALESCE(MAX(position), 0) AS max FROM planfix_task_templates WHERE stage = $1",
+      [stage]
+    );
+    const { rows } = await db.query(
+      "INSERT INTO planfix_task_templates (stage, name, position) VALUES ($1, $2, $3) RETURNING id, name",
+      [stage, name, maxPos[0].max + 1]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ message: "Такая задача уже есть в списке для этой стадии" });
+    throw err;
+  }
+});
+
+/** Удалить задачу из справочника — тоже доступно всем с правом на "Дела". */
+cases.delete("/planfix/stage-tasks/:id", async (req, res) => {
+  const { rowCount } = await db.query("DELETE FROM planfix_task_templates WHERE id = $1", [req.params.id]);
+  if (!rowCount) return res.status(404).json({ message: "Задача не найдена" });
+  res.json({ ok: true });
 });
 
 /** Список сотрудников Planfix — для выбора исполнителя. */
@@ -262,6 +286,37 @@ cases.post("/analyze-files", upload.array("files", 10), async (req, res) => {
 cases.post("/analyze-files/:batchId/discard", async (req, res) => {
   await attachments.discardBatch(req.params.batchId);
   res.json({ ok: true });
+});
+
+/**
+ * Простая загрузка файлов в черновик — без распознавания ИИ, просто
+ * складывает файлы, чтобы потом раскидать по нужным папкам при создании
+ * проекта. Можно передать уже существующий batchId (query-параметр),
+ * если загружаем вторую партию файлов в тот же черновик (например,
+ * сначала в "Запрос", потом ещё и в "Первичные материалы").
+ */
+cases.post("/stage-files", upload.array("files", 20), async (req, res) => {
+  if (!req.files || !req.files.length) {
+    return res.status(400).json({ message: "Файлы не получены" });
+  }
+
+  const batchId = req.query.batchId || attachments.newBatchId();
+  const results = [];
+
+  for (const file of req.files) {
+    const filename = Buffer.from(file.originalname, "latin1").toString("utf8");
+    try {
+      const key = await attachments.stageFile(batchId, filename, file.path);
+      results.push({ key, filename });
+    } catch (err) {
+      console.error(`Не удалось загрузить файл "${filename}":`, err.message);
+      results.push({ key: null, filename, error: err.message });
+    } finally {
+      await fs.promises.unlink(file.path).catch(() => {});
+    }
+  }
+
+  res.json({ batchId, results });
 });
 
 cases.post("/", async (req, res) => {
