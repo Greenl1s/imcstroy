@@ -190,6 +190,20 @@ app.get("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   }
 });
 
+/** Место на диске сервера — для виджета в боковой панели. Доступно любому вошедшему. */
+app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
+  try {
+    const stats = await fs.promises.statfs(filesLib.DATA_ROOT);
+    const total = stats.blocks * stats.bsize;
+    const free = stats.bavail * stats.bsize;
+    const used = total - free;
+    res.json({ total, free, used, percentUsed: total > 0 ? Math.round((used / total) * 100) : 0 });
+  } catch (err) {
+    console.error("Не удалось получить сведения о месте на диске:", err);
+    res.status(500).json({ message: "Не удалось получить сведения о месте на диске" });
+  }
+});
+
 app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     const { username, password, role, can_tools, can_db, can_cases } = req.body || {};
