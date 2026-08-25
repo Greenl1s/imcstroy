@@ -99,4 +99,43 @@ async function syncProjectToPlanfix(kase) {
   return created.id;
 }
 
-module.exports = { syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest };
+/** Список сотрудников Planfix — для выбора исполнителя задачи. */
+async function listPlanfixEmployees() {
+  const data = await planfixRequest("POST", "/user/list", { offset: 0, pageSize: 100, fields: "id,name" });
+  return data.users || [];
+}
+
+/** "2026-09-01" (как приходит из <input type="date">) -> "01-09-2026" (формат Planfix). */
+function formatDateForPlanfix(isoDate) {
+  const [year, month, day] = String(isoDate).split("-");
+  if (!year || !month || !day) return null;
+  return `${day}-${month}-${year}`;
+}
+
+/**
+ * Создаёт одну задачу в Planfix, привязанную к проекту. Исполнитель и
+ * срок — необязательны (можно поставить задачу без них, если по смыслу
+ * не нужны прямо сейчас).
+ */
+async function createPlanfixTask({ name, projectId, assigneeId, deadlineIso }) {
+  const body = {
+    name,
+    description: "",
+    project: { id: projectId },
+  };
+  if (assigneeId) {
+    body.assignees = { users: [{ id: `user:${assigneeId}` }] };
+  }
+  const deadline = deadlineIso ? formatDateForPlanfix(deadlineIso) : null;
+  if (deadline) {
+    body.endDateTime = { date: deadline, dateType: "otherDate" };
+  }
+
+  const created = await planfixRequest("POST", "/task/", body);
+  return created.id;
+}
+
+module.exports = {
+  syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
+  listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
+};

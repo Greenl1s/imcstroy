@@ -134,6 +134,74 @@ cases.get("/by-path", async (req, res) => {
   res.json(rows[0]);
 });
 
+// Типовые задачи по стадиям — Приложение 1 рабочей инструкции.
+// Живут прямо в коде: это фиксированный по инструкции список, редко
+// меняется, а держать отдельную таблицу под него было бы избыточно.
+const STAGE_TASKS = {
+  plan: ["Принять решение о направлении ГП", "Отправка ГП", "Контроль определения о назначении"],
+  active: [
+    "Получение материалов дела",
+    "Отправка ходатайства о получении материалов дела и продлении срока",
+    "Крайний срок сдачи экспертизы",
+    "Доложить статус формирования заключения",
+    "Сдать итоговое заключение",
+    "Согласовать заключение эксперта",
+    "Сформировать сопроводительное письмо",
+    "Направить заключение в суд",
+  ],
+  control: [
+    "Контроль судебного процесса",
+    "Контроль оплаты",
+    "Ходатайство об ознакомлении с материалами дела",
+    "Ходатайство на участие в электронном заседании",
+    "Принять участие в заседании",
+  ],
+};
+
+/** Список типовых задач для стадии — используется формой выбора задач в интерфейсе. */
+cases.get("/planfix/stage-tasks/:stage", (req, res) => {
+  res.json({ tasks: STAGE_TASKS[req.params.stage] || [] });
+});
+
+/** Список сотрудников Planfix — для выбора исполнителя. */
+cases.get("/planfix/employees", async (req, res) => {
+  try {
+    const employees = await planfixSync.listPlanfixEmployees();
+    res.json({ employees });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить список сотрудников Planfix: " + err.message });
+  }
+});
+
+/** Создаёт выбранные задачи в Planfix для проекта — с исполнителем и сроком, если указаны. */
+cases.post("/:id/planfix-tasks", loadCase, requireWriteOnCaseFolder, async (req, res) => {
+  const kase = req.case;
+  if (!kase.planfix_id) {
+    return res.status(400).json({ message: "У проекта ещё нет карточки в Planfix — подождите синхронизации и попробуйте снова" });
+  }
+
+  const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
+  if (!tasks.length) return res.status(400).json({ message: "Не выбрано ни одной задачи" });
+
+  const results = [];
+  for (const t of tasks) {
+    const name = String(t?.name || "").trim();
+    if (!name) continue;
+    try {
+      const taskId = await planfixSync.createPlanfixTask({
+        name,
+        projectId: kase.planfix_id,
+        assigneeId: t.assigneeId || null,
+        deadlineIso: t.deadline || null,
+      });
+      results.push({ name, ok: true, taskId });
+    } catch (err) {
+      results.push({ name, ok: false, error: err.message });
+    }
+  }
+  res.json({ results });
+});
+
 cases.get("/:id", loadCase, async (req, res) => {
   const { rows } = await db.query(`${CASE_LIST_QUERY} WHERE c.id = $1`, [req.params.id]);
   res.json(rows[0]);
