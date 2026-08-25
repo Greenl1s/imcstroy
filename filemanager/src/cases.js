@@ -26,6 +26,28 @@ async function refreshJournalSafely() {
   }
 }
 
+const planfixSync = require("./planfixSync");
+
+/**
+ * Синхронизирует проект с Planfix и, если это создание новой карточки,
+ * сохраняет полученный planfix_id обратно в базу. Никогда не мешает
+ * основной операции — Planfix может быть временно недоступен, это не
+ * должно ломать работу в ИСУ, только предупреждать в логах.
+ */
+async function syncPlanfixSafely(caseId) {
+  try {
+    const { rows } = await db.query("SELECT * FROM cases WHERE id = $1", [caseId]);
+    if (!rows.length) return;
+    const kase = rows[0];
+    const planfixId = await planfixSync.syncProjectToPlanfix(kase);
+    if (!kase.planfix_id && planfixId) {
+      await db.query("UPDATE cases SET planfix_id = $2 WHERE id = $1", [caseId, planfixId]);
+    }
+  } catch (err) {
+    console.error("Не удалось синхронизировать проект с Planfix:", err.message);
+  }
+}
+
 const UPLOAD_TMP_DIR = "/tmp/fm-uploads";
 fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
 const upload = multer({ dest: UPLOAD_TMP_DIR });
@@ -231,6 +253,7 @@ cases.post("/", async (req, res) => {
 
     res.status(201).json(created);
     refreshJournalSafely();
+    syncPlanfixSafely(created.id);
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({ message: "Проект с таким наименованием уже существует" });
@@ -262,6 +285,7 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
   );
   res.json(rows[0]);
   refreshJournalSafely();
+  syncPlanfixSafely(req.params.id);
 });
 
 // Строгий порядок движения по стадиям — без пропусков, как в инструкции.
@@ -304,6 +328,7 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
 
     res.json(updated[0]);
     refreshJournalSafely();
+    syncPlanfixSafely(kase.id);
   } catch (err) {
     console.error("Не удалось изменить стадию:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось изменить стадию" });
@@ -339,6 +364,7 @@ cases.post("/:id/cancel", loadCase, requireWriteOnCaseFolder, async (req, res) =
 
     res.json(updated[0]);
     refreshJournalSafely();
+    syncPlanfixSafely(kase.id);
   } catch (err) {
     console.error("Не удалось отменить проект:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось отменить проект" });
@@ -391,6 +417,7 @@ cases.post("/:id/chat", loadCase, requireWriteOnCaseFolder, async (req, res) => 
 
     res.json({ answer });
     refreshJournalSafely(); // на случай, если ассистент поменял стадию/поля по просьбе
+    syncPlanfixSafely(req.case.id);
   } catch (err) {
     console.error("Ошибка чата с ассистентом:", err);
     res.status(500).json({ message: "Не удалось получить ответ: " + err.message });
