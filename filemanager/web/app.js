@@ -2594,6 +2594,27 @@ async function writeFileToHandle(relPath, parentHandle) {
 
 /* ---------- Init ---------- */
 
+/** Виджет места на диске в боковой панели — грузится один раз при входе. */
+async function loadDiskUsage() {
+  try {
+    const data = await apiFetch("/api/disk-usage");
+    const gb = (bytes) => (bytes / 1024 ** 3).toFixed(1);
+    const fill = document.getElementById("diskUsageFill");
+    const percentEl = document.getElementById("diskUsagePercent");
+    const widget = document.getElementById("diskUsageWidget");
+
+    fill.style.height = `${data.percentUsed}%`;
+    fill.classList.remove("rail-disk-warn", "rail-disk-danger");
+    if (data.percentUsed >= 90) fill.classList.add("rail-disk-danger");
+    else if (data.percentUsed >= 75) fill.classList.add("rail-disk-warn");
+
+    percentEl.textContent = `${data.percentUsed}%`;
+    widget.title = `Занято ${gb(data.used)} ГБ из ${gb(data.total)} ГБ (свободно ${gb(data.free)} ГБ)`;
+  } catch {
+    // Виджет необязателен для работы — просто оставляем плейсхолдер, если не получилось.
+  }
+}
+
 (async function init() {
   try {
     const { user } = await apiFetch("/api/auth/me");
@@ -2601,6 +2622,7 @@ async function writeFileToHandle(relPath, parentHandle) {
     showApp();
     history.replaceState({ view: "columns" }, "");
     enterAppForUser();
+    loadDiskUsage();
   } catch (err) {
     showLogin();
   }
