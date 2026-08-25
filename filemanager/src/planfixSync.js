@@ -67,6 +67,18 @@ function buildCustomFieldData(kase) {
  * id; иначе создаёт новую и возвращает её id (вызывающий код должен
  * сохранить его в cases.planfix_id).
  */
+// "Группа проектов" в Planfix (Экспертизы/Независимые исследования) —
+// отдельная системная сущность, не пользовательское поле. ID узнаны
+// через реальные карточки существующих проектов 25.08.2026.
+const GROUP_ID_EXPERTISE = 2642; // "Экспертизы"
+const GROUP_ID_RESEARCH = 2644;  // "Независимые исследования"
+
+function groupIdForType(type) {
+  if (type === "expertise") return GROUP_ID_EXPERTISE;
+  if (type === "research") return GROUP_ID_RESEARCH;
+  return null;
+}
+
 async function syncProjectToPlanfix(kase) {
   const body = {
     name: kase.name,
@@ -78,8 +90,13 @@ async function syncProjectToPlanfix(kase) {
     return kase.planfix_id;
   }
 
+  // Группу проектов выставляем только при создании — дальше тип
+  // проекта (ЭКС/НИ) в ИСУ не меняется, значит и группу трогать не надо.
+  const groupId = groupIdForType(kase.type);
+  if (groupId) body.group = { id: groupId };
+
   const created = await planfixRequest("POST", "/project/", body);
   return created.id;
 }
 
-module.exports = { syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, planfixRequest };
+module.exports = { syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest };
