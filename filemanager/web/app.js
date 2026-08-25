@@ -1224,18 +1224,22 @@ function stageBadgeHtml(project) {
 async function updateCaseBanner(path) {
   const banner = document.getElementById("caseBanner");
   const chatBox = document.getElementById("caseChatBox");
+  const tasksBox = document.getElementById("planfixTasksBox");
   if (!path.startsWith(CASES_PATH)) {
     banner.classList.add("hidden");
     chatBox.classList.add("hidden");
+    tasksBox.classList.add("hidden");
     return;
   }
   try {
     const project = await apiFetch(`/api/cases/by-path?path=${encodeURIComponent(path)}`);
     renderCaseBanner(project);
     openCaseChatFor(project.id);
+    openPlanfixTasksFor(project);
   } catch {
     banner.classList.add("hidden");
     chatBox.classList.add("hidden");
+    tasksBox.classList.add("hidden");
   }
 }
 
@@ -1385,6 +1389,128 @@ document.getElementById("caseChatForm").addEventListener("submit", async (event)
     pendingBubble.classList.remove("pending");
   } finally {
     sendBtn.disabled = false;
+  }
+});
+
+/* ---- Задачи Planfix для текущей стадии ---- */
+
+let planfixTasksCurrentProject = null;
+let planfixEmployeesCache = null;
+
+function openPlanfixTasksFor(project) {
+  const box = document.getElementById("planfixTasksBox");
+  box.classList.remove("hidden");
+  if (planfixTasksCurrentProject && planfixTasksCurrentProject.id === project.id) return;
+  planfixTasksCurrentProject = project;
+  document.getElementById("planfixTasksList").innerHTML = "";
+  document.getElementById("planfixTasksError").textContent = "";
+  document.getElementById("planfixTasksBody").classList.add("hidden");
+  document.getElementById("planfixTasksArrow").textContent = "▾";
+}
+
+document.getElementById("planfixTasksToggle").addEventListener("click", async () => {
+  const body = document.getElementById("planfixTasksBody");
+  const arrow = document.getElementById("planfixTasksArrow");
+  const opening = body.classList.contains("hidden");
+  body.classList.toggle("hidden");
+  arrow.textContent = opening ? "▴" : "▾";
+  if (opening && planfixTasksCurrentProject) {
+    await loadPlanfixTasksList();
+  }
+});
+
+async function loadPlanfixTasksList() {
+  const list = document.getElementById("planfixTasksList");
+  const errorEl = document.getElementById("planfixTasksError");
+  errorEl.textContent = "";
+  list.innerHTML = '<div class="row-subtitle">Загрузка…</div>';
+
+  try {
+    if (!planfixEmployeesCache) {
+      const { employees } = await apiFetch("/api/cases/planfix/employees");
+      planfixEmployeesCache = employees || [];
+    }
+    const { tasks } = await apiFetch(`/api/cases/planfix/stage-tasks/${planfixTasksCurrentProject.stage}`);
+
+    if (!tasks.length) {
+      list.innerHTML = '<div class="row-subtitle">Для этой стадии типовых задач не предусмотрено</div>';
+      return;
+    }
+
+    const employeeOptions = ['<option value="">Не назначен</option>']
+      .concat(planfixEmployeesCache.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`))
+      .join("");
+
+    list.innerHTML = tasks.map((name, i) => `
+      <div class="pf-task-row">
+        <label class="pf-task-title">
+          <input type="checkbox" class="pf-task-check" data-task-index="${i}">
+          <span>${escapeHtml(name)}</span>
+        </label>
+        <div class="pf-task-details hidden" data-task-details="${i}">
+          <select class="pf-task-assignee">${employeeOptions}</select>
+          <input type="date" class="pf-task-deadline">
+        </div>
+      </div>`).join("");
+
+    list.querySelectorAll(".pf-task-check").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const details = list.querySelector(`[data-task-details="${cb.dataset.taskIndex}"]`);
+        details.classList.toggle("hidden", !cb.checked);
+      });
+    });
+  } catch (err) {
+    list.innerHTML = "";
+    errorEl.textContent = "Не удалось загрузить: " + err.message;
+  }
+}
+
+document.getElementById("planfixTasksCreateBtn").addEventListener("click", async () => {
+  const errorEl = document.getElementById("planfixTasksError");
+  errorEl.textContent = "";
+
+  const rows = document.querySelectorAll("#planfixTasksList .pf-task-row");
+  const tasks = [];
+  rows.forEach((row) => {
+    const check = row.querySelector(".pf-task-check");
+    if (!check.checked) return;
+    const name = row.querySelector(".pf-task-title span").textContent;
+    const assigneeId = row.querySelector(".pf-task-assignee").value || null;
+    const deadline = row.querySelector(".pf-task-deadline").value || null;
+    tasks.push({ name, assigneeId, deadline });
+  });
+
+  if (!tasks.length) {
+    errorEl.textContent = "Отметьте хотя бы одну задачу";
+    return;
+  }
+
+  const btn = document.getElementById("planfixTasksCreateBtn");
+  btn.disabled = true;
+  btn.textContent = "Создаём…";
+
+  try {
+    const { results } = await apiFetch(`/api/cases/${planfixTasksCurrentProject.id}/planfix-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ tasks }),
+    });
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) {
+      errorEl.textContent = `Не удалось создать: ${failed.map((f) => `«${f.name}» (${f.error})`).join(", ")}`;
+    } else {
+      errorEl.textContent = "";
+      alert(`Создано задач в Planfix: ${results.length}`);
+      // Снимаем галочки с успешно созданных, чтобы не создать их повторно случайно.
+      document.querySelectorAll("#planfixTasksList .pf-task-check:checked").forEach((cb) => {
+        cb.checked = false;
+        document.querySelector(`[data-task-details="${cb.dataset.taskIndex}"]`).classList.add("hidden");
+      });
+    }
+  } catch (err) {
+    errorEl.textContent = "Не удалось создать задачи: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Создать в Planfix";
   }
 });
 

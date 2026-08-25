@@ -67,6 +67,13 @@
   flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;
 }
 
+/* Строка задачи в разделе "Задачи Planfix" */
+.pf-task-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--bg-page); border-radius: 8px; }
+.pf-task-row label.pf-task-title { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.pf-task-details { display: flex; gap: 8px; padding-left: 24px; }
+.pf-task-details select, .pf-task-details input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; }
+.pf-task-details.hidden { display: none; }
+
 /* Контекстное меню (правый клик по файлу/папке) */
 .context-menu {
   position: fixed; z-index: 1000; background: var(--bg-card);

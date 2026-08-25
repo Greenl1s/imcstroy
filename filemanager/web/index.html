@@ -122,6 +122,17 @@
           </form>
         </div>
       </div>
+      <div id="planfixTasksBox" class="case-chat-box hidden">
+        <div class="case-chat-header" id="planfixTasksToggle">
+          <span>📋 Задачи Planfix для текущей стадии</span>
+          <span id="planfixTasksArrow">▾</span>
+        </div>
+        <div id="planfixTasksBody" class="hidden" style="padding:12px 14px;">
+          <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:10px;"></div>
+          <p id="planfixTasksError" class="error-text" style="margin-top:8px;"></p>
+          <button type="button" class="primary" id="planfixTasksCreateBtn" style="margin-top:10px;">Создать в Planfix</button>
+        </div>
+      </div>
       <div class="folder-actions" id="folderActions">
         <div class="add-menu-wrap">
           <button class="upload-btn" id="addMenuBtn" type="button">Добавить</button>
