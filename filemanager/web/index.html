@@ -129,6 +129,10 @@
         </div>
         <div id="planfixTasksBody" class="hidden" style="padding:12px 14px;">
           <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:10px;"></div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <input type="text" id="planfixCustomTaskInput" placeholder="Своя задача, которой нет в списке" style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <button type="button" class="secondary" id="planfixCustomTaskAddBtn">+ Добавить</button>
+          </div>
           <p id="planfixTasksError" class="error-text" style="margin-top:8px;"></p>
           <button type="button" class="primary" id="planfixTasksCreateBtn" style="margin-top:10px;">Создать в Planfix</button>
         </div>

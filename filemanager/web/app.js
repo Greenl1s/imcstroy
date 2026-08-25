@@ -1419,11 +1419,47 @@ document.getElementById("planfixTasksToggle").addEventListener("click", async ()
   }
 });
 
+let planfixTaskRowCounter = 0;
+
+/** Собирает HTML одной строки задачи. custom=true — добавляет кнопку удаления (для задач, вписанных вручную). */
+function buildPlanfixTaskRowHtml(name, custom) {
+  const i = planfixTaskRowCounter++;
+  const employeeOptions = ['<option value="">Не назначен</option>']
+    .concat((planfixEmployeesCache || []).map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`))
+    .join("");
+  return `
+    <div class="pf-task-row" data-custom="${custom ? "1" : "0"}">
+      <label class="pf-task-title">
+        <input type="checkbox" class="pf-task-check" data-task-index="${i}" ${custom ? "checked" : ""}>
+        <span>${escapeHtml(name)}</span>
+        ${custom ? `<button type="button" class="pf-task-remove" data-remove-index="${i}" style="margin-left:auto; border:none; background:none; color:var(--danger); cursor:pointer; font-size:14px;">✕</button>` : ""}
+      </label>
+      <div class="pf-task-details ${custom ? "" : "hidden"}" data-task-details="${i}">
+        <select class="pf-task-assignee">${employeeOptions}</select>
+        <input type="date" class="pf-task-deadline">
+      </div>
+    </div>`;
+}
+
+function wirePlanfixTaskRow(row) {
+  const list = document.getElementById("planfixTasksList");
+  const check = row.querySelector(".pf-task-check");
+  check.addEventListener("change", () => {
+    const details = list.querySelector(`[data-task-details="${check.dataset.taskIndex}"]`);
+    details.classList.toggle("hidden", !check.checked);
+  });
+  const removeBtn = row.querySelector(".pf-task-remove");
+  if (removeBtn) {
+    removeBtn.addEventListener("click", () => row.remove());
+  }
+}
+
 async function loadPlanfixTasksList() {
   const list = document.getElementById("planfixTasksList");
   const errorEl = document.getElementById("planfixTasksError");
   errorEl.textContent = "";
   list.innerHTML = '<div class="row-subtitle">Загрузка…</div>';
+  planfixTaskRowCounter = 0;
 
   try {
     if (!planfixEmployeesCache) {
@@ -1432,38 +1468,42 @@ async function loadPlanfixTasksList() {
     }
     const { tasks } = await apiFetch(`/api/cases/planfix/stage-tasks/${planfixTasksCurrentProject.stage}`);
 
-    if (!tasks.length) {
-      list.innerHTML = '<div class="row-subtitle">Для этой стадии типовых задач не предусмотрено</div>';
-      return;
-    }
+    list.innerHTML = tasks.length
+      ? tasks.map((name) => buildPlanfixTaskRowHtml(name, false)).join("")
+      : '<div class="row-subtitle">Для этой стадии типовых задач не предусмотрено</div>';
 
-    const employeeOptions = ['<option value="">Не назначен</option>']
-      .concat(planfixEmployeesCache.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`))
-      .join("");
-
-    list.innerHTML = tasks.map((name, i) => `
-      <div class="pf-task-row">
-        <label class="pf-task-title">
-          <input type="checkbox" class="pf-task-check" data-task-index="${i}">
-          <span>${escapeHtml(name)}</span>
-        </label>
-        <div class="pf-task-details hidden" data-task-details="${i}">
-          <select class="pf-task-assignee">${employeeOptions}</select>
-          <input type="date" class="pf-task-deadline">
-        </div>
-      </div>`).join("");
-
-    list.querySelectorAll(".pf-task-check").forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const details = list.querySelector(`[data-task-details="${cb.dataset.taskIndex}"]`);
-        details.classList.toggle("hidden", !cb.checked);
-      });
-    });
+    list.querySelectorAll(".pf-task-row").forEach(wirePlanfixTaskRow);
   } catch (err) {
     list.innerHTML = "";
     errorEl.textContent = "Не удалось загрузить: " + err.message;
   }
 }
+
+document.getElementById("planfixCustomTaskAddBtn").addEventListener("click", () => {
+  const input = document.getElementById("planfixCustomTaskInput");
+  const name = input.value.trim();
+  if (!name) return;
+
+  const list = document.getElementById("planfixTasksList");
+  // Если список сейчас пуст/показывает подсказку "нет задач" — очищаем перед вставкой первой своей.
+  if (!list.querySelector(".pf-task-row")) list.innerHTML = "";
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = buildPlanfixTaskRowHtml(name, true).trim();
+  const row = wrapper.firstElementChild;
+  list.appendChild(row);
+  wirePlanfixTaskRow(row);
+
+  input.value = "";
+  input.focus();
+});
+
+document.getElementById("planfixCustomTaskInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("planfixCustomTaskAddBtn").click();
+  }
+});
 
 document.getElementById("planfixTasksCreateBtn").addEventListener("click", async () => {
   const errorEl = document.getElementById("planfixTasksError");
