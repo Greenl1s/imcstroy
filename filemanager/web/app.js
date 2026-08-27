@@ -750,6 +750,9 @@ function renderColumnList(key) {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
+    if (entry.isDir) {
+      makeDropTarget(row, () => entry.fullPath, () => loadColumnList(key), { stopPropagation: true });
+    }
     container.appendChild(row);
   }
 }
@@ -1931,6 +1934,9 @@ function renderFolderRows() {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
+    if (entry.isDir) {
+      makeDropTarget(row, () => entry.fullPath, () => renderFolder(currentPath), { stopPropagation: true });
+    }
     els.folderList.appendChild(row);
   }
 }
@@ -2303,27 +2309,46 @@ els.chooseFolderBtn.addEventListener("click", () => {
 els.uploadInput.addEventListener("change", () => {
   const files = Array.from(els.uploadInput.files || []);
   els.uploadInput.value = "";
-  if (files.length > 0) uploadFiles(files);
+  if (files.length > 0) uploadFiles(files, currentPath, () => renderFolder(currentPath));
 });
 
 els.uploadFolderInput.addEventListener("change", () => {
   const files = Array.from(els.uploadFolderInput.files || []);
   els.uploadFolderInput.value = "";
-  if (files.length > 0) uploadFiles(files);
+  if (files.length > 0) uploadFiles(files, currentPath, () => renderFolder(currentPath));
 });
 
 els.uploadPanelCloseBtn.addEventListener("click", () => {
   els.uploadPanel.classList.add("hidden");
 });
 
-function uploadFiles(files) {
-  const targetPath = currentPath;
+// Перетаскивание в пустое место открытого списка — грузит в ту папку,
+// что сейчас показана. Вешаем один раз (не при каждой перерисовке
+// списка), иначе обработчики будут копиться и запускаться много раз подряд.
+makeDropTarget(els.dbList, () => columnState.db.rootPath, () => loadColumnList("db"));
+makeDropTarget(els.casesList, () => columnState.cases.rootPath, () => loadColumnList("cases"));
+makeDropTarget(els.folderList, () => currentPath, () => renderFolder(currentPath));
+
+/**
+ * items — либо обычный File[] (тогда relativePath берётся из
+ * встроенного file.webkitRelativePath, если он есть — так работает выбор
+ * папки через диалог), либо уже готовые {file, relativePath} — так
+ * приходят файлы из перетаскивания, где relativePath собран вручную.
+ * targetPath — куда грузим; onDone — что обновить после завершения
+ * (разное для колонок и для открытой папки).
+ */
+function uploadFiles(items, targetPath, onDone) {
   els.uploadChoice.classList.add("hidden");
 
-  activeUploadItems = files.map((file, i) => ({
+  const normalized = items.map((it) =>
+    it instanceof File ? { file: it, relativePath: it.webkitRelativePath || "" } : it
+  );
+
+  activeUploadItems = normalized.map((it, i) => ({
     id: `${Date.now()}_${i}`,
-    file,
-    name: file.webkitRelativePath || file.name,
+    file: it.file,
+    relativePath: it.relativePath,
+    name: it.relativePath || it.file.name,
     progress: 0,
     status: "uploading", // uploading | done | error
     error: "",
@@ -2339,9 +2364,9 @@ function uploadFiles(files) {
     const form = new FormData();
     form.append("file", item.file);
     form.append("path", targetPath);
-    // Если файл выбран как часть папки — сохраняем структуру подпапок на сервере.
-    if (item.file.webkitRelativePath) {
-      form.append("relativePath", item.file.webkitRelativePath);
+    // Если файл пришёл как часть папки — сохраняем структуру подпапок на сервере.
+    if (item.relativePath) {
+      form.append("relativePath", item.relativePath);
     }
 
     xhr.upload.addEventListener("progress", (e) => {
@@ -2380,7 +2405,7 @@ function uploadFiles(files) {
       remaining--;
       renderUploadPanel();
       if (remaining === 0) {
-        renderFolder(targetPath);
+        if (onDone) onDone();
         if (!activeUploadItems.some((i) => i.status === "error")) {
           setTimeout(() => {
             els.uploadPanel.classList.add("hidden");
@@ -2389,6 +2414,96 @@ function uploadFiles(files) {
       }
     }
   }
+}
+
+/* ---- Перетаскивание файлов/папок из проводника компьютера ---- */
+
+/** Читает ВСЕ записи в папке — readEntries() может отдавать частями, поэтому вызываем, пока не пусто. */
+function readAllDirectoryEntries(dirEntry) {
+  const reader = dirEntry.createReader();
+  return new Promise((resolve, reject) => {
+    let all = [];
+    function readBatch() {
+      reader.readEntries((batch) => {
+        if (!batch.length) { resolve(all); return; }
+        all = all.concat(batch);
+        readBatch();
+      }, reject);
+    }
+    readBatch();
+  });
+}
+
+/**
+ * Рекурсивно разбирает одну "запись" (файл или папку) из перетаскивания.
+ * parentPath === null означает "самый верхний уровень, без обёртки папкой"
+ * — так файл, брошенный сам по себе (не внутри папки), грузится как
+ * обычно, без relativePath. Если же это была папка (или файл внутри
+ * папки) — relativePath строится вручную, начиная с имени этой папки.
+ */
+async function readEntryRecursively(entry, parentPath) {
+  const fullRelPath = parentPath !== null ? `${parentPath}/${entry.name}` : entry.name;
+
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [{ file, relativePath: parentPath === null ? "" : fullRelPath }];
+  }
+  if (entry.isDirectory) {
+    const children = await readAllDirectoryEntries(entry);
+    const nested = await Promise.all(children.map((child) => readEntryRecursively(child, fullRelPath)));
+    return nested.flat();
+  }
+  return [];
+}
+
+/** Достаёт файлы (с сохранением структуры папок) из события drop. */
+async function extractDroppedItems(dataTransfer) {
+  const entries = [];
+  for (const item of dataTransfer.items) {
+    if (item.kind !== "file") continue;
+    const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+    if (entry) {
+      entries.push(entry);
+    } else {
+      const file = item.getAsFile();
+      if (file) entries.push({ isFile: true, isDirectory: false, name: file.name, file: (cb) => cb(file) });
+    }
+  }
+  const results = await Promise.all(entries.map((entry) => readEntryRecursively(entry, null)));
+  return results.flat();
+}
+
+/**
+ * Вешает обработку перетаскивания на элемент. getTargetPath() вызывается
+ * в момент drop (не заранее) — так цель всегда актуальна, даже если
+ * список успел перерисоваться. stopPropagation нужен для строк-папок:
+ * иначе событие всплывёт и сработает ещё и обработчик всей области.
+ */
+function makeDropTarget(element, getTargetPath, onDone, options = {}) {
+  let dragCounter = 0; // dragenter/dragleave у вложенных элементов иначе мигает подсветкой
+  element.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (options.stopPropagation) e.stopPropagation();
+  });
+  element.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    if (options.stopPropagation) e.stopPropagation();
+    dragCounter++;
+    element.classList.add("drag-over");
+  });
+  element.addEventListener("dragleave", (e) => {
+    if (options.stopPropagation) e.stopPropagation();
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) element.classList.remove("drag-over");
+  });
+  element.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    if (options.stopPropagation) e.stopPropagation();
+    dragCounter = 0;
+    element.classList.remove("drag-over");
+    const items = await extractDroppedItems(e.dataTransfer);
+    if (items.length) uploadFiles(items, getTargetPath(), onDone);
+  });
 }
 
 function renderUploadPanel() {
