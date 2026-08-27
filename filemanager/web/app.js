@@ -484,7 +484,7 @@ function renderUsersList(list) {
     const row = document.createElement("div");
     row.className = "user-row";
     row.innerHTML = `
-      <span class="user-name">${u.username}</span>
+      <span class="user-name">${escapeHtml(u.username)}</span>
       <span class="role-badge">${u.role === "admin" ? "администратор" : "сотрудник"}</span>
       <label><input type="checkbox" data-perm="can_tools" ${u.can_tools ? "checked" : ""}> Инструменты</label>
       <label><input type="checkbox" data-perm="can_db" ${u.can_db ? "checked" : ""}> База данных</label>
@@ -577,7 +577,7 @@ async function loadFolderPermUsersList() {
     const { users } = await apiFetch("/api/users");
     folderPermUsersCache = users;
     els.folderPermUserSelect.innerHTML = users
-      .map((u) => `<option value="${u.id}">${u.username}</option>`)
+      .map((u) => `<option value="${u.id}">${escapeHtml(u.username)}</option>`)
       .join("");
   } catch (err) {
     els.folderPermUserSelect.innerHTML = "";
@@ -685,8 +685,8 @@ function renderToolsColumn(links) {
     const isInternal = isSameOriginUrl(link.url);
     const linkAttrs = isInternal ? "" : 'target="_blank" rel="noopener"';
     row.innerHTML = `
-      <a href="${link.url}" ${linkAttrs} style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
-        ${svgLink}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${link.label}</span>
+      <a href="${escapeHtml(link.url)}" ${linkAttrs} style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
+        ${svgLink}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(link.label)}</span>
       </a>
       <button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>
     `;
@@ -860,14 +860,14 @@ function renderColumnList(key) {
       row.style.background = "var(--accent-bg)";
     }
     const pathHint = state.searching
-      ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
+      ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.fullPath)}</span>`
       : "";
     const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
     if (entry.isDir) row.classList.add("is-dir");
     row.innerHTML = `
       ${selState.active ? `<input type="checkbox" class="select-checkbox" ${selState.selected.has(entry.fullPath) ? "checked" : ""}>` : ""}
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-        ${iconHtml(entry)}<span class="row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
+        ${iconHtml(entry)}<span class="row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</span>${pathHint}
       </span>
       ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
     `;
@@ -2057,11 +2057,11 @@ function renderFolderRows() {
     const row = document.createElement("div");
     row.className = "file-row" + (entry.isDir ? " is-dir" : "") + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
     const pathHint = folderSearching
-      ? `<span class="search-path-hint">${entry.fullPath}</span>`
+      ? `<span class="search-path-hint">${escapeHtml(entry.fullPath)}</span>`
       : "";
     row.innerHTML = `
       ${selectMode ? `<input type="checkbox" class="select-checkbox" ${selectedPaths.has(entry.fullPath) ? "checked" : ""}>` : ""}
-      <div class="left">${iconHtml(entry)}<span class="row-name">${entry.name}</span>${pathHint}</div>
+      <div class="left">${iconHtml(entry)}<span class="row-name">${escapeHtml(entry.name)}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}

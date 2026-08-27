@@ -1,6 +1,16 @@
-function showMessage(text, isError) {
+/**
+ * allowHtml выставляем только для наших собственных сообщений со ссылкой.
+ * Всё, что пришло с сервера или из ошибки, вставляем как текст — иначе
+ * содержимое сообщения могло бы выполниться как разметка.
+ */
+function showMessage(text, isError, allowHtml) {
   const el = document.getElementById("editor");
-  el.innerHTML = `<div id="message"${isError ? ' class="error"' : ""}>${text}</div>`;
+  const box = document.createElement("div");
+  box.id = "message";
+  if (isError) box.className = "error";
+  if (allowHtml) box.innerHTML = text;
+  else box.textContent = text;
+  el.replaceChildren(box);
 }
 
 function loadScript(src) {
@@ -26,7 +36,7 @@ function loadScript(src) {
       credentials: "same-origin",
     });
     if (res.status === 401) {
-      showMessage('Сессия истекла. <a href="/">Войдите заново</a> и откройте файл ещё раз.', true);
+      showMessage('Сессия истекла. <a href="/">Войдите заново</a> и откройте файл ещё раз.', true, true);
       return;
     }
     if (!res.ok) {
