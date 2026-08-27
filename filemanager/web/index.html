@@ -52,7 +52,7 @@
 
     <div class="col" data-col="db">
       <div class="col-header">
-        <span>База данных</span>
+        <span>База данных<span class="col-count hidden" id="dbCount"></span></span>
         <div style="display:flex; gap:6px;">
           <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
         </div>
@@ -80,7 +80,7 @@
 
     <div class="col" data-col="cases">
       <div class="col-header">
-        <span>Дела</span>
+        <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
         <div style="display:flex; gap:6px;">
           <button class="add-btn" id="addGpBtn" title="Добавить гарантийное письмо" aria-label="Добавить ГП" style="width:auto; padding:0 8px; font-size:11px;">ГП</button>
           <button class="add-btn" id="addProjectBtn" title="Новый проект (экспертиза/НИ)" aria-label="Новый проект" style="width:auto; padding:0 8px; font-size:11px;">Проект</button>
@@ -159,7 +159,7 @@
             </button>
           </div>
         </div>
-        <button class="upload-btn" id="uploadTriggerBtn" type="button">Загрузить</button>
+        <button class="upload-btn primary-action" id="uploadTriggerBtn" type="button">Загрузить</button>
         <input type="file" id="uploadInput" multiple hidden>
         <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
         <button class="back-btn" id="backBtn">

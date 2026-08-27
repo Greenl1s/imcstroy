@@ -142,6 +142,34 @@ const svgDownload = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill
 const svgDots = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;stroke:none"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 const svgRename = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 
+/* ---------- Иконки по типу файла ---------- */
+
+const FILE_KINDS = {
+  doc: ["doc", "docx", "rtf", "odt", "txt", "md"],
+  sheet: ["xls", "xlsx", "xlsm", "csv", "ods"],
+  pdf: ["pdf"],
+  img: ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "heic", "tif", "tiff"],
+  zip: ["zip", "rar", "7z", "tar", "gz"],
+};
+
+const KIND_BY_EXT = (() => {
+  const map = {};
+  for (const [kind, exts] of Object.entries(FILE_KINDS)) {
+    for (const ext of exts) map[ext] = kind;
+  }
+  return map;
+})();
+
+function fileKind(name) {
+  return KIND_BY_EXT[extOf(name)] || "other";
+}
+
+/** Иконка в плитке: по ней тип файла виден боковым зрением, без чтения расширения. */
+function iconHtml(entry) {
+  if (entry.isDir) return `<span class="ficon ficon-folder">${svgFolder}</span>`;
+  return `<span class="ficon ficon-${fileKind(entry.name)}">${svgFile}</span>`;
+}
+
 function formatSize(bytes) {
   if (bytes === undefined || bytes === null) return "";
   if (bytes < 1024) return bytes + " Б";
@@ -705,9 +733,18 @@ function renderColumnList(key) {
   const { container, sortSelect } = colRefs(key);
   const selState = columnSelectState[key];
   const sorted = sortEntries(state.entries, sortSelect.value);
+  const counter = document.getElementById(key === "db" ? "dbCount" : "casesCount");
+  if (counter) {
+    counter.textContent = sorted.length ? String(sorted.length) : "";
+    counter.classList.toggle("hidden", sorted.length === 0);
+  }
   container.innerHTML = "";
   if (sorted.length === 0) {
-    container.innerHTML = `<div class="empty-hint">${state.searching ? "Ничего не найдено" : "Здесь пока пусто"}</div>`;
+    container.innerHTML = `<div class="empty-hint">${
+      state.searching
+        ? "Ничего не найдено"
+        : "Здесь пока пусто<br>Перетащите сюда файлы или папки"
+    }</div>`;
     return;
   }
   for (const entry of sorted) {
@@ -721,10 +758,11 @@ function renderColumnList(key) {
       ? `<span class="search-path-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.fullPath}</span>`
       : "";
     const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
+    if (entry.isDir) row.classList.add("is-dir");
     row.innerHTML = `
       ${selState.active ? `<input type="checkbox" class="select-checkbox" ${selState.selected.has(entry.fullPath) ? "checked" : ""}>` : ""}
       <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-        ${entry.isDir ? svgFolder : svgFile}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
+        ${iconHtml(entry)}<span class="row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${pathHint}
       </span>
       ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
     `;
@@ -1896,18 +1934,22 @@ function renderFolderRows() {
   const canManagePerms = inCasesTree && currentUser && currentUser.role === "admin";
   els.folderList.innerHTML = "";
   if (list.length === 0) {
-    els.folderList.innerHTML = `<div class="empty-hint">${folderSearching ? "Ничего не найдено" : "Папка пуста"}</div>`;
+    els.folderList.innerHTML = `<div class="empty-hint">${
+      folderSearching
+        ? "Ничего не найдено"
+        : "Папка пуста<br>Перетащите файлы или папки прямо сюда"
+    }</div>`;
     return;
   }
   for (const entry of list) {
     const row = document.createElement("div");
-    row.className = "file-row" + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
+    row.className = "file-row" + (entry.isDir ? " is-dir" : "") + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
     const pathHint = folderSearching
       ? `<span class="search-path-hint">${entry.fullPath}</span>`
       : "";
     row.innerHTML = `
       ${selectMode ? `<input type="checkbox" class="select-checkbox" ${selectedPaths.has(entry.fullPath) ? "checked" : ""}>` : ""}
-      <div class="left">${entry.isDir ? svgFolder : svgFile}<span>${entry.name}</span>${pathHint}</div>
+      <div class="left">${iconHtml(entry)}<span class="row-name">${entry.name}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
