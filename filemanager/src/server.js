@@ -19,6 +19,7 @@ const gpGenerate = require("./gpGenerate");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
 const trash = require("./trash");
+const events = require("./events");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -471,6 +472,7 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
     }
 
     await fs.promises.writeFile(destPath, buffer);
+    events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + fileName, name: fileName });
     res.json({ ok: true, name: fileName, path: gpOutputDir + "/" + fileName, caseFolderPath: kase.folder_path });
   } catch (err) {
     console.error("Не удалось создать ГП:", err);
@@ -512,6 +514,7 @@ app.get("/api/resources", auth.requireAuth, requireColumnAccess(), async (req, r
 app.post("/api/folder", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     await filesLib.ensureDir(req.body.path);
+    events.log(req.user, "create_folder", { path: req.body.path, isDir: true });
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ message: "Не удалось создать папку: " + err.message });
@@ -623,6 +626,8 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
     }
 
     await fs.promises.copyFile(path.join(TEMPLATES_DIR, template.file), destPath);
+    const relPath = (req.body.path || "/").replace(/\/+$/, "") + "/" + name;
+    events.log(req.user, "create_file", { path: relPath, name });
     res.json({ ok: true, name });
   } catch (err) {
     console.error("Не удалось создать документ:", err);
@@ -636,6 +641,7 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     await trash.moveToTrash(req.query.path, req.user.id);
+    events.log(req.user, "delete", { path: req.query.path });
     res.json({ ok: true });
   } catch (err) {
     console.error("Не удалось переместить в корзину:", err);
@@ -658,6 +664,7 @@ app.get("/api/trash", auth.requireAuth, async (req, res) => {
 app.post("/api/trash/:id/restore", auth.requireAuth, async (req, res) => {
   try {
     const result = await trash.restore(req.params.id, req.user);
+    events.log(req.user, "restore", { path: result.path, name: result.name });
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(err.status || 400).json({ message: err.message });
@@ -666,7 +673,9 @@ app.post("/api/trash/:id/restore", auth.requireAuth, async (req, res) => {
 
 app.delete("/api/trash/:id", auth.requireAuth, async (req, res) => {
   try {
+    const entry = await trash.getEntry(req.params.id);
     await trash.purge(req.params.id, req.user);
+    if (entry) events.log(req.user, "purge", { path: entry.original_path, name: entry.name, isDir: entry.is_dir });
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 400).json({ message: err.message });
@@ -677,6 +686,7 @@ app.delete("/api/trash/:id", auth.requireAuth, async (req, res) => {
 app.post("/api/trash/empty", auth.requireAuth, async (req, res) => {
   try {
     const removed = await trash.empty(req.user);
+    events.log(req.user, "trash_empty", { details: { removed } });
     res.json({ ok: true, removed });
   } catch (err) {
     res.status(err.status || 400).json({ message: err.message });
@@ -693,6 +703,10 @@ app.post("/api/rename", auth.requireAuth, requireColumnAccess({ write: true }), 
     if (columnForPath(oldPath) === "cases") {
       await folderPermissions.renamePath(oldPath, newPath);
     }
+    events.log(req.user, "rename", {
+      path: newPath,
+      details: { from: path.posix.basename(oldPath), to: path.posix.basename(newPath) },
+    });
     res.json({ ok: true, path: newPath });
   } catch (err) {
     res.status(400).json({ message: "Не удалось переименовать: " + err.message });
@@ -742,6 +756,7 @@ app.post("/api/move", auth.requireAuth, requireColumnAccess({ write: true }), as
     if (sourceColumn === "cases") {
       await folderPermissions.renamePath(sourcePath, newPath);
     }
+    events.log(req.user, "move", { path: newPath, details: { from: sourcePath, to: destination } });
     res.json({ ok: true, path: newPath });
   } catch (err) {
     res.status(400).json({ message: "Не удалось переместить: " + err.message });
@@ -776,6 +791,7 @@ app.post("/api/copy", auth.requireAuth, requireColumnAccess({ write: true }), as
     }
 
     const newPath = await filesLib.copyEntry(sourcePath, destination);
+    events.log(req.user, "copy", { path: newPath, details: { from: sourcePath } });
     res.json({ ok: true, path: newPath });
   } catch (err) {
     res.status(400).json({ message: "Не удалось скопировать: " + err.message });
@@ -817,6 +833,9 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUplo
     await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
     await fs.promises.copyFile(req.file.path, destPath);
     await fs.promises.unlink(req.file.path);
+
+    const relDest = (req.body.path || "/").replace(/\/+$/, "") + "/" + (rawRelativePath || fixedName).split(path.sep).join("/");
+    events.log(req.user, "upload", { path: relDest, name: path.basename(destPath) });
 
     res.json({ ok: true });
   } catch (err) {
@@ -939,6 +958,43 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
   }
 });
 
+/* ---------------- История и последние ---------------- */
+
+app.get("/api/events", auth.requireAuth, async (req, res) => {
+  try {
+    const items = await events.list(req.user, {
+      limit: req.query.limit,
+      action: req.query.action || null,
+      actorId: req.query.actorId || null,
+    });
+    res.json({ items });
+  } catch (err) {
+    console.error("Не удалось получить историю:", err);
+    res.status(500).json({ message: "Не удалось получить историю" });
+  }
+});
+
+app.get("/api/events/actors", auth.requireAuth, async (req, res) => {
+  try {
+    res.json({ actors: await events.listActors() });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить список сотрудников" });
+  }
+});
+
+app.get("/api/recent", auth.requireAuth, async (req, res) => {
+  try {
+    const items = await events.recent(req.user, {
+      limit: req.query.limit,
+      column: req.query.column || null,
+    });
+    res.json({ items });
+  } catch (err) {
+    console.error("Не удалось получить последние файлы:", err);
+    res.status(500).json({ message: "Не удалось получить последние файлы" });
+  }
+});
+
 /* ---------------- OnlyOffice ---------------- */
 
 app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess(), (req, res) => {
@@ -1022,6 +1078,10 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
       const buffer = Buffer.from(await response.arrayBuffer());
       await fs.promises.writeFile(abs, buffer);
       console.log(`OnlyOffice callback: файл "${req.query.path}" успешно сохранён (${buffer.length} байт)`);
+      // Кто именно правил документ, OnlyOffice сообщает в users — берём первого.
+      const editorId = Array.isArray(req.body.users) && req.body.users.length ? req.body.users[0] : null;
+      const editor = await auth.userForEvent(editorId);
+      events.log(editor, "office_save", { path: req.query.path });
     } catch (err) {
       console.error("Не удалось сохранить документ из OnlyOffice:", err);
       return res.json({ error: 1 });

@@ -103,7 +103,25 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/**
+ * Кто выступает автором события, когда запрос пришёл не от браузера
+ * пользователя, а от стороннего сервиса (OnlyOffice сообщает лишь id).
+ * Если такого пользователя уже нет — вернём null, событие запишется
+ * без автора, а не потеряется.
+ */
+async function userForEvent(userId) {
+  const id = Number(userId);
+  if (!id) return null;
+  try {
+    const res = await db.query("SELECT id, username FROM users WHERE id = $1", [id]);
+    return res.rows[0] || null;
+  } catch (err) {
+    return null;
+  }
+}
+
 module.exports = {
+  userForEvent,
   verifyLogin,
   issueToken,
   setAuthCookie,

@@ -228,6 +228,7 @@ async function usedBytes() {
 
 module.exports = {
   TRASH_DIR,
+  getEntry,
   RETENTION_DAYS,
   moveToTrash,
   listTrash,

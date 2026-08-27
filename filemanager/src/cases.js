@@ -6,6 +6,7 @@ const files = require("./files");
 const caseFolders = require("./caseFolders");
 const folderPermissions = require("./folderPermissions");
 const folderAccess = require("./folderAccess");
+const events = require("./events");
 const attachments = require("./caseAttachments");
 const fileTextExtract = require("./fileTextExtract");
 const aiExtract = require("./aiExtract");
@@ -358,6 +359,13 @@ cases.post("/", async (req, res) => {
       [created.id, stage, req.user.id]
     );
 
+    events.log(req.user, "case_create", {
+      path: folderPath,
+      name: cleanName,
+      isDir: true,
+      details: { stage },
+    });
+
     // Раскладываем заранее проанализированные и подтверждённые вложения —
     // делаем это ПОСЛЕ успешной записи в базу: если запись в базу вдруг
     // не удастся, файлы останутся целыми в черновике, а не потеряются
@@ -449,6 +457,13 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
       [kase.id, kase.stage, targetStage, req.user.id, `Переведён на стадию «${STAGE_LABEL[targetStage]}»`]
     );
 
+    events.log(req.user, "case_stage", {
+      path: newPath,
+      name: kase.name,
+      isDir: true,
+      details: { from: kase.stage, to: targetStage, label: STAGE_LABEL[targetStage] },
+    });
+
     res.json(updated[0]);
     refreshJournalSafely();
     syncPlanfixSafely(kase.id);
@@ -484,6 +499,13 @@ cases.post("/:id/cancel", loadCase, requireWriteOnCaseFolder, async (req, res) =
        VALUES ($1, 'cancelled', $2, $3, $4)`,
       [kase.id, kase.stage, req.user.id, reason]
     );
+
+    events.log(req.user, "case_cancel", {
+      path: kase.folder_path,
+      name: kase.name,
+      isDir: true,
+      details: { reason },
+    });
 
     res.json(updated[0]);
     refreshJournalSafely();
