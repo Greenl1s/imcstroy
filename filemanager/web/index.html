@@ -263,17 +263,33 @@
       <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
   </div>
-  <div id="uploadChoice" class="upload-choice">
-    <button class="upload-choice-btn" id="chooseFilesBtn" type="button">
-      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-      Загрузить файлы
-    </button>
-    <button class="upload-choice-btn" id="chooseFolderBtn" type="button">
-      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
-      Загрузить папку
-    </button>
-  </div>
   <div id="uploadPanelList" class="upload-panel-list"></div>
+</div>
+
+<div id="uploadModalOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:480px;">
+    <div class="modal-header">
+      <span>Загрузить в эту папку</span>
+      <button class="back-btn" id="uploadModalCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div id="uploadDropzone" class="upload-dropzone">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg>
+      <span>Перетащите файлы или папки сюда</span>
+    </div>
+    <div class="upload-choice">
+      <button class="upload-choice-btn" id="chooseFilesBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Выбрать файлы
+      </button>
+      <button class="upload-choice-btn" id="chooseFolderBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        Выбрать папку
+      </button>
+    </div>
+  </div>
 </div>
 
 <div id="downloadChoiceOverlay" class="modal-overlay hidden">

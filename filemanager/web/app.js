@@ -66,7 +66,6 @@ const els = {
   uploadPanelCloseBtn: document.getElementById("uploadPanelCloseBtn"),
   uploadTriggerBtn: document.getElementById("uploadTriggerBtn"),
   uploadFolderInput: document.getElementById("uploadFolderInput"),
-  uploadChoice: document.getElementById("uploadChoice"),
   chooseFilesBtn: document.getElementById("chooseFilesBtn"),
   chooseFolderBtn: document.getElementById("chooseFolderBtn"),
   folderActions: document.getElementById("folderActions"),
@@ -749,9 +748,6 @@ function renderColumnList(key) {
         e.stopPropagation();
         openFolderPermissions(entry.fullPath, entry.name);
       });
-    }
-    if (entry.isDir) {
-      makeDropTarget(row, () => entry.fullPath, () => loadColumnList(key), { stopPropagation: true });
     }
     container.appendChild(row);
   }
@@ -1934,9 +1930,6 @@ function renderFolderRows() {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
-    if (entry.isDir) {
-      makeDropTarget(row, () => entry.fullPath, () => renderFolder(currentPath), { stopPropagation: true });
-    }
     els.folderList.appendChild(row);
   }
 }
@@ -2291,11 +2284,20 @@ const svgError = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:no
 
 let activeUploadItems = [];
 
+// Страховка на уровне всей страницы: без этого браузер по умолчанию
+// открывает/скачивает перетащенный файл сам, если отпустить его чуть
+// мимо зоны загрузки внутри окна "Загрузить". Сама загрузка при этом
+// всё равно происходит только через зону ниже — здесь только защита
+// от случайного перехода на файл как на веб-страницу.
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
 els.uploadTriggerBtn.addEventListener("click", () => {
-  els.uploadPanel.classList.remove("hidden");
-  els.uploadPanelTitle.textContent = "Что загрузить?";
-  els.uploadChoice.classList.remove("hidden");
-  els.uploadPanelList.innerHTML = "";
+  document.getElementById("uploadModalOverlay").classList.remove("hidden");
+});
+
+document.getElementById("uploadModalCloseBtn").addEventListener("click", () => {
+  document.getElementById("uploadModalOverlay").classList.add("hidden");
 });
 
 els.chooseFilesBtn.addEventListener("click", () => {
@@ -2309,12 +2311,14 @@ els.chooseFolderBtn.addEventListener("click", () => {
 els.uploadInput.addEventListener("change", () => {
   const files = Array.from(els.uploadInput.files || []);
   els.uploadInput.value = "";
+  document.getElementById("uploadModalOverlay").classList.add("hidden");
   if (files.length > 0) uploadFiles(files, currentPath, () => renderFolder(currentPath));
 });
 
 els.uploadFolderInput.addEventListener("change", () => {
   const files = Array.from(els.uploadFolderInput.files || []);
   els.uploadFolderInput.value = "";
+  document.getElementById("uploadModalOverlay").classList.add("hidden");
   if (files.length > 0) uploadFiles(files, currentPath, () => renderFolder(currentPath));
 });
 
@@ -2322,20 +2326,17 @@ els.uploadPanelCloseBtn.addEventListener("click", () => {
   els.uploadPanel.classList.add("hidden");
 });
 
-// Перетаскивание в пустое место открытого списка — грузит в ту папку,
-// что сейчас показана. Вешаем один раз (не при каждой перерисовке
-// списка), иначе обработчики будут копиться и запускаться много раз подряд.
-// Страховка на уровне всей страницы: без этого браузер по умолчанию
-// открывает/скачивает перетащенный файл сам, если промахнуться мимо
-// конкретной зоны загрузки хотя бы на пиксель. Конкретные зоны ниже
-// сами останавливают всплытие (stopPropagation), так что это не мешает
-// им — просто гарантирует, что "мимо" ничего плохого не случится.
-window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("drop", (e) => e.preventDefault());
-
-makeDropTarget(els.dbList, () => columnState.db.rootPath, () => loadColumnList("db"));
-makeDropTarget(els.casesList, () => columnState.cases.rootPath, () => loadColumnList("cases"));
-makeDropTarget(els.folderList, () => currentPath, () => renderFolder(currentPath));
+// Перетаскивание — теперь только внутри окна "Загрузить", не по всей
+// странице: так понятнее, куда именно можно бросать файл, и не
+// путается со случайными перетаскиваниями по интерфейсу.
+makeDropTarget(
+  document.getElementById("uploadDropzone"),
+  () => currentPath,
+  () => {
+    document.getElementById("uploadModalOverlay").classList.add("hidden");
+    renderFolder(currentPath);
+  }
+);
 
 /**
  * items — либо обычный File[] (тогда relativePath берётся из
@@ -2346,8 +2347,6 @@ makeDropTarget(els.folderList, () => currentPath, () => renderFolder(currentPath
  * (разное для колонок и для открытой папки).
  */
 function uploadFiles(items, targetPath, onDone) {
-  els.uploadChoice.classList.add("hidden");
-
   const normalized = items.map((it) =>
     it instanceof File ? { file: it, relativePath: it.webkitRelativePath || "" } : it
   );
