@@ -246,12 +246,14 @@
     <div class="page-head">
       <div>
         <h1 class="folder-title">Корзина</h1>
-        <p class="page-sub">Удалённое хранится 30 дней, потом стирается само</p>
+        <p class="page-sub" id="trashSubtitle">Удалённое хранится 30 дней, потом стирается само</p>
+      </div>
+      <div class="folder-actions">
+        <button class="upload-btn" id="trashRefreshBtn" type="button">Обновить</button>
+        <button class="upload-btn danger-btn" id="trashEmptyBtn" type="button">Очистить корзину</button>
       </div>
     </div>
-    <div class="folder-body">
-      <div class="empty-hint">Раздел появится на следующем шаге</div>
-    </div>
+    <div class="folder-body" id="trashList"></div>
   </div>
 
   <div class="folder-view section hidden" id="historySection" data-view="history">

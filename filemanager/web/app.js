@@ -53,6 +53,10 @@ const els = {
   linksPopover: document.getElementById("linksPopover"),
   trashCount: document.getElementById("trashCount"),
   filesSection: document.getElementById("filesSection"),
+  trashList: document.getElementById("trashList"),
+  trashSubtitle: document.getElementById("trashSubtitle"),
+  trashEmptyBtn: document.getElementById("trashEmptyBtn"),
+  trashRefreshBtn: document.getElementById("trashRefreshBtn"),
   addProjectBtn: document.getElementById("addProjectBtn"),
   projectFormOverlay: document.getElementById("projectFormOverlay"),
   projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
@@ -458,6 +462,142 @@ function enterAppForUser() {
   }
 }
 
+/* ---------- Корзина ---------- */
+
+let trashItems = [];
+
+function trashDaysText(days) {
+  if (days <= 0) return "сегодня";
+  if (days === 1) return "завтра";
+  const last = days % 10, tens = days % 100;
+  if (last === 1 && tens !== 11) return `${days} день`;
+  if (last >= 2 && last <= 4 && (tens < 12 || tens > 14)) return `${days} дня`;
+  return `${days} дней`;
+}
+
+/** "/Дела/ЭКС.А40/Отчёт.docx" -> "Дела › ЭКС.А40" — где эта запись лежала. */
+function parentBreadcrumb(fullPath) {
+  const parts = String(fullPath || "").split("/").filter(Boolean);
+  parts.pop();
+  return parts.join(" › ") || "корень";
+}
+
+function updateTrashBadge(count) {
+  els.trashCount.textContent = count > 0 ? String(count) : "";
+  els.trashCount.classList.toggle("hidden", count === 0);
+}
+
+async function refreshTrashBadge() {
+  try {
+    const { items } = await apiFetch("/api/trash");
+    updateTrashBadge(items.length);
+  } catch (err) {
+    // Значок необязателен — молчим, если не получилось.
+  }
+}
+
+async function loadTrash() {
+  els.trashList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const { items, retentionDays } = await apiFetch("/api/trash");
+    trashItems = items || [];
+    els.trashSubtitle.textContent =
+      `Удалённое хранится ${retentionDays} дней, потом стирается само`;
+    updateTrashBadge(trashItems.length);
+    renderTrash();
+  } catch (err) {
+    els.trashList.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderTrash() {
+  els.trashList.innerHTML = "";
+  els.trashEmptyBtn.classList.toggle("hidden", trashItems.length === 0);
+
+  if (trashItems.length === 0) {
+    els.trashList.innerHTML = '<div class="empty-hint">Корзина пуста<br>Сюда попадает всё, что вы удаляете</div>';
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "trash-head";
+  head.innerHTML = `
+    <span class="th-name">Название</span>
+    <span class="th-from">Откуда</span>
+    <span class="th-who">Кто удалил</span>
+    <span class="th-left">Осталось</span>
+    <span class="th-act"></span>
+  `;
+  els.trashList.appendChild(head);
+
+  for (const item of trashItems) {
+    const row = document.createElement("div");
+    row.className = "file-row trash-row";
+    const entry = { name: item.name, isDir: item.is_dir };
+    const soon = item.days_left <= 3;
+    row.innerHTML = `
+      ${iconHtml(entry)}
+      <span class="row-name" title="${escapeHtml(item.original_path)}">${escapeHtml(item.name)}</span>
+      <span class="row-path">${escapeHtml(parentBreadcrumb(item.original_path))}</span>
+      <span class="who">${escapeHtml(item.deleted_by_name || "—")}</span>
+      <span class="left-days${soon ? " warn" : ""}">${trashDaysText(item.days_left)}</span>
+      <span class="trash-actions">
+        <button class="row-btn" data-act="restore">Восстановить</button>
+        <button class="row-btn danger" data-act="purge">Удалить</button>
+      </span>
+    `;
+    row.querySelector('[data-act="restore"]').addEventListener("click", () => restoreFromTrash(item));
+    row.querySelector('[data-act="purge"]').addEventListener("click", () => purgeFromTrash(item));
+    els.trashList.appendChild(row);
+  }
+}
+
+async function restoreFromTrash(item) {
+  try {
+    const result = await apiFetch(`/api/trash/${item.id}/restore`, { method: "POST" });
+    showToast(result.renamed
+      ? `Восстановлено под именем «${result.name}» — прежнее было занято`
+      : `«${item.name}» вернулось на место`);
+    await loadTrash();
+    refreshFilesAfterTrashChange();
+  } catch (err) {
+    alert("Не удалось восстановить: " + err.message);
+  }
+}
+
+async function purgeFromTrash(item) {
+  if (!confirm(`Удалить «${item.name}» навсегда? Вернуть будет нельзя.`)) return;
+  try {
+    await apiFetch(`/api/trash/${item.id}`, { method: "DELETE" });
+    await loadTrash();
+  } catch (err) {
+    alert("Не удалось удалить: " + err.message);
+  }
+}
+
+els.trashRefreshBtn.addEventListener("click", () => loadTrash());
+
+els.trashEmptyBtn.addEventListener("click", async () => {
+  const what = currentUser && currentUser.role === "admin"
+    ? "всю корзину"
+    : "всё, что вы удаляли";
+  if (!confirm(`Очистить ${what}? Вернуть будет нельзя.`)) return;
+  try {
+    const { removed } = await apiFetch("/api/trash/empty", { method: "POST" });
+    showToast(removed > 0 ? `Корзина очищена: ${removed}` : "Корзина уже пуста");
+    await loadTrash();
+  } catch (err) {
+    alert("Не удалось очистить корзину: " + err.message);
+  }
+});
+
+/** После восстановления обновляем то, что сейчас открыто в "Файлах". */
+function refreshFilesAfterTrashChange() {
+  if (els.folderView.classList.contains("hidden")) loadColumns();
+  else renderFolder(currentPath);
+  loadDiskUsage();
+}
+
 /* ---------- Разделы боковой панели ---------- */
 
 let currentSection = "files";
@@ -475,6 +615,7 @@ function showSection(name, pushHistory) {
     btn.classList.toggle("active", btn.dataset.section === name);
   });
   closeLinksPopover();
+  if (name === "trash") loadTrash();
 
   if (!pushHistory || PICKER_MODE) return;
   // В "Файлах" адрес показывает открытую папку (как и раньше),
@@ -881,7 +1022,7 @@ function toggleColumnSelect(key, fullPath) {
 async function deleteColumnSelected(key) {
   const st = columnSelectState[key];
   if (st.selected.size === 0) return;
-  if (!confirm(`Удалить выбранное (${st.selected.size})? Это действие необратимо.`)) return;
+  if (!confirm(`Удалить выбранное (${st.selected.size})? Всё уедет в корзину.`)) return;
   const paths = [...st.selected];
   try {
     const results = await Promise.allSettled(
@@ -890,6 +1031,7 @@ async function deleteColumnSelected(key) {
     const failed = results.filter((r) => r.status === "rejected");
     exitColumnSelectMode(key);
     await loadColumnList(key);
+    refreshTrashBadge();
     if (failed.length > 0) alert(`Не удалось удалить ${failed.length} из ${paths.length} элементов`);
   } catch (err) {
     alert("Не удалось удалить выбранное: " + err.message);
@@ -2321,7 +2463,7 @@ function updateSelectionBar() {
 
 els.deleteSelectedBtn.addEventListener("click", async () => {
   if (selectedPaths.size === 0) return;
-  if (!confirm(`Удалить выбранное (${selectedPaths.size})? Это действие необратимо.`)) return;
+  if (!confirm(`Удалить выбранное (${selectedPaths.size})? Всё уедет в корзину.`)) return;
   const paths = [...selectedPaths];
   try {
     const results = await Promise.allSettled(
@@ -2330,6 +2472,7 @@ els.deleteSelectedBtn.addEventListener("click", async () => {
     const failed = results.filter((r) => r.status === "rejected");
     exitSelectMode(false);
     await renderFolder(currentPath);
+    refreshTrashBadge();
     if (failed.length > 0) {
       alert(`Не удалось удалить ${failed.length} из ${paths.length} элементов`);
     }
@@ -2432,10 +2575,11 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
     } else if (action === "share") {
       await shareLinkFor(target.path, target.isDir);
     } else if (action === "delete") {
-      if (!confirm(`Удалить «${target.name}»?`)) return;
+      if (!confirm(`Удалить «${target.name}»? Объект уедет в корзину.`)) return;
       try {
         await apiFetch(`/api/resources?path=${encodeURIComponent(target.path)}`, { method: "DELETE" });
         refreshContext(target.context);
+        refreshTrashBadge();
       } catch (err) {
         alert("Не удалось удалить: " + err.message);
       }
@@ -3275,6 +3419,7 @@ async function loadDiskUsage() {
     history.replaceState({ view: "columns" }, "");
     enterAppForUser();
     loadDiskUsage();
+    refreshTrashBadge();
   } catch (err) {
     showLogin();
   }
