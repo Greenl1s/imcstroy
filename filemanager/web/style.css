@@ -537,7 +537,33 @@ button.primary:hover { background: #2569c9; }
   gap: 14px;
 }
 
+/* Много файлов — прокручиваем список внутри панели. */
+.upload-panel-list.scrollable {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+/* Общая полоса по всей загрузке — под заголовком, показывается от двух файлов. */
+.upload-panel-total {
+  height: 4px;
+  background: var(--accent-bg);
+  overflow: hidden;
+}
+
+.upload-panel-total-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.upload-panel-total-fill.has-error { background: var(--danger); }
+
+.upload-item-status .status-done { color: #1d9e75; }
+.upload-item-status .status-error { color: var(--danger); }
+.upload-item-status svg { vertical-align: -2px; }
+
 .upload-item { animation: upload-item-in 0.2s ease; }
+.upload-panel .upload-item-error.hidden { display: none; }
 
 @keyframes upload-item-in {
   from { opacity: 0; transform: translateX(8px); }
@@ -580,7 +606,7 @@ button.primary:hover { background: #2569c9; }
   height: 100%;
   border-radius: 4px;
   background: var(--accent);
-  transition: width 0.2s ease, background-color 0.2s ease;
+  transition: width 0.18s linear, background-color 0.2s ease;
 }
 
 .upload-progress-fill.uploading {

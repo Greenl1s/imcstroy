@@ -63,6 +63,8 @@ const els = {
   uploadPanel: document.getElementById("uploadPanel"),
   uploadPanelTitle: document.getElementById("uploadPanelTitle"),
   uploadPanelList: document.getElementById("uploadPanelList"),
+  uploadPanelTotal: document.getElementById("uploadPanelTotal"),
+  uploadPanelTotalFill: document.getElementById("uploadPanelTotalFill"),
   uploadPanelCloseBtn: document.getElementById("uploadPanelCloseBtn"),
   uploadTriggerBtn: document.getElementById("uploadTriggerBtn"),
   uploadFolderInput: document.getElementById("uploadFolderInput"),
@@ -2293,12 +2295,25 @@ const svgError = `<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:no
 let activeUploadItems = [];
 
 // Страховка на уровне всей страницы: без этого браузер по умолчанию
-// открывает/скачивает перетащенный файл сам, если отпустить его чуть
-// мимо зоны загрузки внутри окна "Загрузить". Сама загрузка при этом
-// всё равно происходит только через зону ниже — здесь только защита
-// от случайного перехода на файл как на веб-страницу.
+// открывает/скачивает перетащенный файл сам, если отпустить его мимо
+// всех зон загрузки.
 window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("drop", (e) => e.preventDefault());
+window.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  // Событие уже обработала конкретная зона (колонка, папка, строка-папка) —
+  // второй раз грузить не нужно.
+  if (e.fmHandled) return;
+  if (!dragHasFiles(e)) return;
+  // Отпустили где-то мимо зон (пустое место страницы, шапка, полоса
+  // прокрутки). Если открыта папка — грузим в неё, это почти всегда то,
+  // что человек и имел в виду. На экране с колонками цели нет: там надо
+  // бросать в саму колонку, она для этого подсвечивается.
+  if (els.folderView.classList.contains("hidden")) return;
+  const items = await extractDroppedItems(e.dataTransfer);
+  if (!items.length) return;
+  document.getElementById("uploadModalOverlay").classList.add("hidden");
+  uploadFiles(items, currentPath, () => renderFolder(currentPath));
+});
 
 els.uploadTriggerBtn.addEventListener("click", () => {
   document.getElementById("uploadModalOverlay").classList.remove("hidden");
@@ -2376,17 +2391,41 @@ function uploadFiles(items, targetPath, onDone) {
     file: it.file,
     relativePath: it.relativePath,
     name: it.relativePath || it.file.name,
+    loaded: 0,
+    total: it.file.size || 0,
     progress: 0,
-    status: "uploading", // uploading | done | error
+    status: "queued", // queued | uploading | done | error
     error: "",
+    els: null, // ссылки на уже созданные узлы строки — чтобы не пересоздавать её
   }));
 
   els.uploadPanel.classList.remove("hidden");
-  renderUploadPanel();
+  buildUploadPanel();
+  runUploadQueue(targetPath, onDone);
+}
 
-  let remaining = activeUploadItems.length;
+// Грузим не все файлы разом: браузер всё равно держит ограниченное число
+// соединений, а прогресс при сотне параллельных запросов скачет и врёт.
+const MAX_PARALLEL_UPLOADS = 3;
 
-  for (const item of activeUploadItems) {
+function runUploadQueue(targetPath, onDone) {
+  const queue = activeUploadItems.slice();
+  let nextIndex = 0;
+  let running = 0;
+  let finished = 0;
+  const total = queue.length;
+
+  function pump() {
+    while (running < MAX_PARALLEL_UPLOADS && nextIndex < total) {
+      startUpload(queue[nextIndex++]);
+    }
+  }
+
+  function startUpload(item) {
+    running++;
+    item.status = "uploading";
+    scheduleUploadPanelUpdate();
+
     const xhr = new XMLHttpRequest();
     const form = new FormData();
     form.append("file", item.file);
@@ -2397,16 +2436,18 @@ function uploadFiles(items, targetPath, onDone) {
     }
 
     xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        item.progress = Math.round((e.loaded / e.total) * 100);
-        renderUploadPanel();
-      }
+      if (!e.lengthComputable) return;
+      item.loaded = e.loaded;
+      item.total = e.total;
+      item.progress = Math.round((e.loaded / e.total) * 100);
+      scheduleUploadPanelUpdate();
     });
 
     xhr.addEventListener("load", () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         item.status = "done";
         item.progress = 100;
+        item.loaded = item.total;
       } else {
         item.status = "error";
         try {
@@ -2429,18 +2470,158 @@ function uploadFiles(items, targetPath, onDone) {
     xhr.send(form);
 
     function settle() {
-      remaining--;
-      renderUploadPanel();
-      if (remaining === 0) {
+      running--;
+      finished++;
+      scheduleUploadPanelUpdate();
+      if (finished === total) {
         if (onDone) onDone();
         if (!activeUploadItems.some((i) => i.status === "error")) {
           setTimeout(() => {
             els.uploadPanel.classList.add("hidden");
           }, 1800);
         }
+      } else {
+        pump();
       }
     }
   }
+
+  pump();
+}
+
+/* ---- Панель прогресса загрузки ---- */
+
+// Строки списка создаются ОДИН раз на всю загрузку, дальше меняются
+// только цифры и ширина полоски. Раньше список перерисовывался целиком
+// на каждое событие прогресса — из-за этого заново проигрывалась
+// анимация появления строк и панель мигала.
+function buildUploadPanel() {
+  els.uploadPanelList.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  for (const item of activeUploadItems) {
+    const row = document.createElement("div");
+    row.className = "upload-item";
+    row.innerHTML = `
+      <div class="upload-item-top">
+        <span class="upload-item-name"></span>
+        <span class="upload-item-status"></span>
+      </div>
+      <div class="upload-progress-track">
+        <div class="upload-progress-fill"></div>
+      </div>
+      <div class="upload-item-error hidden"></div>
+    `;
+    const nameEl = row.querySelector(".upload-item-name");
+    nameEl.textContent = item.name;
+    nameEl.title = item.name;
+    item.els = {
+      row,
+      status: row.querySelector(".upload-item-status"),
+      fill: row.querySelector(".upload-progress-fill"),
+      error: row.querySelector(".upload-item-error"),
+      lastStatusHtml: "",
+      lastWidth: "",
+      lastFillClass: "",
+    };
+    fragment.appendChild(row);
+  }
+
+  els.uploadPanelList.appendChild(fragment);
+  // Много файлов — список внутри панели прокручивается сам,
+  // а не растягивает панель на пол-экрана.
+  els.uploadPanelList.classList.toggle("scrollable", activeUploadItems.length > 5);
+  updateUploadPanel();
+}
+
+let uploadPanelFrame = null;
+
+// События прогресса приходят десятками в секунду; перерисовываем не чаще
+// одного раза на кадр — иначе браузер захлёбывается и картинка дёргается.
+function scheduleUploadPanelUpdate() {
+  if (uploadPanelFrame !== null) return;
+  uploadPanelFrame = requestAnimationFrame(() => {
+    uploadPanelFrame = null;
+    updateUploadPanel();
+  });
+}
+
+function updateUploadPanel() {
+  const total = activeUploadItems.length;
+  const doneCount = activeUploadItems.filter((i) => i.status === "done").length;
+  const errorCount = activeUploadItems.filter((i) => i.status === "error").length;
+  const settled = doneCount + errorCount;
+
+  // Общий процент считаем по байтам, а не по числу файлов: иначе на
+  // одном большом файле полоска стоит на месте, а потом прыгает на 100%.
+  const totalBytes = activeUploadItems.reduce((sum, i) => sum + (i.total || 0), 0);
+  const loadedBytes = activeUploadItems.reduce(
+    (sum, i) => sum + (i.status === "done" ? i.total || 0 : i.loaded || 0),
+    0
+  );
+  const overall = totalBytes > 0 ? Math.round((loadedBytes / totalBytes) * 100) : (settled / total) * 100;
+
+  let title;
+  if (settled < total) {
+    title = total === 1
+      ? `Загрузка файла — ${Math.round(overall)}%`
+      : `Загрузка: ${doneCount} из ${total} · ${Math.round(overall)}%`;
+  } else if (errorCount === 0) {
+    title = total === 1 ? "Файл загружен" : `Загружено файлов: ${total}`;
+  } else {
+    title = `Готово, с ошибками: ${errorCount} из ${total}`;
+  }
+  setText(els.uploadPanelTitle, title);
+
+  if (els.uploadPanelTotalFill) {
+    const width = `${settled === total && errorCount === 0 ? 100 : Math.round(overall)}%`;
+    if (els.uploadPanelTotalFill.style.width !== width) {
+      els.uploadPanelTotalFill.style.width = width;
+    }
+    els.uploadPanelTotalFill.classList.toggle("has-error", errorCount > 0 && settled === total);
+    // Общая полоска не нужна, когда файл всего один — у него своя.
+    els.uploadPanelTotal.classList.toggle("hidden", total < 2);
+  }
+
+  for (const item of activeUploadItems) {
+    if (!item.els) continue;
+    const { els: nodes } = item;
+
+    const statusHtml =
+      item.status === "done" ? `<span class="status-done">${svgCheck}</span>`
+      : item.status === "error" ? `<span class="status-error">${svgError}</span>`
+      : item.status === "queued" ? "в очереди"
+      // Байты ушли, но сервер ещё не ответил — честнее написать
+      // "сохранение", чем держать 100% и ждать.
+      : item.progress >= 100 ? "сохранение"
+      : `${item.progress}%`;
+    if (statusHtml !== nodes.lastStatusHtml) {
+      nodes.status.innerHTML = statusHtml;
+      nodes.lastStatusHtml = statusHtml;
+    }
+
+    const width = `${item.status === "error" ? 100 : item.progress}%`;
+    if (width !== nodes.lastWidth) {
+      nodes.fill.style.width = width;
+      nodes.lastWidth = width;
+    }
+    const fillClass = `upload-progress-fill ${item.status}`;
+    if (fillClass !== nodes.lastFillClass) {
+      nodes.fill.className = fillClass;
+      nodes.lastFillClass = fillClass;
+    }
+
+    if (item.status === "error") {
+      if (nodes.error.textContent !== item.error) nodes.error.textContent = item.error;
+      nodes.error.classList.remove("hidden");
+    } else if (!nodes.error.classList.contains("hidden")) {
+      nodes.error.classList.add("hidden");
+    }
+  }
+}
+
+function setText(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
 }
 
 /* ---- Перетаскивание файлов/папок из проводника компьютера ---- */
@@ -2530,6 +2711,8 @@ function makeDropTarget(element, getTargetPath, onDone, options = {}) {
     if (!dragHasFiles(e)) return;
     e.preventDefault();
     if (options.stopPropagation) e.stopPropagation();
+    // Метка для обработчика на window: эту цель уже отработали.
+    e.fmHandled = true;
     dragCounter = 0;
     element.classList.remove("drag-over");
     const items = await extractDroppedItems(e.dataTransfer);
@@ -2546,32 +2729,6 @@ function dragHasFiles(e) {
   const types = e.dataTransfer && e.dataTransfer.types;
   if (!types) return false;
   return Array.from(types).includes("Files");
-}
-
-function renderUploadPanel() {
-  const doneCount = activeUploadItems.filter((i) => i.status === "done").length;
-  els.uploadPanelTitle.textContent = `Загрузка файлов (${doneCount}/${activeUploadItems.length})`;
-
-  els.uploadPanelList.innerHTML = "";
-  for (const item of activeUploadItems) {
-    const row = document.createElement("div");
-    row.className = "upload-item";
-    const statusHtml =
-      item.status === "done" ? `<span class="upload-item-status status-done">${svgCheck}</span>`
-      : item.status === "error" ? `<span class="upload-item-status status-error">${svgError}</span>`
-      : `<span class="upload-item-status">${item.progress}%</span>`;
-    row.innerHTML = `
-      <div class="upload-item-top">
-        <span class="upload-item-name">${item.name}</span>
-        ${statusHtml}
-      </div>
-      <div class="upload-progress-track">
-        <div class="upload-progress-fill ${item.status}" style="width:${item.status === "error" ? 100 : item.progress}%;"></div>
-      </div>
-      ${item.status === "error" ? `<div class="upload-item-error">${item.error}</div>` : ""}
-    `;
-    els.uploadPanelList.appendChild(row);
-  }
 }
 
 /* ---------- Open file (PDF / OnlyOffice в новой вкладке, остальное — скачивание) ---------- */
