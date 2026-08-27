@@ -259,6 +259,108 @@ function showApp() {
   els.appScreen.classList.remove("hidden");
 }
 
+/* ---------- Ссылка на папку или файл (для своих сотрудников) ---------- */
+
+/**
+ * Ссылка не даёт доступа сама по себе — она лишь говорит, куда идти.
+ * Открывший её увидит экран входа, а после входа права проверятся как
+ * обычно: нет доступа к папке — будет честное сообщение об этом.
+ */
+function buildShareUrl(entryPath, isDir) {
+  const url = new URL(location.origin + "/");
+  if (isDir) {
+    url.searchParams.set("path", entryPath);
+  } else {
+    // На файл ссылки нет — открываем папку, где он лежит, и подсвечиваем строку.
+    const cut = entryPath.lastIndexOf("/");
+    url.searchParams.set("path", cut > 0 ? entryPath.slice(0, cut) : "/");
+    url.searchParams.set("sel", entryPath.slice(cut + 1));
+  }
+  return url.toString();
+}
+
+async function copyTextToClipboard(text) {
+  // navigator.clipboard есть только на https (и на localhost) — на всякий
+  // случай оставляем запасной способ через временное поле ввода.
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(area);
+  if (!ok) throw new Error("браузер не разрешил копирование");
+}
+
+let toastTimer = null;
+
+function showToast(text) {
+  const el = document.getElementById("toast");
+  el.textContent = text;
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
+}
+
+async function shareLinkFor(entryPath, isDir) {
+  const url = buildShareUrl(entryPath, isDir);
+  try {
+    await copyTextToClipboard(url);
+    showToast(isDir ? "Ссылка на папку скопирована" : "Ссылка на файл скопирована");
+  } catch (err) {
+    // Копирование не прошло — показываем ссылку, чтобы её можно было
+    // выделить руками, а не оставлять человека ни с чем.
+    prompt("Скопируйте ссылку вручную:", url);
+  }
+}
+
+/* ---------- Переход по ссылке при открытии страницы ---------- */
+
+// Куда вести после входа: разбираем ?path= (и ?sel=) один раз при загрузке.
+// Если пользователь ещё не авторизован, ссылка дождётся его входа.
+let pendingDeepLink = (() => {
+  if (PICKER_MODE) return null;
+  const path = pickerParams.get("path");
+  if (!path) return null;
+  return { path, sel: pickerParams.get("sel") || "" };
+})();
+
+// Имя строки, которую надо подсветить после отрисовки папки.
+let pendingFlashName = "";
+
+function rootTrailFor(path) {
+  if (path === CASES_PATH || path.startsWith(CASES_PATH + "/")) {
+    return { rootPath: CASES_PATH, rootLabel: "Дела" };
+  }
+  if (path === DB_PATH || path.startsWith(DB_PATH + "/")) {
+    return { rootPath: DB_PATH, rootLabel: "База данных" };
+  }
+  return null;
+}
+
+/** Возвращает true, если ссылка распознана и переход выполнен. */
+function openPendingDeepLink() {
+  const link = pendingDeepLink;
+  pendingDeepLink = null;
+  if (!link) return false;
+
+  const root = rootTrailFor(link.path);
+  if (!root) return false;
+
+  const trail = buildTrailExtending(
+    [{ label: root.rootLabel, path: root.rootPath }],
+    root.rootPath,
+    link.path
+  );
+  pendingFlashName = link.sel;
+  goToFolder(link.path, trail, false);
+  return true;
+}
+
 /* ---------- Права доступа и адаптация интерфейса под пользователя ---------- */
 
 let currentUser = null;
@@ -289,6 +391,9 @@ function applyPermissionsUI() {
 // Запускает подходящий начальный экран после входа/загрузки страницы.
 function enterAppForUser() {
   const allowed = applyPermissionsUI();
+
+  // Пришли по ссылке на конкретную папку — открываем сразу её.
+  if (allowed.length > 0 && openPendingDeepLink()) return;
 
   if (allowed.length === 0) {
     showColumnsUI();
@@ -1867,7 +1972,7 @@ function goToColumns(pushHistory) {
   showColumnsUI();
   loadColumns();
   if (pushHistory) {
-    history.pushState({ view: "columns" }, "");
+    history.pushState({ view: "columns" }, "", PICKER_MODE ? null : "/");
   }
 }
 
@@ -1880,7 +1985,9 @@ function goToFolder(path, trail, pushHistory) {
   showFolderUI();
   renderFolder(path);
   if (pushHistory) {
-    history.pushState({ view: "folder", path, trail }, "");
+    // Адрес меняется вместе с папкой: ссылку можно скопировать прямо из
+    // строки браузера, а F5 оставит человека там же, где он был.
+    history.pushState({ view: "folder", path, trail }, "", PICKER_MODE ? null : buildShareUrl(path, true));
   }
 }
 
@@ -1918,7 +2025,12 @@ async function renderFolder(path) {
     renderFolderRows();
   } catch (err) {
     currentFolderEntries = [];
-    els.folderList.innerHTML = '<div class="empty-hint">Не удалось загрузить содержимое</div>';
+    // Сообщение сервера («Нет доступа к этой папке») полезнее общей фразы —
+    // особенно когда человек пришёл по ссылке от коллеги.
+    const reason = err && err.message && err.message !== "unauthorized"
+      ? escapeHtml(err.message)
+      : "Не удалось загрузить содержимое";
+    els.folderList.innerHTML = `<div class="empty-hint">${reason}</div>`;
   }
 }
 
@@ -1980,6 +2092,11 @@ function renderFolderRows() {
     // Бросок точно на строку-папку — загрузка внутрь неё, а не в текущую.
     if (entry.isDir) {
       makeDropTarget(row, () => entry.fullPath, () => renderFolder(currentPath), { stopPropagation: true });
+    }
+    if (pendingFlashName && entry.name === pendingFlashName) {
+      row.classList.add("row-flash");
+      row.scrollIntoView({ block: "center" });
+      pendingFlashName = "";
     }
     els.folderList.appendChild(row);
   }
@@ -2136,7 +2253,7 @@ function showContextMenu(event, path, name, isDir, context) {
   const inCases = context === "cases" || path.startsWith(CASES_PATH);
   ctxMenuEl.querySelector('[data-ctx-action="move"]').classList.toggle("hidden", inCases);
 
-  const menuWidth = 190, menuHeight = 230; // с запасом, чтобы не вылезало за край экрана
+  const menuWidth = 210, menuHeight = 270; // с запасом, чтобы не вылезало за край экрана
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
   ctxMenuEl.style.left = `${Math.max(8, x)}px`;
@@ -2204,6 +2321,8 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
       openMoveModal([{ path: target.path, isDir: target.isDir }], () => refreshContext(target.context));
     } else if (action === "copy") {
       await copyItemInPlace(target.path, target.context);
+    } else if (action === "share") {
+      await shareLinkFor(target.path, target.isDir);
     } else if (action === "delete") {
       if (!confirm(`Удалить «${target.name}»?`)) return;
       try {
