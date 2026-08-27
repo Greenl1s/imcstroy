@@ -749,6 +749,10 @@ function renderColumnList(key) {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
+    // Бросок точно на строку-папку — загрузка внутрь неё, а не в корень колонки.
+    if (entry.isDir) {
+      makeDropTarget(row, () => entry.fullPath, () => loadColumnList(key), { stopPropagation: true });
+    }
     container.appendChild(row);
   }
 }
@@ -1930,6 +1934,10 @@ function renderFolderRows() {
         openFolderPermissions(entry.fullPath, entry.name);
       });
     }
+    // Бросок точно на строку-папку — загрузка внутрь неё, а не в текущую.
+    if (entry.isDir) {
+      makeDropTarget(row, () => entry.fullPath, () => renderFolder(currentPath), { stopPropagation: true });
+    }
     els.folderList.appendChild(row);
   }
 }
@@ -2326,9 +2334,7 @@ els.uploadPanelCloseBtn.addEventListener("click", () => {
   els.uploadPanel.classList.add("hidden");
 });
 
-// Перетаскивание — теперь только внутри окна "Загрузить", не по всей
-// странице: так понятнее, куда именно можно бросать файл, и не
-// путается со случайными перетаскиваниями по интерфейсу.
+// Зона в окне "Загрузить" — как и раньше.
 makeDropTarget(
   document.getElementById("uploadDropzone"),
   () => currentPath,
@@ -2337,6 +2343,20 @@ makeDropTarget(
     renderFolder(currentPath);
   }
 );
+
+// Перетаскивание прямо в интерфейс, без открытия окна "Загрузить":
+//  - бросок в открытую папку грузит в неё;
+//  - бросок в колонку "База данных"/"Дела" грузит в корень этой колонки;
+//  - бросок точно на строку-папку грузит внутрь этой папки
+//    (см. makeDropTarget с stopPropagation в renderFolderRows/renderColumnList).
+makeDropTarget(els.folderView, () => currentPath, () => renderFolder(currentPath));
+
+for (const key of ["db", "cases"]) {
+  const column = document.querySelector(`.col[data-col="${key}"]`);
+  if (column) {
+    makeDropTarget(column, () => columnState[key].rootPath, () => loadColumnList(key));
+  }
+}
 
 /**
  * items — либо обычный File[] (тогда relativePath берётся из
@@ -2489,21 +2509,25 @@ async function extractDroppedItems(dataTransfer) {
 function makeDropTarget(element, getTargetPath, onDone, options = {}) {
   let dragCounter = 0; // dragenter/dragleave у вложенных элементов иначе мигает подсветкой
   element.addEventListener("dragover", (e) => {
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
     if (options.stopPropagation) e.stopPropagation();
   });
   element.addEventListener("dragenter", (e) => {
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
     if (options.stopPropagation) e.stopPropagation();
     dragCounter++;
     element.classList.add("drag-over");
   });
   element.addEventListener("dragleave", (e) => {
+    if (!dragHasFiles(e)) return;
     if (options.stopPropagation) e.stopPropagation();
     dragCounter = Math.max(0, dragCounter - 1);
     if (dragCounter === 0) element.classList.remove("drag-over");
   });
   element.addEventListener("drop", async (e) => {
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
     if (options.stopPropagation) e.stopPropagation();
     dragCounter = 0;
@@ -2511,6 +2535,17 @@ function makeDropTarget(element, getTargetPath, onDone, options = {}) {
     const items = await extractDroppedItems(e.dataTransfer);
     if (items.length) uploadFiles(items, getTargetPath(), onDone);
   });
+}
+
+/**
+ * Перетаскивают ли именно файлы/папки с компьютера. Без этой проверки
+ * подсветка зоны загорается и от перетаскивания выделенного текста или
+ * элементов самой страницы, а drop по ним ничего бы не загрузил.
+ */
+function dragHasFiles(e) {
+  const types = e.dataTransfer && e.dataTransfer.types;
+  if (!types) return false;
+  return Array.from(types).includes("Files");
 }
 
 function renderUploadPanel() {

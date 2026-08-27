@@ -613,6 +613,26 @@ button.primary:hover { background: #2569c9; }
 .upload-dropzone svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .upload-dropzone.drag-over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
 
+/* Перетаскивание файлов с компьютера прямо в интерфейс:
+   колонка / открытая папка подсвечиваются рамкой, строка-папка — заливкой. */
+.col.drag-over,
+.folder-view.drag-over {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-bg);
+}
+
+.file-row.drag-over,
+.row-item.drag-over {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.file-row.drag-over .icon,
+.row-item.drag-over .icon { stroke: var(--accent); }
+
 .upload-choice {
   display: flex;
   gap: 10px;
