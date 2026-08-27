@@ -204,9 +204,8 @@ async function copyEntry(relPath, newParentRelPath) {
  *
  * Имя берём по содержимому: одна папка/файл — её название, несколько —
  * общее "files". Кириллицу нельзя писать в filename="" (только ASCII),
- * поэтому даём два варианта: транслитерации нет — ASCII-запасной вариант
- * может оказаться безликим "archive.zip", зато современные браузеры
- * прочитают filename*= и сохранят настоящее русское имя.
+ * поэтому даём два варианта: ASCII-запасной для старых браузеров и
+ * filename*=UTF-8'' с настоящим русским именем для современных.
  */
 function zipContentDisposition(relPaths) {
   const single = Array.isArray(relPaths) && relPaths.length === 1 ? relPaths[0] : null;
@@ -218,8 +217,6 @@ function zipContentDisposition(relPaths) {
   const clean = rawName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 120);
   const fileName = clean + ".zip";
 
-  // Запасное ASCII-имя для старых браузеров: если после выбрасывания
-  // кириллицы не осталось ни букв, ни цифр — берём нейтральное "archive".
   const asciiFallback = clean.replace(/[^\x20-\x7e]/g, "").replace(/["\\]/g, "").trim();
   const ascii = (/[A-Za-z0-9]/.test(asciiFallback) ? asciiFallback : "archive") + ".zip";
 

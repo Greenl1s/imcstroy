@@ -39,16 +39,47 @@ function isOfficeFile(fileName) {
 // только при закрытии документа — если бы токен истекал раньше, чем
 // длится реальное редактирование, финальное сохранение отклонялось бы
 // как "недействительный токен".
-function signInternalToken(relPath) {
-  return jwt.sign({ path: relPath }, INTERNAL_TOKEN_SECRET, { expiresIn: "24h" });
+function signInternalToken(relPath, canEdit) {
+  return jwt.sign({ path: relPath, canEdit: Boolean(canEdit) }, INTERNAL_TOKEN_SECRET, { expiresIn: "24h" });
 }
 
-function verifyInternalToken(token, relPath) {
+/**
+ * options.requireEdit — токен должен быть выдан для РЕДАКТИРОВАНИЯ.
+ * Без этой проверки любой, кто просто открыл файл на просмотр, получал
+ * вместе с конфигом редактора токен, которым можно было вызвать колбэк
+ * сохранения и перезаписать файл, доступный ему только для чтения.
+ * Старые токены (без поля canEdit) на запись не годятся.
+ */
+function verifyInternalToken(token, relPath, options = {}) {
   const payload = jwt.verify(token, INTERNAL_TOKEN_SECRET);
   if (payload.path !== relPath) {
     throw new Error("Токен не соответствует пути файла");
   }
-  return true;
+  if (options.requireEdit && payload.canEdit !== true) {
+    throw new Error("Этот токен не даёт права сохранять файл");
+  }
+  return payload;
+}
+
+/**
+ * Проверяет, что ссылка на сохранённый документ ведёт к нашему же
+ * OnlyOffice, а не куда-то ещё. Иначе колбэком можно было заставить
+ * сервер сходить по произвольному адресу (в том числе во внутреннюю
+ * docker-сеть) и записать полученный ответ в файл.
+ */
+function isAllowedOnlyOfficeUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (err) {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const allowed = new Set();
+  for (const base of [ONLYOFFICE_PUBLIC_URL, ONLYOFFICE_INTERNAL_URL]) {
+    try { allowed.add(new URL(base).origin); } catch (err) { /* пропускаем кривой адрес */ }
+  }
+  return allowed.has(parsed.origin);
 }
 
 // OnlyOffice в колбэке присылает ссылку на сохранённый файл через свой
@@ -75,7 +106,6 @@ function buildEditorConfig({ relPath, fileName, userId, userName, canEdit }) {
   if (!documentType) {
     throw new Error("Формат файла не поддерживается для просмотра");
   }
-  const token = signInternalToken(relPath);
   const encodedPath = encodeURIComponent(relPath);
 
   // По умолчанию — как раньше (редактируемые форматы можно редактировать).
@@ -83,12 +113,17 @@ function buildEditorConfig({ relPath, fileName, userId, userName, canEdit }) {
   // на эту папку в "Дела") — открываем строго в режиме просмотра.
   const allowEdit = canEdit === undefined ? EDITABLE_EXT.has(ext) : (canEdit && EDITABLE_EXT.has(ext));
 
+  // Токен на чтение файла и токен на сохранение — разные: сохранять
+  // разрешаем только когда файл и правда открыт на редактирование.
+  const readToken = signInternalToken(relPath, false);
+  const saveToken = signInternalToken(relPath, allowEdit);
+
   const config = {
     document: {
       fileType: ext,
       key: buildDocKey(relPath),
       title: fileName,
-      url: `${FILEMANAGER_INTERNAL_URL}/internal/raw?path=${encodedPath}&token=${token}`,
+      url: `${FILEMANAGER_INTERNAL_URL}/internal/raw?path=${encodedPath}&token=${readToken}`,
       permissions: {
         edit: allowEdit,
         download: true,
@@ -97,7 +132,7 @@ function buildEditorConfig({ relPath, fileName, userId, userName, canEdit }) {
     documentType,
     editorConfig: {
       mode: allowEdit ? "edit" : "view",
-      callbackUrl: `${FILEMANAGER_INTERNAL_URL}/api/onlyoffice/callback?path=${encodedPath}&token=${token}`,
+      callbackUrl: `${FILEMANAGER_INTERNAL_URL}/api/onlyoffice/callback?path=${encodedPath}&token=${saveToken}`,
       user: { id: String(userId), name: userName },
       lang: "ru",
     },
@@ -116,6 +151,7 @@ function buildDocKey(relPath) {
 
 module.exports = {
   isOfficeFile,
+  isAllowedOnlyOfficeUrl,
   buildEditorConfig,
   signInternalToken,
   verifyInternalToken,

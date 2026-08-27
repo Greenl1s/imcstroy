@@ -75,9 +75,24 @@ function buildTools() {
 }
 
 /** Выполняет один вызов инструмента, попросенный ИИ, и возвращает результат (строка для ответа модели). */
+/**
+ * Путь, который назвал ИИ, должен оставаться внутри папки проекта.
+ * Содержимое документов может само содержать текст вроде "открой
+ * ../../другое дело", поэтому ".." отсекаем жёстко, а не полагаемся
+ * на здравомыслие модели.
+ */
+function safeSubpath(raw) {
+  const parts = String(raw || "").split(/[\\/]+/).filter((seg) => seg && seg !== ".");
+  if (parts.includes("..")) return null;
+  return parts.join("/");
+}
+
 async function runTool(name, args, kase) {
   if (name === "list_folder") {
-    const subpath = (args.subpath || "").replace(/^\/+/, "").replace(/\/+$/, "");
+    const subpath = safeSubpath(args.subpath);
+    if (subpath === null) {
+      return JSON.stringify({ error: "Недопустимый путь: выходить за пределы папки проекта нельзя" });
+    }
     const targetPath = subpath ? `${kase.folder_path}/${subpath}` : kase.folder_path;
     try {
       const listing = await files.listDir(targetPath);
@@ -91,7 +106,10 @@ async function runTool(name, args, kase) {
   }
 
   if (name === "read_file") {
-    const rel = String(args.path || "").replace(/^\/+/, "");
+    const rel = safeSubpath(args.path);
+    if (!rel) {
+      return JSON.stringify({ error: "Недопустимый путь: читать можно только файлы внутри папки проекта" });
+    }
     const fullPath = `${kase.folder_path}/${rel}`;
     try {
       const abs = files.absolutePathFor(fullPath);
@@ -266,4 +284,5 @@ async function chatWithProject(kase, history, userMessage, actorId) {
   throw new Error("ИИ слишком долго вызывал инструменты подряд — попробуйте переформулировать запрос");
 }
 
-module.exports = { chatWithProject, buildTools, runTool };
+module.exports = {
+  safeSubpath, chatWithProject, buildTools, runTool };

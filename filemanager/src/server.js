@@ -26,10 +26,25 @@ const app = express();
 // напрямую из браузера (например, массовая выгрузка QR-кодов) — для этого
 // нужен CORS с credentials, чтобы прошла общая cookie SSO.
 const SSO_DOMAIN = process.env.SSO_COOKIE_DOMAIN;
+if (!SSO_DOMAIN) {
+  // Раньше при незаданной переменной разрешался ЛЮБОЙ источник вместе с
+  // cookie — то есть посторонний сайт мог дёргать наш API от имени
+  // вошедшего сотрудника. Теперь в этом случае кросс-доменные запросы
+  // просто запрещены (сам сайт продолжает работать как обычно).
+  console.warn("SSO_COOKIE_DOMAIN не задана — кросс-доменные запросы к API запрещены");
+}
 app.use(cors({
-  origin: SSO_DOMAIN ? [`https://${SSO_DOMAIN}`, `https://files.${SSO_DOMAIN}`] : true,
+  origin: SSO_DOMAIN ? [`https://${SSO_DOMAIN}`, `https://files.${SSO_DOMAIN}`] : false,
   credentials: true,
 }));
+
+// За Caddy: настоящий адрес клиента приходит в X-Forwarded-For.
+// Нужен для ограничения попыток входа — иначе все запросы выглядят
+// как приходящие с одного адреса самого прокси.
+// Именно 1, а не true: доверяем ровно одному прокси — нашему Caddy.
+// При true подошёл бы и заголовок, подделанный самим клиентом, и защиту
+// от перебора можно было бы обойти, подставляя случайные адреса.
+app.set("trust proxy", 1);
 
 app.use(express.json());
 // Скачивание архива запускается обычной формой (см. web/app.js): так
@@ -45,7 +60,25 @@ app.use(express.static(WEB_ROOT));
 // иначе multer может упасть с ENOENT, если папки ещё нет в контейнере.
 const UPLOAD_TMP_DIR = "/tmp/fm-uploads";
 fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
-const upload = multer({ dest: UPLOAD_TMP_DIR });
+// Ограничение размера файла: без него любой вошедший мог занять весь диск
+// одним запросом. По умолчанию 512 МБ, меняется переменной MAX_UPLOAD_MB.
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 512);
+const upload = multer({
+  dest: UPLOAD_TMP_DIR,
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
+});
+
+// Временный файл multer удаляем в любом случае — в том числе когда запрос
+// отклонён проверкой прав. Раньше такие файлы навсегда оставались в /tmp.
+function cleanupTempUpload(req, res, next) {
+  res.on("finish", () => {
+    const leftovers = [];
+    if (req.file && req.file.path) leftovers.push(req.file.path);
+    for (const f of req.files || []) if (f && f.path) leftovers.push(f.path);
+    for (const p of leftovers) fs.promises.unlink(p).catch(() => {});
+  });
+  next();
+}
 
 // Отдельные корневые папки для колонок "База данных" и "Дела",
 // чтобы они не показывали одно и то же содержимое.
@@ -56,6 +89,45 @@ for (const rel of COLUMN_ROOTS) {
 
 /* ---------------- Auth ---------------- */
 
+// Простая защита от перебора паролей: считаем неудачные попытки по
+// связке "адрес + логин". Хранится в памяти процесса — контейнер один,
+// внешнего хранилища ради этого заводить не нужно.
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const loginAttempts = new Map();
+
+function loginKey(req, username) {
+  return `${req.ip}|${String(username || "").toLowerCase()}`;
+}
+
+function loginBlockedFor(key) {
+  const entry = loginAttempts.get(key);
+  if (!entry) return 0;
+  if (Date.now() - entry.first > LOGIN_WINDOW_MS) {
+    loginAttempts.delete(key);
+    return 0;
+  }
+  if (entry.count < LOGIN_MAX_ATTEMPTS) return 0;
+  return LOGIN_WINDOW_MS - (Date.now() - entry.first);
+}
+
+function noteFailedLogin(key) {
+  const entry = loginAttempts.get(key);
+  if (!entry || Date.now() - entry.first > LOGIN_WINDOW_MS) {
+    loginAttempts.set(key, { count: 1, first: Date.now() });
+    return;
+  }
+  entry.count++;
+}
+
+// Чтобы список не рос бесконечно, раз в час выкидываем просроченные записи.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (now - entry.first > LOGIN_WINDOW_MS) loginAttempts.delete(key);
+  }
+}, 60 * 60 * 1000).unref();
+
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -63,10 +135,22 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ message: "Введите логин и пароль" });
     }
 
+    const key = loginKey(req, username);
+    const blockedMs = loginBlockedFor(key);
+    if (blockedMs > 0) {
+      const minutes = Math.ceil(blockedMs / 60000);
+      res.setHeader("Retry-After", Math.ceil(blockedMs / 1000));
+      return res.status(429).json({
+        message: `Слишком много попыток входа. Попробуйте через ${minutes} мин.`,
+      });
+    }
+
     const user = await auth.verifyLogin(username, password);
     if (!user) {
+      noteFailedLogin(key);
       return res.status(401).json({ message: "Неверный логин или пароль" });
     }
+    loginAttempts.delete(key);
 
     const token = auth.issueToken(user);
     auth.setAuthCookie(res, token);
@@ -340,7 +424,9 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
 
     const experts = [];
     for (const p of expertPaths) {
-      if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/")) {
+      // Проверяем не только начало пути, но и отсутствие ".." — иначе
+      // "/База данных/Эксперты/../../<чужая папка>" проходило проверку.
+      if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/") || p.split(/[\\/]/).includes("..")) {
         return res.status(400).json({ message: "Недопустимый путь к папке эксперта" });
       }
       const infoAbs = filesLib.safeResolve(p + "/" + EXPERT_INFO_FILENAME);
@@ -463,6 +549,22 @@ function filterTreeForUser(node, fullPath, rules) {
     if (filtered) filteredChildren.push(filtered);
   }
   return { ...node, children: filteredChildren };
+}
+
+/** Складывает в архив только то, что осталось после фильтрации по правам. */
+function addTreeToArchive(archive, node, fullPath, archiveName) {
+  if (!node.isDir) {
+    archive.file(filesLib.safeResolve(fullPath), { name: archiveName });
+    return;
+  }
+  if (!node.children || node.children.length === 0) {
+    // Пустая (после фильтрации) папка — сохраняем саму папку, без содержимого.
+    archive.append(null, { name: archiveName + "/" });
+    return;
+  }
+  for (const child of node.children) {
+    addTreeToArchive(archive, child, joinRelPath(fullPath, child.name), archiveName + "/" + child.name);
+  }
 }
 
 // Отдаёт полную структуру папки (вложенные подпапки и файлы) одним запросом —
@@ -643,7 +745,7 @@ function sanitizeRelativePath(relPath) {
     .join("/");
 }
 
-app.post("/api/upload", auth.requireAuth, upload.single("file"), requireColumnAccess({ write: true }), async (req, res) => {
+app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUpload, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "Файл не получен" });
@@ -742,8 +844,6 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
       return res.json({ ok: true });
     }
 
-    const absPaths = paths.map((p) => filesLib.safeResolve(p));
-
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", filesLib.zipContentDisposition(paths));
 
@@ -754,14 +854,31 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
     });
     archive.pipe(res);
 
-    for (const abs of absPaths) {
+    // Для обычного пользователя в "Дела" архив собираем по отфильтрованному
+    // дереву: иначе запрет на вложенную папку обходился скачиванием
+    // родительской одним архивом.
+    let casesRulesForZip = null;
+    if (req.user.role !== "admin" && paths.some((p) => columnForPath(p) === "cases")) {
+      casesRulesForZip = await folderAccess.getUserRules(req.user.id);
+    }
+
+    for (const rel of paths) {
+      const abs = filesLib.safeResolve(rel);
       const stat = await fs.promises.stat(abs);
       const name = path.basename(abs);
-      if (stat.isDirectory()) {
-        archive.directory(abs, name);
-      } else {
+
+      if (!stat.isDirectory()) {
         archive.file(abs, { name });
+        continue;
       }
+      if (!casesRulesForZip || columnForPath(rel) !== "cases") {
+        archive.directory(abs, name);
+        continue;
+      }
+
+      const tree = filterTreeForUser(await filesLib.buildTree(rel), rel, casesRulesForZip);
+      if (!tree) continue;
+      addTreeToArchive(archive, tree, rel, name);
     }
 
     await archive.finalize();
@@ -829,7 +946,9 @@ app.get("/internal/linked-file", (req, res) => {
 
 app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
   try {
-    onlyoffice.verifyInternalToken(req.query.token, req.query.path);
+    // requireEdit: сохранять можно только тем токеном, который выдан для
+    // редактирования. Токен просмотра сюда больше не подходит.
+    onlyoffice.verifyInternalToken(req.query.token, req.query.path, { requireEdit: true });
   } catch (err) {
     console.error("OnlyOffice callback: недействительный/просроченный токен для", req.query.path, "-", err.message);
     return res.status(403).json({ error: 1, message: "Недействительный токен" });
@@ -842,6 +961,12 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
   if (status === 2 || status === 6) {
     try {
       const abs = filesLib.safeResolve(req.query.path);
+      // Ссылку на сохранённый документ принимаем только от нашего же
+      // OnlyOffice — иначе колбэком можно заставить сервер сходить
+      // по чужому адресу и записать что угодно в файл.
+      if (!onlyoffice.isAllowedOnlyOfficeUrl(url)) {
+        throw new Error("Ссылка на сохранённый файл ведёт не к OnlyOffice: " + url);
+      }
       const fetchUrl = onlyoffice.toInternalOnlyOfficeUrl(url);
       const response = await fetch(fetchUrl);
       if (!response.ok) {
@@ -856,6 +981,26 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
     }
   }
   res.json({ error: 0 });
+});
+
+/* ---------------- Обработка ошибок загрузки ---------------- */
+
+// Multer бросает свою ошибку (например, файл больше разрешённого) —
+// без этого обработчика клиент получал бы страницу с текстом ошибки
+// вместо понятного сообщения.
+app.use((err, req, res, next) => {
+  if (err && err.name === "MulterError") {
+    const message = err.code === "LIMIT_FILE_SIZE"
+      ? `Файл слишком большой: максимум ${MAX_UPLOAD_MB} МБ`
+      : "Не удалось принять файл: " + err.message;
+    return res.status(400).json({ message });
+  }
+  if (err) {
+    console.error("Необработанная ошибка запроса:", err);
+    if (res.headersSent) return next(err);
+    return res.status(500).json({ message: "Внутренняя ошибка сервера" });
+  }
+  next();
 });
 
 /* ---------------- Frontend fallback ---------------- */

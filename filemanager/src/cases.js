@@ -181,7 +181,7 @@ cases.post("/planfix/stage-tasks", async (req, res) => {
 });
 
 /** Удалить задачу из справочника — тоже доступно всем с правом на "Дела". */
-cases.delete("/planfix/stage-tasks/:id", async (req, res) => {
+cases.delete("/planfix/stage-tasks/:id", auth.requireAdmin, async (req, res) => {
   const { rowCount } = await db.query("DELETE FROM planfix_task_templates WHERE id = $1", [req.params.id]);
   if (!rowCount) return res.status(404).json({ message: "Задача не найдена" });
   res.json({ ok: true });
