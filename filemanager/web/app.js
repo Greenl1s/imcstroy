@@ -46,7 +46,13 @@ const els = {
   backBtn: document.getElementById("backBtn"),
   folderTitle: document.getElementById("folderTitle"),
   logoutBtn: document.getElementById("logoutBtn"),
-  equipmentBtn: document.getElementById("equipmentBtn"),
+  profileInitials: document.getElementById("profileInitials"),
+  profileName: document.getElementById("profileName"),
+  profileRole: document.getElementById("profileRole"),
+  linksBtn: document.getElementById("linksBtn"),
+  linksPopover: document.getElementById("linksPopover"),
+  trashCount: document.getElementById("trashCount"),
+  filesSection: document.getElementById("filesSection"),
   addProjectBtn: document.getElementById("addProjectBtn"),
   projectFormOverlay: document.getElementById("projectFormOverlay"),
   projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
@@ -330,6 +336,14 @@ let pendingDeepLink = (() => {
   return { path, sel: pickerParams.get("sel") || "" };
 })();
 
+// ?section=recent|trash|history — открыть сразу нужный раздел панели.
+const SECTIONS = ["files", "recent", "trash", "history"];
+let pendingSection = (() => {
+  if (PICKER_MODE) return null;
+  const name = pickerParams.get("section");
+  return SECTIONS.includes(name) ? name : null;
+})();
+
 // Имя строки, которую надо подсветить после отрисовки папки.
 let pendingFlashName = "";
 
@@ -369,9 +383,27 @@ let currentUser = null;
 // ("db" или "cases") — работаем сразу в нём, без экрана с колонками.
 let singleColumnMode = null;
 
+/** Инициалы для кружка в панели: из "Иванов Иван" — "ИИ", из "kirill" — "KI". */
+function initialsFor(name) {
+  const clean = String(name || "").trim();
+  if (!clean) return "—";
+  const parts = clean.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return clean.slice(0, 2).toUpperCase();
+}
+
+function renderProfileCard() {
+  const p = currentUser || {};
+  els.profileInitials.textContent = initialsFor(p.username);
+  els.profileName.textContent = p.username || "—";
+  els.profileRole.textContent = p.role === "admin" ? "Администратор" : "Сотрудник";
+}
+
 function applyPermissionsUI() {
   const p = currentUser || {};
-  document.querySelector('[data-col="tools"]').classList.toggle("hidden", !p.can_tools);
+  renderProfileCard();
+  // Раздел "Инструменты" стал кнопкой "Ссылки" в боковой панели.
+  els.linksBtn.parentElement.classList.toggle("hidden", !(p.can_tools || p.role === "admin"));
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
 
@@ -394,7 +426,20 @@ function enterAppForUser() {
   const allowed = applyPermissionsUI();
 
   // Пришли по ссылке на конкретную папку — открываем сразу её.
-  if (allowed.length > 0 && openPendingDeepLink()) return;
+  if (allowed.length > 0 && openPendingDeepLink()) {
+    showSection("files", false);
+    return;
+  }
+
+  if (pendingSection && pendingSection !== "files") {
+    const section = pendingSection;
+    pendingSection = null;
+    showColumnsUI();
+    loadColumns();
+    showSection(section, false);
+    return;
+  }
+  pendingSection = null;
 
   if (allowed.length === 0) {
     showColumnsUI();
@@ -412,6 +457,60 @@ function enterAppForUser() {
     loadColumns();
   }
 }
+
+/* ---------- Разделы боковой панели ---------- */
+
+let currentSection = "files";
+
+/**
+ * Показывает один из разделов. Содержимое "Файлов" при этом не сбрасывается:
+ * ушёл в "Историю", вернулся — та же папка на месте.
+ */
+function showSection(name, pushHistory) {
+  currentSection = name;
+  document.querySelectorAll(".section").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.view !== name);
+  });
+  document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.section === name);
+  });
+  closeLinksPopover();
+
+  if (!pushHistory || PICKER_MODE) return;
+  // В "Файлах" адрес показывает открытую папку (как и раньше),
+  // в остальных разделах — сам раздел, чтобы F5 возвращал туда же.
+  if (name === "files") {
+    const inFolder = !els.folderView.classList.contains("hidden");
+    history.pushState({ view: inFolder ? "folder" : "columns", path: currentPath, trail: currentTrail, section: "files" },
+      "", inFolder && currentPath ? buildShareUrl(currentPath, true) : "/");
+  } else {
+    history.pushState({ view: "section", section: name }, "", `/?section=${name}`);
+  }
+}
+
+document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
+  btn.addEventListener("click", () => showSection(btn.dataset.section, true));
+});
+
+/* ---------- Всплывающее окно со ссылками ---------- */
+
+function closeLinksPopover() {
+  els.linksPopover.classList.add("hidden");
+}
+
+els.linksBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const wasHidden = els.linksPopover.classList.contains("hidden");
+  els.linksPopover.classList.toggle("hidden", !wasHidden);
+  // Список подтягиваем при первом открытии, а не на каждой загрузке страницы.
+  if (wasHidden && !toolsLoaded) loadToolsColumn();
+});
+
+els.linksPopover.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("click", closeLinksPopover);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeLinksPopover();
+});
 
 /* ---------- Login ---------- */
 
@@ -439,10 +538,6 @@ els.logoutBtn.addEventListener("click", async () => {
   currentUser = null;
   singleColumnMode = null;
   showLogin();
-});
-
-els.equipmentBtn.addEventListener("click", () => {
-  location.href = "/instruments/";
 });
 
 /* ---------- Профиль / управление пользователями ---------- */
@@ -647,11 +742,19 @@ els.folderPermCloseBtn.addEventListener("click", () => {
 
 /* ---------- Columns ---------- */
 
+// Встроенная ссылка, которая была отдельной кнопкой в боковой панели.
+// Теперь живёт первым пунктом в том же списке — чтобы все переходы на
+// другие наши сайты были собраны в одном месте.
+const BUILTIN_LINKS = [{ label: "Учёт оборудования", url: "/instruments/", builtin: true }];
+
+let toolsLoaded = false;
+
 async function loadToolsColumn() {
   els.toolsList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
     const { links } = await apiFetch("/api/tools");
     renderToolsColumn(links);
+    toolsLoaded = true;
   } catch (err) {
     els.toolsList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
   }
@@ -670,14 +773,10 @@ function isSameOriginUrl(url) {
 
 function renderToolsColumn(links) {
   els.toolsList.innerHTML = "";
-  if (!links || links.length === 0) {
-    els.toolsList.innerHTML = '<div class="empty-hint">Ссылок пока нет</div>';
-    return;
-  }
-  for (const link of links) {
+  const all = [...BUILTIN_LINKS, ...(links || [])];
+  for (const link of all) {
     const row = document.createElement("div");
-    row.className = "row-item";
-    row.style.justifyContent = "space-between";
+    row.className = "links-popover-item";
     // Внутренняя ссылка — если после разбора у неё тот же домен, что и у
     // текущей страницы (неважно, записана она относительным путём вроде
     // "/instruments/" или полным адресом "https://files.imcstroy.ru/instruments/").
@@ -686,10 +785,14 @@ function renderToolsColumn(links) {
     const linkAttrs = isInternal ? "" : 'target="_blank" rel="noopener"';
     row.innerHTML = `
       <a href="${escapeHtml(link.url)}" ${linkAttrs} style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
-        ${svgLink}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(link.label)}</span>
+        <span class="links-dot"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(link.label)}</span>
       </a>
-      <button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>
+      ${link.builtin ? "" : `<button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>`}
     `;
+    if (link.builtin) {
+      els.toolsList.appendChild(row);
+      continue;
+    }
     row.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.preventDefault();
       if (!confirm(`Удалить ссылку «${link.label}»?`)) return;
@@ -928,7 +1031,6 @@ els.dbSortSelect.addEventListener("change", () => renderColumnList("db"));
 els.casesSortSelect.addEventListener("change", () => renderColumnList("cases"));
 
 async function loadColumns() {
-  loadToolsColumn();
   els.dbSearchInput.value = "";
   els.casesSearchInput.value = "";
   loadColumnList("db");
@@ -1994,6 +2096,11 @@ function goToFolder(path, trail, pushHistory) {
 
 window.addEventListener("popstate", (e) => {
   const state = e.state;
+  if (state && state.view === "section") {
+    showSection(state.section, false);
+    return;
+  }
+  showSection("files", false);
   if (!state || state.view === "columns") {
     if (singleColumnMode) {
       const rootPath = singleColumnMode === "db" ? DB_PATH : CASES_PATH;
@@ -3147,10 +3254,10 @@ async function loadDiskUsage() {
     const freeEl = document.getElementById("diskUsageFree");
     const widget = document.getElementById("diskUsageWidget");
 
-    fill.style.height = `${data.percentUsed}%`;
-    fill.classList.remove("rail-disk-warn", "rail-disk-danger");
-    if (data.percentUsed >= 90) fill.classList.add("rail-disk-danger");
-    else if (data.percentUsed >= 75) fill.classList.add("rail-disk-warn");
+    fill.style.width = `${data.percentUsed}%`;
+    fill.classList.remove("disk-warn", "disk-danger");
+    if (data.percentUsed >= 90) fill.classList.add("disk-danger");
+    else if (data.percentUsed >= 75) fill.classList.add("disk-warn");
 
     // Под полоской — "свободно/всего" одной строкой (например "10/70ГБ").
     freeEl.textContent = formatFreeOfTotal(data.free, data.total);

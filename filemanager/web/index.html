@@ -24,31 +24,64 @@
 
 <div id="appScreen" class="app-screen hidden">
 
-  <div class="rail">
-    <button class="rail-btn" id="profileBtn" title="Профиль" aria-label="Профиль">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+  <div class="sidebar">
+    <button class="side-profile" id="profileBtn" title="Профиль">
+      <span class="side-avatar" id="profileInitials">—</span>
+      <span class="side-profile-text">
+        <span class="side-profile-name" id="profileName">—</span>
+        <span class="side-profile-role" id="profileRole">—</span>
+      </span>
     </button>
-    <button class="rail-btn" id="equipmentBtn" title="Учёт оборудования" aria-label="Учёт оборудования">
-      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    </button>
-    <div id="diskUsageWidget" class="rail-disk-widget" title="Загрузка…">
-      <div class="rail-disk-bar"><div id="diskUsageFill" class="rail-disk-fill" style="height:0%;"></div></div>
-      <span id="diskUsageFree" class="rail-disk-percent">…</span>
+
+    <div class="side-links-wrap">
+      <button class="side-item" id="linksBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+        <span>Ссылки</span>
+      </button>
+      <div class="links-popover hidden" id="linksPopover">
+        <div class="links-popover-header">
+          <span>Ссылки на сайты</span>
+          <button class="add-btn" id="addToolBtn" type="button" aria-label="Добавить ссылку">+</button>
+        </div>
+        <div id="toolsList"></div>
+      </div>
     </div>
-    <button class="rail-btn" id="logoutBtn" title="Выйти" aria-label="Выйти">
-      <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
+
+    <div class="side-divider"></div>
+
+    <button class="side-item active" data-section="files" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      <span>Файлы</span>
     </button>
+    <button class="side-item" data-section="recent" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span>Последние</span>
+    </button>
+    <button class="side-item" data-section="trash" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+      <span>Корзина</span>
+      <span class="side-badge hidden" id="trashCount"></span>
+    </button>
+    <button class="side-item" data-section="history" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span>История</span>
+    </button>
+
+    <div class="side-bottom">
+      <div class="side-disk" id="diskUsageWidget" title="Загрузка…">
+        <div class="side-disk-top"><span>Место на диске</span><span id="diskUsageFree">…</span></div>
+        <div class="side-disk-track"><div class="side-disk-fill" id="diskUsageFill" style="width:0%;"></div></div>
+      </div>
+      <button class="side-item side-logout" id="logoutBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
+        <span>Выйти</span>
+      </button>
+    </div>
   </div>
 
-  <div id="columnsView" class="columns-view">
+  <div class="section files-section" id="filesSection" data-view="files">
 
-    <div class="col" data-col="tools">
-      <div class="col-header">
-        <span>Инструменты</span>
-        <button class="add-btn" id="addToolBtn" aria-label="Добавить ссылку">+</button>
-      </div>
-      <div class="col-body" id="toolsList"></div>
-    </div>
+  <div id="columnsView" class="columns-view">
 
     <div class="col" data-col="db">
       <div class="col-header">
@@ -193,6 +226,44 @@
       </div>
     </div>
     <div class="folder-body" id="folderList"></div>
+  </div>
+
+  </div><!-- /filesSection -->
+
+  <div class="folder-view section hidden" id="recentSection" data-view="recent">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Последние</h1>
+        <p class="page-sub">Файлы, которые недавно добавили или изменили</p>
+      </div>
+    </div>
+    <div class="folder-body">
+      <div class="empty-hint">Раздел появится на следующем шаге</div>
+    </div>
+  </div>
+
+  <div class="folder-view section hidden" id="trashSection" data-view="trash">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Корзина</h1>
+        <p class="page-sub">Удалённое хранится 30 дней, потом стирается само</p>
+      </div>
+    </div>
+    <div class="folder-body">
+      <div class="empty-hint">Раздел появится на следующем шаге</div>
+    </div>
+  </div>
+
+  <div class="folder-view section hidden" id="historySection" data-view="history">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">История</h1>
+        <p class="page-sub">Что происходило в системе</p>
+      </div>
+    </div>
+    <div class="folder-body">
+      <div class="empty-hint">Раздел появится на следующем шаге</div>
+    </div>
   </div>
 
 </div>
