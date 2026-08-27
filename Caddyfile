@@ -15,6 +15,9 @@
                 X-Content-Type-Options nosniff
                 X-Frame-Options DENY
                 Referrer-Policy same-origin
+                # Говорит браузеру полгода ходить сюда только по https —
+                # защищает от подмены соединения на первом же заходе.
+                Strict-Transport-Security "max-age=15768000"
                 -Server
         }
 
@@ -49,6 +52,15 @@ files.{$SITE_ADDRESS} {
                 X-Content-Type-Options nosniff
                 X-Frame-Options SAMEORIGIN
                 Referrer-Policy same-origin
+                Strict-Transport-Security "max-age=15768000"
+
+                # Запасной рубеж против выполнения чужого кода на странице.
+                # Пока в режиме "только жалобы": браузер ничего не блокирует,
+                # но пишет нарушения в консоль. Открой файловый менеджер и
+                # документ через OnlyOffice, посмотри консоль (F12) — если
+                # жалоб нет, переименуй заголовок в
+                # Content-Security-Policy, и правило начнёт действовать.
+                Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://office.{$SITE_ADDRESS}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://office.{$SITE_ADDRESS}; frame-src 'self' https://office.{$SITE_ADDRESS}; object-src 'none'; base-uri 'self'; form-action 'self'"
                 -Server
         }
         log {
