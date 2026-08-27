@@ -236,10 +236,13 @@
         <h1 class="folder-title">Последние</h1>
         <p class="page-sub">Файлы, которые недавно добавили или изменили</p>
       </div>
+      <div class="seg" id="recentFilter">
+        <button class="seg-btn active" data-column="" type="button">Все</button>
+        <button class="seg-btn" data-column="db" type="button">База данных</button>
+        <button class="seg-btn" data-column="cases" type="button">Дела</button>
+      </div>
     </div>
-    <div class="folder-body">
-      <div class="empty-hint">Раздел появится на следующем шаге</div>
-    </div>
+    <div class="folder-body" id="recentList"></div>
   </div>
 
   <div class="folder-view section hidden" id="trashSection" data-view="trash">
@@ -262,10 +265,16 @@
         <h1 class="folder-title">История</h1>
         <p class="page-sub">Что происходило в системе</p>
       </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <select class="col-sort-select" id="historyActor" style="max-width:170px;">
+          <option value="">Все сотрудники</option>
+        </select>
+        <select class="col-sort-select" id="historyAction" style="max-width:170px;">
+          <option value="">Все действия</option>
+        </select>
+      </div>
     </div>
-    <div class="folder-body">
-      <div class="empty-hint">Раздел появится на следующем шаге</div>
-    </div>
+    <div class="folder-body" id="historyList"></div>
   </div>
 
 </div>

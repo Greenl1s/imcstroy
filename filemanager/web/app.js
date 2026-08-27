@@ -57,6 +57,11 @@ const els = {
   trashSubtitle: document.getElementById("trashSubtitle"),
   trashEmptyBtn: document.getElementById("trashEmptyBtn"),
   trashRefreshBtn: document.getElementById("trashRefreshBtn"),
+  recentList: document.getElementById("recentList"),
+  recentFilter: document.getElementById("recentFilter"),
+  historyList: document.getElementById("historyList"),
+  historyActor: document.getElementById("historyActor"),
+  historyAction: document.getElementById("historyAction"),
   addProjectBtn: document.getElementById("addProjectBtn"),
   projectFormOverlay: document.getElementById("projectFormOverlay"),
   projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
@@ -598,6 +603,185 @@ function refreshFilesAfterTrashChange() {
   loadDiskUsage();
 }
 
+/* ---------- Последние и История ---------- */
+
+// Как называется каждое действие в ленте и каким цветом помечено.
+const EVENT_KINDS = {
+  upload:      { label: "Загрузка",            tone: "add",   text: (e) => `загрузил ${b(e.target_name)}` },
+  create_file: { label: "Новый документ",      tone: "new",   text: (e) => `создал документ ${b(e.target_name)}` },
+  create_folder:{ label: "Новая папка",        tone: "new",   text: (e) => `создал папку ${b(e.target_name)}` },
+  office_save: { label: "Изменение документа", tone: "edit",  text: (e) => `изменил ${b(e.target_name)}` },
+  rename:      { label: "Переименование",      tone: "edit",  text: (e) => `переименовал ${b(e.details.from)} → ${b(e.details.to)}` },
+  move:        { label: "Перемещение",         tone: "edit",  text: (e) => `переместил ${b(e.target_name)} в ${escapeHtml(prettyPath(e.details.to))}` },
+  copy:        { label: "Копирование",         tone: "new",   text: (e) => `скопировал ${b(e.target_name)}` },
+  delete:      { label: "Удаление",            tone: "del",   text: (e) => `удалил ${b(e.target_name)}` },
+  restore:     { label: "Восстановление",      tone: "add",   text: (e) => `восстановил ${b(e.target_name)} из корзины` },
+  purge:       { label: "Удаление навсегда",   tone: "del",   text: (e) => `удалил навсегда ${b(e.target_name)}` },
+  trash_empty: { label: "Очистка корзины",     tone: "del",   text: (e) => `очистил корзину (${e.details.removed || 0})` },
+  gp_generate: { label: "Гарантийное письмо",  tone: "new",   text: (e) => `создал гарантийное письмо ${b(e.target_name)}` },
+  case_create: { label: "Новый проект",        tone: "new",   text: (e) => `создал проект ${b(e.target_name)}` },
+  case_stage:  { label: "Смена стадии",        tone: "stage", text: (e) => `перевёл проект ${b(e.target_name)} на стадию ${stageChip(e.details)}` },
+  case_cancel: { label: "Отмена проекта",      tone: "del",   text: (e) => `отменил проект ${b(e.target_name)}` },
+};
+
+const STAGE_CLASS = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" };
+
+function b(text) {
+  return `<b>${escapeHtml(text || "—")}</b>`;
+}
+
+function stageChip(details) {
+  const cls = STAGE_CLASS[details && details.to] || "stage-plan";
+  return `<span class="stage-badge ${cls}">${escapeHtml((details && details.label) || "—")}</span>`;
+}
+
+/** "/Дела/ЭКС.А40/01_Запрос" -> "Дела › ЭКС.А40 › 01_Запрос" */
+function prettyPath(fullPath) {
+  return String(fullPath || "").split("/").filter(Boolean).join(" › ");
+}
+
+function dayLabel(iso) {
+  const date = new Date(iso);
+  const today = new Date();
+  const sameDay = (a, c) => a.toDateString() === c.toDateString();
+  if (sameDay(date, today)) return "Сегодня";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (sameDay(date, yesterday)) return "Вчера";
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
+function timeLabel(iso) {
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Раскладывает список по дням и вставляет подписи "Сегодня"/"Вчера"/дата. */
+function appendByDays(container, items, renderRow) {
+  let lastDay = null;
+  for (const item of items) {
+    const day = dayLabel(item.created_at);
+    if (day !== lastDay) {
+      const label = document.createElement("div");
+      label.className = "day-label";
+      label.textContent = day;
+      container.appendChild(label);
+      lastDay = day;
+    }
+    container.appendChild(renderRow(item));
+  }
+}
+
+/* ---- Последние ---- */
+
+let recentColumn = "";
+
+async function loadRecent() {
+  els.recentList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    const query = recentColumn ? `?column=${recentColumn}` : "";
+    const { items } = await apiFetch("/api/recent" + query);
+    els.recentList.innerHTML = "";
+    if (!items.length) {
+      els.recentList.innerHTML = '<div class="empty-hint">Пока ничего не добавляли<br>Здесь появятся файлы, которые загрузили или изменили</div>';
+      return;
+    }
+    appendByDays(els.recentList, items, (item) => {
+      const row = document.createElement("div");
+      row.className = "file-row";
+      row.innerHTML = `
+        <div class="left">
+          ${iconHtml({ name: item.target_name, isDir: false })}
+          <span class="row-name">${escapeHtml(item.target_name)}</span>
+          <span class="row-path">${escapeHtml(prettyPath(item.target_path.slice(0, item.target_path.lastIndexOf("/"))))}</span>
+        </div>
+        <div class="right">
+          <span class="who">${escapeHtml(item.actor_name || "—")}</span>
+          <span class="size">${timeLabel(item.created_at)}</span>
+        </div>
+      `;
+      row.addEventListener("click", () => openFile(item.target_path, item.target_name));
+      return row;
+    });
+  } catch (err) {
+    els.recentList.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+els.recentFilter.addEventListener("click", (e) => {
+  const btn = e.target.closest(".seg-btn");
+  if (!btn) return;
+  els.recentFilter.querySelectorAll(".seg-btn").forEach((x) => x.classList.toggle("active", x === btn));
+  recentColumn = btn.dataset.column;
+  loadRecent();
+});
+
+/* ---- История ---- */
+
+let historyActorsLoaded = false;
+
+async function loadHistoryFilters() {
+  if (historyActorsLoaded) return;
+  // Список действий собираем из словаря — он же задаёт и подписи.
+  for (const [key, kind] of Object.entries(EVENT_KINDS)) {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = kind.label;
+    els.historyAction.appendChild(option);
+  }
+  try {
+    const { actors } = await apiFetch("/api/events/actors");
+    for (const actor of actors) {
+      const option = document.createElement("option");
+      option.value = actor.id;
+      option.textContent = actor.name;
+      els.historyActor.appendChild(option);
+    }
+  } catch (err) {
+    // Фильтр по сотрудникам не обязателен — лента работает и без него.
+  }
+  historyActorsLoaded = true;
+}
+
+async function loadHistory() {
+  els.historyList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  await loadHistoryFilters();
+  try {
+    const params = new URLSearchParams();
+    if (els.historyAction.value) params.set("action", els.historyAction.value);
+    if (els.historyActor.value) params.set("actorId", els.historyActor.value);
+    const query = params.toString() ? "?" + params.toString() : "";
+    const { items } = await apiFetch("/api/events" + query);
+
+    els.historyList.innerHTML = "";
+    if (!items.length) {
+      els.historyList.innerHTML = '<div class="empty-hint">Событий пока нет</div>';
+      return;
+    }
+    appendByDays(els.historyList, items, (item) => {
+      const kind = EVENT_KINDS[item.action];
+      const row = document.createElement("div");
+      row.className = "ev";
+      const where = item.target_path && item.action !== "rename"
+        ? `<span class="row-path">${escapeHtml(prettyPath(item.target_path.slice(0, item.target_path.lastIndexOf("/"))))}</span>`
+        : "";
+      const text = kind
+        ? kind.text(item)
+        : `${escapeHtml(item.action)} ${b(item.target_name)}`;
+      row.innerHTML = `
+        <span class="ev-dot ev-${kind ? kind.tone : "new"}"></span>
+        <span class="ev-time">${timeLabel(item.created_at)}</span>
+        <span class="ev-text">${b(item.actor_name)} ${text} ${where}</span>
+      `;
+      return row;
+    });
+  } catch (err) {
+    els.historyList.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+els.historyAction.addEventListener("change", () => loadHistory());
+els.historyActor.addEventListener("change", () => loadHistory());
+
 /* ---------- Разделы боковой панели ---------- */
 
 let currentSection = "files";
@@ -616,6 +800,8 @@ function showSection(name, pushHistory) {
   });
   closeLinksPopover();
   if (name === "trash") loadTrash();
+  if (name === "recent") loadRecent();
+  if (name === "history") loadHistory();
 
   if (!pushHistory || PICKER_MODE) return;
   // В "Файлах" адрес показывает открытую папку (как и раньше),
