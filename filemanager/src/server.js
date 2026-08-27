@@ -32,6 +32,10 @@ app.use(cors({
 }));
 
 app.use(express.json());
+// Скачивание архива запускается обычной формой (см. web/app.js): так
+// браузер сам сохраняет файл и берёт имя из Content-Disposition —
+// иначе кириллица в названии архива теряется.
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 const WEB_ROOT = path.join(__dirname, "..", "web");
@@ -697,7 +701,12 @@ app.get("/api/view", auth.requireAuth, requireColumnAccess(), (req, res) => {
 // Скачивание нескольких выбранных файлов/папок разом — упаковываем в zip на лету.
 app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
   try {
-    const paths = Array.isArray(req.body && req.body.paths) ? req.body.paths : [];
+    // Из fetch приходит массив, из формы — та же строка в JSON.
+    let paths = (req.body && req.body.paths) || [];
+    if (typeof paths === "string") {
+      try { paths = JSON.parse(paths); } catch (e) { paths = []; }
+    }
+    if (!Array.isArray(paths)) paths = [];
     if (paths.length === 0) {
       return res.status(400).json({ message: "Не выбрано ни одного элемента" });
     }
@@ -726,10 +735,17 @@ app.post("/api/download-zip", auth.requireAuth, async (req, res) => {
       }
     }
 
+    // Фронтенд сначала спрашивает «а можно?» обычным запросом — так он
+    // покажет понятную ошибку. Сам архив потом качается формой, чтобы имя
+    // файла задал этот сервер (см. web/app.js).
+    if (req.body && (req.body.dryRun === true || req.body.dryRun === "true")) {
+      return res.json({ ok: true });
+    }
+
     const absPaths = paths.map((p) => filesLib.safeResolve(p));
 
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", 'attachment; filename="files.zip"');
+    res.setHeader("Content-Disposition", filesLib.zipContentDisposition(paths));
 
     const archive = new ZipArchive({ zlib: { level: 9 } });
     archive.on("error", (err) => {

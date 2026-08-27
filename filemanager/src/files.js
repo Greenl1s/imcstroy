@@ -198,7 +198,35 @@ async function copyEntry(relPath, newParentRelPath) {
   return cleanNewParent === "/" ? "/" + finalName : cleanNewParent + "/" + finalName;
 }
 
+
+/**
+ * Заголовок Content-Disposition для скачиваемого архива.
+ *
+ * Имя берём по содержимому: одна папка/файл — её название, несколько —
+ * общее "files". Кириллицу нельзя писать в filename="" (только ASCII),
+ * поэтому даём два варианта: транслитерации нет — ASCII-запасной вариант
+ * может оказаться безликим "archive.zip", зато современные браузеры
+ * прочитают filename*= и сохранят настоящее русское имя.
+ */
+function zipContentDisposition(relPaths) {
+  const single = Array.isArray(relPaths) && relPaths.length === 1 ? relPaths[0] : null;
+  const rawName = single
+    ? String(single).split("/").filter(Boolean).pop() || "files"
+    : "files";
+
+  // Убираем то, что не годится для имени файла в Windows и macOS.
+  const clean = rawName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 120);
+  const fileName = clean + ".zip";
+
+  // Запасное ASCII-имя для старых браузеров: если после выбрасывания
+  // кириллицы не осталось ни букв, ни цифр — берём нейтральное "archive".
+  const asciiFallback = clean.replace(/[^\x20-\x7e]/g, "").replace(/["\\]/g, "").trim();
+  const ascii = (/[A-Za-z0-9]/.test(asciiFallback) ? asciiFallback : "archive") + ".zip";
+
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
 module.exports = {
-  DATA_ROOT, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry, copyEntry,
+  DATA_ROOT, zipContentDisposition, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry, copyEntry,
   searchTree, buildTree, absolutePathFor,
 };
