@@ -296,7 +296,9 @@ cases.post("/analyze-files/:batchId/discard", async (req, res) => {
  * если загружаем вторую партию файлов в тот же черновик (например,
  * сначала в "Запрос", потом ещё и в "Первичные материалы").
  */
-cases.post("/stage-files", upload.array("files", 20), async (req, res) => {
+// Файлы приходят пачками (см. web/app.js): из перетащенной папки их может
+// быть много, поэтому запас по количеству за один запрос — с избытком.
+cases.post("/stage-files", upload.array("files", 50), async (req, res) => {
   if (!req.files || !req.files.length) {
     return res.status(400).json({ message: "Файлы не получены" });
   }
