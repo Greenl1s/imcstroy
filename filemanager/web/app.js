@@ -2595,12 +2595,21 @@ async function writeFileToHandle(relPath, parentHandle) {
 /* ---------- Init ---------- */
 
 /** Виджет места на диске в боковой панели — грузится один раз при входе. */
-/** "9.4" -> "9.4ГБ", "1234" (ГБ) -> "1.2ТБ" — компактно, чтобы влезло в узкую колонку. */
-function formatCompactSize(bytes) {
-  const gb = bytes / 1024 ** 3;
-  if (gb >= 1000) return `${(gb / 1024).toFixed(1)}ТБ`;
-  if (gb >= 10) return `${Math.round(gb)}ГБ`;
-  return `${gb.toFixed(1)}ГБ`;
+/**
+ * "10/70ГБ" — свободно/всего одной строкой. Единица измерения общая для
+ * обоих чисел (берётся по общему объёму — он всегда больше), чтобы не
+ * получилось так, что одно число тихо оказалось в терабайтах, а другое в
+ * гигабайтах и запутало.
+ */
+function formatFreeOfTotal(freeBytes, totalBytes) {
+  const freeGb = freeBytes / 1024 ** 3;
+  const totalGb = totalBytes / 1024 ** 3;
+
+  if (totalGb >= 1000) {
+    return `${(freeGb / 1024).toFixed(1)}/${(totalGb / 1024).toFixed(1)}ТБ`;
+  }
+  const fmt = (v) => (v >= 10 ? String(Math.round(v)) : v.toFixed(1));
+  return `${fmt(freeGb)}/${fmt(totalGb)}ГБ`;
 }
 
 async function loadDiskUsage() {
@@ -2616,8 +2625,8 @@ async function loadDiskUsage() {
     if (data.percentUsed >= 90) fill.classList.add("rail-disk-danger");
     else if (data.percentUsed >= 75) fill.classList.add("rail-disk-warn");
 
-    // Под полоской — сколько СВОБОДНО (самое нужное число), в компактном виде.
-    freeEl.textContent = formatCompactSize(data.free);
+    // Под полоской — "свободно/всего" одной строкой (например "10/70ГБ").
+    freeEl.textContent = formatFreeOfTotal(data.free, data.total);
     widget.title = `Свободно: ${gb(data.free)} ГБ\nЗанято: ${gb(data.used)} ГБ\nВсего: ${gb(data.total)} ГБ (${data.percentUsed}%)`;
   } catch {
     // Виджет необязателен для работы — просто оставляем плейсхолдер, если не получилось.
