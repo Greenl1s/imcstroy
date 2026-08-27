@@ -2325,6 +2325,14 @@ els.uploadPanelCloseBtn.addEventListener("click", () => {
 // Перетаскивание в пустое место открытого списка — грузит в ту папку,
 // что сейчас показана. Вешаем один раз (не при каждой перерисовке
 // списка), иначе обработчики будут копиться и запускаться много раз подряд.
+// Страховка на уровне всей страницы: без этого браузер по умолчанию
+// открывает/скачивает перетащенный файл сам, если промахнуться мимо
+// конкретной зоны загрузки хотя бы на пиксель. Конкретные зоны ниже
+// сами останавливают всплытие (stopPropagation), так что это не мешает
+// им — просто гарантирует, что "мимо" ничего плохого не случится.
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
 makeDropTarget(els.dbList, () => columnState.db.rootPath, () => loadColumnList("db"));
 makeDropTarget(els.casesList, () => columnState.cases.rootPath, () => loadColumnList("cases"));
 makeDropTarget(els.folderList, () => currentPath, () => renderFolder(currentPath));
