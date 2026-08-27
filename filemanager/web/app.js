@@ -99,6 +99,7 @@ const els = {
   downloadChoiceOverlay: document.getElementById("downloadChoiceOverlay"),
   downloadChoiceCloseBtn: document.getElementById("downloadChoiceCloseBtn"),
   downloadAsZipBtn: document.getElementById("downloadAsZipBtn"),
+  downloadFolderBtn: document.getElementById("downloadFolderBtn"),
   downloadAsFolderBtn: document.getElementById("downloadAsFolderBtn"),
   downloadFolderHint: document.getElementById("downloadFolderHint"),
   dbToolbar: document.getElementById("dbToolbar"),
@@ -2494,6 +2495,14 @@ window.addEventListener("drop", async (e) => {
   uploadFiles(items, currentPath, () => renderFolder(currentPath));
 });
 
+// Скачать целиком папку, в которой находимся, — тем же путём, что и
+// скачивание выбранных объектов: архивом или, если браузер умеет, в
+// выбранную папку на диске с сохранением структуры.
+els.downloadFolderBtn.addEventListener("click", () => {
+  if (!currentPath) return;
+  requestDownload([{ path: currentPath, isDir: true }]);
+});
+
 els.uploadTriggerBtn.addEventListener("click", () => {
   document.getElementById("uploadModalOverlay").classList.remove("hidden");
 });
@@ -3005,30 +3014,55 @@ els.downloadAsFolderBtn.addEventListener("click", async () => {
   await performFolderDownload(pendingDownloadItems);
 });
 
+/**
+ * Скачивание архива в два шага.
+ *   1) Обычный запрос «а можно?» — если прав нет, показываем сообщение
+ *      сервера, а не оставляем человека без объяснений.
+ *   2) Сам архив качаем отправкой формы в невидимый iframe: тогда имя
+ *      файла задаёт сервер заголовком Content-Disposition и кириллица
+ *      в названии сохраняется. Через fetch + blob имя берётся из
+ *      атрибута download, а из него браузер русские буквы выбрасывает —
+ *      архив сохранялся как безымянный "download".
+ */
 async function performZipDownload(paths) {
   try {
-    const res = await fetch("/api/download-zip", {
+    await apiFetch("/api/download-zip", {
       method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths }),
+      body: JSON.stringify({ paths, dryRun: true }),
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || "HTTP " + res.status);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "files.zip";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   } catch (err) {
-    alert("Не удалось скачать: " + err.message);
+    if (err.message !== "unauthorized") alert("Не удалось скачать: " + err.message);
+    return;
   }
+  submitZipDownloadForm(paths);
+}
+
+function submitZipDownloadForm(paths) {
+  const frameId = "zipDownloadFrame";
+  let frame = document.getElementById(frameId);
+  if (!frame) {
+    frame = document.createElement("iframe");
+    frame.id = frameId;
+    frame.name = frameId;
+    frame.style.display = "none";
+    document.body.appendChild(frame);
+  }
+
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = "/api/download-zip";
+  form.target = frameId;
+  form.style.display = "none";
+
+  const field = document.createElement("input");
+  field.type = "hidden";
+  field.name = "paths";
+  field.value = JSON.stringify(paths);
+  form.appendChild(field);
+
+  document.body.appendChild(form);
+  form.submit();
+  setTimeout(() => form.remove(), 1000);
 }
 
 async function performFolderDownload(items) {
