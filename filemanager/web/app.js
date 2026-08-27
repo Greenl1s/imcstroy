@@ -44,6 +44,7 @@ const els = {
   breadcrumbs: document.getElementById("breadcrumbs"),
   folderList: document.getElementById("folderList"),
   backBtn: document.getElementById("backBtn"),
+  folderTitle: document.getElementById("folderTitle"),
   logoutBtn: document.getElementById("logoutBtn"),
   equipmentBtn: document.getElementById("equipmentBtn"),
   addProjectBtn: document.getElementById("addProjectBtn"),
@@ -276,13 +277,11 @@ function applyPermissionsUI() {
   if (p.can_db) allowed.push("db");
   if (p.can_cases) allowed.push("cases");
 
-  if (allowed.length === 1 && (allowed[0] === "db" || allowed[0] === "cases")) {
-    singleColumnMode = allowed[0];
-    els.backBtn.classList.add("hidden");
-  } else {
-    singleColumnMode = null;
-    els.backBtn.classList.remove("hidden");
-  }
+  // Если раздел всего один, экрана с колонками нет — значит и подниматься
+  // из корня этого раздела некуда.
+  singleColumnMode = allowed.length === 1 && (allowed[0] === "db" || allowed[0] === "cases")
+    ? allowed[0]
+    : null;
 
   return allowed;
 }
@@ -2008,29 +2007,48 @@ const debouncedFolderSearch = debounce((q) => searchFolder(q), 300);
 els.folderSearchInput.addEventListener("input", (e) => debouncedFolderSearch(e.target.value.trim()));
 els.folderSortSelect.addEventListener("change", () => renderFolderRows());
 
+/**
+ * Шапка папки состоит из двух строк:
+ *   1) путь до текущей папки — только родители, каждый кликабелен;
+ *   2) стрелка «на уровень выше» и название текущей папки крупно.
+ * Так видно и где ты находишься, и куда вернёшься одним движением.
+ */
 function renderBreadcrumbs() {
+  const parents = currentTrail.slice(0, -1);
+  const current = currentTrail[currentTrail.length - 1];
+
   els.breadcrumbs.innerHTML = "";
-  currentTrail.forEach((crumb, i) => {
+  parents.forEach((crumb, i) => {
     const span = document.createElement("span");
-    span.className = "crumb" + (i === currentTrail.length - 1 ? " current" : "");
+    span.className = "crumb";
     span.textContent = crumb.label;
-    if (i !== currentTrail.length - 1) {
-      span.addEventListener("click", () => {
-        const trail = currentTrail.slice(0, i + 1);
-        goToFolder(crumb.path, trail, true);
-      });
-    }
+    span.addEventListener("click", () => {
+      goToFolder(crumb.path, currentTrail.slice(0, i + 1), true);
+    });
     els.breadcrumbs.appendChild(span);
-    if (i < currentTrail.length - 1) {
+
+    if (i < parents.length - 1) {
       const sep = document.createElement("span");
+      sep.className = "crumb-sep";
       sep.textContent = "›";
-      sep.style.color = "var(--text-muted)";
       els.breadcrumbs.appendChild(sep);
     }
   });
+  els.breadcrumbs.classList.toggle("hidden", parents.length === 0);
+
+  els.folderTitle.textContent = current ? current.label : "";
+  // Из корня единственного доступного раздела подниматься некуда.
+  const canGoUp = currentTrail.length > 1 || !singleColumnMode;
+  els.backBtn.classList.toggle("hidden", !canGoUp);
 }
 
 els.backBtn.addEventListener("click", () => {
+  if (currentTrail.length > 1) {
+    const parentTrail = currentTrail.slice(0, -1);
+    const parent = parentTrail[parentTrail.length - 1];
+    goToFolder(parent.path, parentTrail, true);
+    return;
+  }
   goToColumns(true);
 });
 

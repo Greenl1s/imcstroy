@@ -335,7 +335,8 @@ button.primary:hover { background: #2569c9; }
 /* Шапка папки: первая строка — путь и кнопки, ниже во всю ширину
    баннер проекта, чат и задачи Planfix. */
 .folder-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 12px; flex-wrap: wrap; }
-.folder-header > .breadcrumbs { flex: 1 1 auto; min-width: 0; }
+.folder-header > .breadcrumbs { order: 0; flex: 0 0 100%; margin-bottom: 2px; }
+.folder-header > .folder-title-row { order: 1; flex: 1 1 auto; min-width: 0; }
 .folder-header > .folder-actions { order: 1; }
 .folder-header > .case-banner,
 .folder-header > .case-chat-box,
@@ -344,18 +345,38 @@ button.primary:hover { background: #2569c9; }
 
 .folder-actions { display: flex; align-items: center; gap: 8px; }
 
-.breadcrumbs { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Верхняя строка — путь до текущей папки (без неё самой). */
+.breadcrumbs { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.breadcrumbs .crumb-sep { color: var(--text-muted); padding: 0 2px; }
+
+/* Вторая строка — стрелка «наверх» и название открытой папки. */
+.folder-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.folder-title {
+  margin: 0;
+  font-size: 21px; font-weight: 700; letter-spacing: -.01em;
+  color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.folder-up-btn {
+  width: 30px; height: 30px; flex: 0 0 30px;
+  border: none; background: transparent;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s ease, color .12s ease;
+}
+.folder-up-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.folder-up-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
 
 .breadcrumbs .crumb {
   cursor: pointer; padding: 2px 6px; border-radius: 6px;
   transition: background .12s ease, color .12s ease;
 }
 .breadcrumbs .crumb:hover { color: var(--accent); background: var(--accent-bg); }
-.breadcrumbs .crumb.current {
-  color: var(--text-primary); font-weight: 600; cursor: default;
-  font-size: 16px; padding-left: 2px;
-}
-.breadcrumbs .crumb.current:hover { background: transparent; }
+
 
 .upload-btn, .back-btn {
   display: flex; align-items: center; gap: 6px;
