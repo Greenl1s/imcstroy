@@ -18,6 +18,7 @@ const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
+const trash = require("./trash");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
 const app = express();
@@ -285,7 +286,12 @@ app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
     const total = stats.blocks * stats.bsize;
     const free = stats.bavail * stats.bsize;
     const used = total - free;
-    res.json({ total, free, used, percentUsed: total > 0 ? Math.round((used / total) * 100) : 0 });
+    const trashBytes = await trash.usedBytes().catch(() => 0);
+    res.json({
+      total, free, used,
+      percentUsed: total > 0 ? Math.round((used / total) * 100) : 0,
+      trashBytes,
+    });
   } catch (err) {
     console.error("Не удалось получить сведения о месте на диске:", err);
     res.status(500).json({ message: "Не удалось получить сведения о месте на диске" });
@@ -624,15 +630,56 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
   }
 });
 
+// Удаление не стирает файл, а переносит его в корзину: оттуда его можно
+// вернуть в течение срока хранения. Персональные правила доступа уезжают
+// вместе с записью (см. trash.js) — сами по себе они здесь больше не чистятся.
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
-    await filesLib.removeEntry(req.query.path);
-    if (columnForPath(req.query.path) === "cases") {
-      await folderPermissions.removeRulesUnderPath(req.query.path);
-    }
+    await trash.moveToTrash(req.query.path, req.user.id);
     res.json({ ok: true });
   } catch (err) {
+    console.error("Не удалось переместить в корзину:", err);
     res.status(400).json({ message: "Не удалось удалить: " + err.message });
+  }
+});
+
+/* ---------------- Корзина ---------------- */
+
+app.get("/api/trash", auth.requireAuth, async (req, res) => {
+  try {
+    const items = await trash.listTrash(req.user);
+    res.json({ items, retentionDays: trash.RETENTION_DAYS });
+  } catch (err) {
+    console.error("Не удалось получить корзину:", err);
+    res.status(500).json({ message: "Не удалось получить содержимое корзины" });
+  }
+});
+
+app.post("/api/trash/:id/restore", auth.requireAuth, async (req, res) => {
+  try {
+    const result = await trash.restore(req.params.id, req.user);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(err.status || 400).json({ message: err.message });
+  }
+});
+
+app.delete("/api/trash/:id", auth.requireAuth, async (req, res) => {
+  try {
+    await trash.purge(req.params.id, req.user);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 400).json({ message: err.message });
+  }
+});
+
+// Очистка вручную: сотрудник убирает своё, администратор — всю корзину.
+app.post("/api/trash/empty", auth.requireAuth, async (req, res) => {
+  try {
+    const removed = await trash.empty(req.user);
+    res.json({ ok: true, removed });
+  } catch (err) {
+    res.status(err.status || 400).json({ message: err.message });
   }
 });
 
@@ -1017,6 +1064,22 @@ app.get("*", (req, res, next) => {
 process.on("unhandledRejection", (err) => {
   console.error("Необработанная ошибка (unhandledRejection):", err);
 });
+
+// Уборка корзины: сразу при запуске и дальше раз в шесть часов.
+// Отдельный планировщик ради этого не нужен — контейнер и так работает
+// постоянно, а операция короткая.
+async function runTrashCleanup() {
+  try {
+    const { removed, orphans } = await trash.purgeExpired();
+    if (removed || orphans) {
+      console.log(`Корзина: удалено просроченных ${removed}, потерянных папок ${orphans}`);
+    }
+  } catch (err) {
+    console.error("Не удалось очистить корзину:", err);
+  }
+}
+setTimeout(runTrashCleanup, 30 * 1000).unref();
+setInterval(runTrashCleanup, 6 * 60 * 60 * 1000).unref();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
