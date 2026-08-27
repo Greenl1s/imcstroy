@@ -2185,12 +2185,24 @@ function resetPendingProjectFiles() {
 }
 
 function renderPendingFileList(zone) {
-  const container = document.getElementById(zone === "zapros" ? "pfAttachZaprosList" : "pfAttachMaterialsList");
-  container.innerHTML = pfPendingFiles[zone]
+  const suffix = zone === "zapros" ? "Zapros" : "Materials";
+  const container = document.getElementById(`pfAttach${suffix}List`);
+  const counter = document.getElementById(`pfAttach${suffix}Count`);
+  const hint = document.getElementById(`pfAttach${suffix}Hint`);
+  const items = pfPendingFiles[zone];
+
+  counter.textContent = items.length ? String(items.length) : "";
+  counter.classList.toggle("hidden", items.length === 0);
+  // Подсказку про перетаскивание убираем, когда файлы уже набраны —
+  // чтобы список не тонул в служебном тексте.
+  hint.classList.toggle("hidden", items.length > 0);
+
+  container.innerHTML = items
     .map((f, i) => `
       <div class="pf-attach-file-row">
-        <span>${escapeHtml(f.name)}</span>
-        <button type="button" data-remove-zone="${zone}" data-remove-index="${i}">✕</button>
+        <span class="pf-attach-file-name">${escapeHtml(f.label)}</span>
+        <span class="pf-attach-file-size">${formatSize(f.file.size)}</span>
+        <button type="button" data-remove-zone="${zone}" data-remove-index="${i}" title="Убрать">✕</button>
       </div>`)
     .join("");
   container.querySelectorAll("[data-remove-index]").forEach((btn) => {
@@ -2201,14 +2213,78 @@ function renderPendingFileList(zone) {
   });
 }
 
+/**
+ * Добавляет файлы в зону, отсеивая повторы: один и тот же файл легко
+ * перетащить дважды, и тогда он загрузился бы в проект в двух экземплярах.
+ * Считаем совпадением одинаковые имя, размер и время изменения.
+ */
+function addPendingFiles(zone, incoming) {
+  const known = new Set(pfPendingFiles[zone].map((f) => `${f.label}|${f.file.size}|${f.file.lastModified}`));
+  let added = 0, skipped = 0;
+
+  for (const item of incoming) {
+    const file = item instanceof File ? item : item.file;
+    // Внутри проекта структура своя ("01_Запрос" и т.д.), поэтому файлы из
+    // перетащенной папки раскладываются плоско — но в списке показываем,
+    // откуда что взялось.
+    const label = (item.relativePath || file.webkitRelativePath || file.name);
+    const key = `${label}|${file.size}|${file.lastModified}`;
+    if (known.has(key)) { skipped++; continue; }
+    known.add(key);
+    pfPendingFiles[zone].push({ file, label });
+    added++;
+  }
+
+  renderPendingFileList(zone);
+  if (skipped > 0) {
+    showToast(added > 0
+      ? `Добавлено файлов: ${added}, повторов пропущено: ${skipped}`
+      : `Эти файлы уже добавлены (${skipped})`);
+  }
+  return added;
+}
+
 function wireAttachZone(zone, buttonId, inputId) {
   const button = document.getElementById(buttonId);
   const input = document.getElementById(inputId);
+  const dropZone = document.getElementById(zone === "zapros" ? "pfAttachZaprosZone" : "pfAttachMaterialsZone");
+
   button.addEventListener("click", () => input.click());
   input.addEventListener("change", () => {
-    for (const file of input.files) pfPendingFiles[zone].push(file);
+    addPendingFiles(zone, Array.from(input.files));
     input.value = ""; // чтобы можно было выбрать тот же файл повторно, если удалили и передумали
-    renderPendingFileList(zone);
+  });
+
+  // Перетаскивание прямо в зону — файлы и целые папки, сразу несколько.
+  // Разбор перетащенного тот же, что и в файловом менеджере.
+  let dragCounter = 0;
+  dropZone.addEventListener("dragover", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  dropZone.addEventListener("dragenter", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    dropZone.classList.add("drag-over");
+  });
+  dropZone.addEventListener("dragleave", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.stopPropagation();
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) dropZone.classList.remove("drag-over");
+  });
+  dropZone.addEventListener("drop", async (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.fmHandled = true;
+    dragCounter = 0;
+    dropZone.classList.remove("drag-over");
+    const items = await extractDroppedItems(e.dataTransfer);
+    if (items.length) addPendingFiles(zone, items);
   });
 }
 wireAttachZone("zapros", "pfAttachZaprosBtn", "pfAttachZapros");
@@ -2226,18 +2302,24 @@ async function uploadPendingProjectFiles() {
   let batchId = null;
   const fileAssignments = [];
 
+  // Сервер принимает ограниченное число файлов за один запрос, а из
+  // перетащенной папки их может быть много — отправляем пачками.
+  const BATCH_SIZE = 20;
+
   async function uploadZone(files, category) {
-    if (!files.length) return;
-    const formData = new FormData();
-    for (const f of files) formData.append("files", f);
-    const url = batchId ? `/api/cases/stage-files?batchId=${encodeURIComponent(batchId)}` : "/api/cases/stage-files";
-    const res = await fetch(url, { method: "POST", credentials: "include", body: formData });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Не удалось загрузить файлы");
-    const data = await res.json();
-    batchId = data.batchId;
-    for (const r of data.results) {
-      if (r.key) fileAssignments.push({ key: r.key, category });
-      else throw new Error(`Не удалось загрузить файл «${r.filename}»: ${r.error}`);
+    for (let from = 0; from < files.length; from += BATCH_SIZE) {
+      const chunk = files.slice(from, from + BATCH_SIZE);
+      const formData = new FormData();
+      for (const f of chunk) formData.append("files", f.file);
+      const url = batchId ? `/api/cases/stage-files?batchId=${encodeURIComponent(batchId)}` : "/api/cases/stage-files";
+      const res = await fetch(url, { method: "POST", credentials: "include", body: formData });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Не удалось загрузить файлы");
+      const data = await res.json();
+      batchId = data.batchId;
+      for (const r of data.results) {
+        if (r.key) fileAssignments.push({ key: r.key, category });
+        else throw new Error(`Не удалось загрузить файл «${r.filename}»: ${r.error}`);
+      }
     }
   }
 

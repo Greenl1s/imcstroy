@@ -191,7 +191,26 @@ button.primary:hover { background: #2569c9; }
 .pf-attach-zone { margin-top: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; }
 .pf-attach-zone-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; }
 .pf-attach-file-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-.pf-attach-file-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 8px; background: var(--bg-page); border-radius: 6px; }
+.pf-attach-file-row { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 5px 8px; background: var(--bg-page); border-radius: 6px; }
+.pf-attach-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-attach-file-size { color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* Зона прикрепления принимает и перетаскивание — подсвечиваем цель. */
+.pf-attach-zone { transition: border-color .15s ease, background .15s ease; }
+.pf-attach-zone.drag-over { border-color: var(--accent); border-style: solid; background: var(--accent-bg); }
+
+.pf-attach-hint {
+  font-size: 12px; color: var(--text-muted);
+  text-align: center; padding: 10px 8px 4px;
+}
+.pf-attach-zone.drag-over .pf-attach-hint { color: var(--accent); }
+
+.pf-attach-count {
+  display: inline-block; margin-left: 8px;
+  font-size: 11px; font-weight: 700;
+  background: var(--accent-bg); color: var(--accent-strong);
+  border-radius: 999px; padding: 1px 7px;
+}
 .pf-attach-file-row button { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 13px; }
 
 /* App shell */

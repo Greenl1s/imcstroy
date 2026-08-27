@@ -571,20 +571,22 @@
 
       <div>
         <span class="row-subtitle">Материалы <span style="font-weight:400;">(необязательно)</span></span>
-        <div class="pf-attach-zone">
+        <div class="pf-attach-zone" id="pfAttachZaprosZone">
           <div class="pf-attach-zone-header">
-            <span>Запрос</span>
+            <span>Запрос<span class="pf-attach-count hidden" id="pfAttachZaprosCount"></span></span>
             <input type="file" id="pfAttachZapros" multiple style="display:none;">
             <button type="button" class="secondary" id="pfAttachZaprosBtn">+ Выбрать файлы</button>
           </div>
+          <div class="pf-attach-hint" id="pfAttachZaprosHint">Перетащите сюда файлы или папку — можно сразу несколько</div>
           <div id="pfAttachZaprosList" class="pf-attach-file-list"></div>
         </div>
-        <div class="pf-attach-zone">
+        <div class="pf-attach-zone" id="pfAttachMaterialsZone">
           <div class="pf-attach-zone-header">
-            <span>Первичные материалы для ознакомления</span>
+            <span>Первичные материалы для ознакомления<span class="pf-attach-count hidden" id="pfAttachMaterialsCount"></span></span>
             <input type="file" id="pfAttachMaterials" multiple style="display:none;">
             <button type="button" class="secondary" id="pfAttachMaterialsBtn">+ Выбрать файлы</button>
           </div>
+          <div class="pf-attach-hint" id="pfAttachMaterialsHint">Перетащите сюда файлы или папку — можно сразу несколько</div>
           <div id="pfAttachMaterialsList" class="pf-attach-file-list"></div>
         </div>
       </div>
