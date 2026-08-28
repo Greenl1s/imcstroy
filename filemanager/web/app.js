@@ -1002,7 +1002,8 @@ async function loadFolderPermRules() {
     const { permissions } = await apiFetch(`/api/folder-permissions?path=${encodeURIComponent(folderPermPath)}`);
     renderFolderPermRules(permissions);
   } catch (err) {
-    els.folderPermList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
+    els.folderPermList.innerHTML =
+      `<div class="empty-hint">Не удалось загрузить: ${escapeHtml(err.message || "неизвестная ошибка")}</div>`;
   }
 }
 
@@ -1018,8 +1019,8 @@ function renderFolderPermRules(list) {
     const row = document.createElement("div");
     row.className = "user-row";
     row.innerHTML = `
-      <span class="user-name">${perm.username}</span>
-      <span class="role-badge">${FOLDER_ACCESS_LABEL[perm.access] || perm.access}</span>
+      <span class="user-name">${escapeHtml(perm.username)}</span>
+      <span class="role-badge">${escapeHtml(FOLDER_ACCESS_LABEL[perm.access] || perm.access)}</span>
       <button class="delete-btn" title="Убрать правило" aria-label="Убрать правило">${svgTrash}</button>
     `;
     row.querySelector(".delete-btn").addEventListener("click", async () => {
