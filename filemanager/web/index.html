@@ -662,6 +662,29 @@
   <button type="button" class="danger-item" data-ctx-action="delete">Удалить</button>
 </div>
 
+<div id="planfixOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:720px;">
+    <div class="modal-header">
+      <span>Planfix</span>
+      <button class="back-btn" id="planfixCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <p class="row-subtitle" id="planfixLastSync">Проверяю, когда сверялись в последний раз…</p>
+
+    <div style="display:flex; gap:8px; margin:12px 0 4px; flex-wrap:wrap;">
+      <button class="upload-btn" id="planfixProbeBtn" type="button">Проверить связь</button>
+      <button class="create-btn" id="planfixRunBtn" type="button" style="height:34px;">
+        <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
+        <span>Перенести проекты и задачи</span>
+      </button>
+    </div>
+
+    <div id="planfixResult" class="planfix-result"></div>
+  </div>
+</div>
+
 <div id="moveOverlay" class="modal-overlay hidden">
   <div class="modal-panel" style="max-width:480px;">
     <div class="modal-header">

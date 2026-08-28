@@ -1951,7 +1951,13 @@ function renderCaseBanner(project) {
   }
 }
 
-/* ---- Сверка с Planfix вручную ---- */
+/* ---- Окно Planfix: диагностика и перенос ----
+   Кнопка в шапке колонки открывает окно, а не запускает перенос сразу:
+   операция читает весь аккаунт Planfix и заводит папки, такое не должно
+   случаться от одного случайного клика. */
+
+const planfixOverlay = document.getElementById("planfixOverlay");
+const planfixResult = document.getElementById("planfixResult");
 
 function syncSummary(report) {
   const parts = [];
@@ -1965,29 +1971,140 @@ function syncSummary(report) {
   return parts.length ? parts.join(", ") : "изменений нет";
 }
 
-els.planfixSyncBtn.addEventListener("click", async () => {
-  const btn = els.planfixSyncBtn;
-  btn.classList.add("busy");
-  showToast("Сверяюсь с Planfix…");
+function pfTable(headers, rows) {
+  return `<table class="pf-table">
+    <tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>
+    ${rows.map((r) => `<tr>${r.join("")}</tr>`).join("")}
+  </table>`;
+}
+
+/** Показывает, что видно в Planfix: группы, поля и статусы задач. */
+function renderProbe(data) {
+  const typeLabel = { expertise: "Экспертизы", research: "Независимые исследования" };
+
+  const groups = pfTable(["Группа проектов", "id", "Проектов", "Переносится как"],
+    data.groups.map((g) => [
+      `<td>${escapeHtml(g.name)}</td>`,
+      `<td class="num">${g.id ?? "—"}</td>`,
+      `<td class="num">${g.count}</td>`,
+      g.mappedTo
+        ? `<td class="pf-ok">${typeLabel[g.mappedTo]}</td>`
+        : `<td class="pf-warn">не переносится — определим по префиксу «ЭКС.»/«НИ.»</td>`,
+    ]));
+
+  const fields = pfTable(["Поле проекта", "id", "Пример значения"],
+    data.fields.map((f) => {
+      const configured = Number(f.id) === Number(data.expertiseFieldConfigured);
+      return [
+        `<td>${escapeHtml(f.name || "(без названия)")}${configured ? ' <span class="pf-ok">— тип экспертизы</span>' : ""}</td>`,
+        `<td class="num">${f.id}</td>`,
+        `<td>${escapeHtml(String(f.sample == null ? "—" : f.sample)).slice(0, 60)}</td>`,
+      ];
+    }));
+
+  const statuses = pfTable(["Статус задачи", "Задач", "Считается завершённой"],
+    data.taskStatuses.map((st) => [
+      `<td>${escapeHtml(st.name)}</td>`,
+      `<td class="num">${st.count}</td>`,
+      st.treatedAsDone ? '<td class="pf-ok">да</td>' : "<td>нет</td>",
+    ]));
+
+  planfixResult.innerHTML = `
+    <div class="pf-block">
+      <h3>Группы проектов</h3>
+      ${groups}
+    </div>
+    <div class="pf-block">
+      <h3>Поля проекта</h3>
+      ${fields}
+      ${data.expertiseFieldConfigured
+        ? ""
+        : '<p class="page-sub">Тип экспертизы пока не настроен: найдите нужное поле в таблице и пропишите его id в .env как PLANFIX_FIELD_EXPERTISE_TYPE.</p>'}
+    </div>
+    <div class="pf-block">
+      <h3>Статусы задач</h3>
+      ${statuses}
+      <p class="page-sub">Свои названия завершённых статусов добавляются в .env: PLANFIX_DONE_STATUSES="Сдана,Принята".</p>
+    </div>
+    <p class="page-sub">Смотрели ${data.projectsSampled} проектов и ${data.tasksSampled} задач.</p>
+  `;
+}
+
+function renderSyncReport(report) {
+  const list = (title, items, render) =>
+    items.length
+      ? `<div class="pf-block"><h3>${title} (${items.length})</h3>
+           <ul class="pf-list">${items.slice(0, 50).map(render).join("")}</ul>
+           ${items.length > 50 ? `<p class="page-sub">…и ещё ${items.length - 50}</p>` : ""}
+         </div>`
+      : "";
+
+  planfixResult.innerHTML = `
+    <p class="row-subtitle"><strong>Итог: ${escapeHtml(syncSummary(report))}</strong></p>
+    ${list("Новые проекты", report.created, (x) =>
+      `<li>${escapeHtml(x.name)}${x.foldersCreated ? ` — папок создано ${x.foldersCreated}` : ""}</li>`)}
+    ${list("Подхвачены существующие папки", report.adopted, (x) => `<li>${escapeHtml(x.name)} — ${escapeHtml(x.folder)}</li>`)}
+    ${list("Обновлены", report.updated, (x) => `<li>${escapeHtml(x.name)}: ${escapeHtml(x.changes.join(", "))}</li>`)}
+    ${list("Пропущены", report.skipped, (x) => `<li>${escapeHtml(x.name)} — ${escapeHtml(x.why)}</li>`)}
+    ${list("Ошибки", report.errors, (x) => `<li>${escapeHtml(x.name)} — ${escapeHtml(x.error)}</li>`)}
+    <p class="page-sub">Просмотрено проектов ${report.projectsSeen}, задач ${report.tasksSeen}, без изменений ${report.unchanged}.</p>
+  `;
+}
+
+async function showLastSync() {
+  const el = document.getElementById("planfixLastSync");
+  try {
+    const { last } = await apiFetch("/api/cases/planfix/sync-status");
+    if (!last) { el.textContent = "Сверки ещё не было."; return; }
+    const when = formatWhen(new Date(last.finished_at || last.started_at).getTime());
+    el.textContent = last.ok
+      ? `Последняя сверка: ${when} — ${syncSummary(last.report || { created: [], adopted: [], updated: [], skipped: [], errors: [] })}`
+      : `Последняя сверка ${when} закончилась ошибкой: ${last.error || "причина не записана"}`;
+  } catch (err) {
+    el.textContent = "Не удалось узнать, когда сверялись: " + err.message;
+  }
+}
+
+els.planfixSyncBtn.addEventListener("click", () => {
+  planfixOverlay.classList.remove("hidden");
+  planfixResult.innerHTML = "";
+  showLastSync();
+});
+
+document.getElementById("planfixCloseBtn").addEventListener("click", () => {
+  planfixOverlay.classList.add("hidden");
+});
+
+document.getElementById("planfixProbeBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("planfixProbeBtn");
+  btn.disabled = true;
+  planfixResult.innerHTML = '<div class="empty-hint" style="padding:16px;">Спрашиваю Planfix…</div>';
+  try {
+    renderProbe(await apiFetch("/api/cases/planfix/probe"));
+  } catch (err) {
+    planfixResult.innerHTML = `<div class="empty-hint" style="padding:16px;">${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("planfixRunBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("planfixRunBtn");
+  btn.disabled = true;
+  planfixResult.innerHTML = '<div class="empty-hint" style="padding:16px;">Переношу проекты и задачи…</div>';
   try {
     const { report } = await apiFetch("/api/cases/planfix/sync", { method: "POST" });
+    renderSyncReport(report);
     showToast("Planfix: " + syncSummary(report));
-    // Проекты могли появиться в любой стадии — обновляем то, что открыто.
+    showLastSync();
     if (currentSection === "files") {
       if (els.folderView && !els.folderView.classList.contains("hidden")) renderFolder(currentPath);
       else loadColumnList("cases");
     }
-    if (report.skipped.length || report.errors.length) {
-      const lines = [
-        ...report.skipped.map((x) => `• ${x.name} — ${x.why}`),
-        ...report.errors.map((x) => `• ${x.name} — ошибка: ${x.error}`),
-      ];
-      alert("Часть карточек Planfix не перенесена:\n\n" + lines.join("\n"));
-    }
   } catch (err) {
-    showToast("Не удалось свериться: " + err.message);
+    planfixResult.innerHTML = `<div class="empty-hint" style="padding:16px;">Не удалось перенести: ${escapeHtml(err.message)}</div>`;
   } finally {
-    btn.classList.remove("busy");
+    btn.disabled = false;
   }
 });
 

@@ -1272,6 +1272,19 @@ button.primary:hover { background: #2569c9; }
 .ev .stage-badge { font-size: 12px; padding: 2px 8px; }
 
 /* Add menu dropdown */
+/* Диагностика и отчёт сверки с Planfix */
+.planfix-result { margin-top: 6px; max-height: 52vh; overflow-y: auto; }
+.pf-block { margin-top: 16px; }
+.pf-block h3 { margin: 0 0 8px; font-size: var(--fs-body); font-weight: 600; }
+.pf-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
+.pf-table th, .pf-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.pf-table th { color: var(--text-muted); font-weight: 600; }
+.pf-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-ok { color: var(--accent-on-tint); font-weight: 600; }
+.pf-warn { color: var(--warning); font-weight: 600; }
+.pf-list { margin: 0; padding-left: 18px; font-size: var(--fs-meta); color: var(--text-secondary); }
+.pf-list li { margin-bottom: 3px; }
+
 /* Служебная иконка-кнопка в шапке колонки (сверка с Planfix). */
 .col-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
