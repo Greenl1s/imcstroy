@@ -214,6 +214,19 @@ cases.post("/planfix/sync", auth.requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Диагностика связи с Planfix: какие есть группы проектов, какие
+ * пользовательские поля с их id и как называются статусы задач. Нужна,
+ * чтобы настроить сопоставление, не залезая в консоль сервера.
+ */
+cases.get("/planfix/probe", auth.requireAdmin, async (req, res) => {
+  try {
+    res.json(await planfixSync.probe());
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось опросить Planfix: " + err.message });
+  }
+});
+
 /** Задачи проекта: текущие и завершённые, зеркало Planfix. */
 cases.get("/:id/tasks", loadCase, async (req, res) => {
   const { rows } = await db.query(

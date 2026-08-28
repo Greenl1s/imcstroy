@@ -15,11 +15,6 @@ const caseFolders = require("./caseFolders");
 const planfix = require("./planfixSync");
 const journalExcel = require("./journalExcel");
 
-const GROUP_TO_TYPE = {
-  [planfix.GROUP_ID_EXPERTISE]: "expertise",
-  [planfix.GROUP_ID_RESEARCH]: "research",
-};
-
 // Планфиксовые значения полей -> наши. Сравниваем по нижнему регистру и
 // без лишних пробелов: в карточках встречается и "Завершен", и "Завершён".
 const STAGE_FROM_PLANFIX = {
@@ -56,7 +51,7 @@ function customField(project, fieldId) {
 
 /** Тип проекта: сначала по группе Planfix, иначе по префиксу наименования. */
 function typeOf(project) {
-  const byGroup = GROUP_TO_TYPE[Number(project?.group?.id)];
+  const byGroup = planfix.typeForGroup(project?.group);
   if (byGroup) return byGroup;
   const name = String(project?.name || "").trim();
   if (name.startsWith("ЭКС.")) return "expertise";
@@ -235,7 +230,11 @@ async function importProjects(report) {
         continue;
       }
       if (!parsed.type) {
-        report.skipped.push({ name: parsed.name, why: "не понятен тип: ни группа, ни префикс «ЭКС.»/«НИ.»" });
+        const groupName = project?.group?.name ? `группа «${project.group.name}»` : "группы нет";
+        report.skipped.push({
+          name: parsed.name,
+          why: `не понятен тип: ${groupName}, и наименование не начинается с «ЭКС.»/«НИ.»`,
+        });
         continue;
       }
       if (!parsed.stage && !parsed.isCancelled) {

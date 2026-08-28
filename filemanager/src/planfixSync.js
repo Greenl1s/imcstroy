@@ -83,6 +83,88 @@ function groupIdForType(type) {
   return null;
 }
 
+/**
+ * Группы проектов Planfix -> наши типы. Раньше это были два зашитых в код
+ * числа; теперь узнаём группу по названию, поэтому переименование или
+ * пересоздание группы в Planfix ничего не ломает, а лишние группы
+ * (например "Управление и развитие") видно в диагностике.
+ */
+const GROUP_NAME_TO_TYPE = [
+  { test: /эксперт/i, type: "expertise" },
+  { test: /независим|^ни\b|исследован/i, type: "research" },
+];
+
+function typeForGroup(group) {
+  if (!group) return null;
+  const id = Number(group.id);
+  if (id === GROUP_ID_EXPERTISE) return "expertise";
+  if (id === GROUP_ID_RESEARCH) return "research";
+  const name = String(group.name || "");
+  const hit = GROUP_NAME_TO_TYPE.find((g) => g.test.test(name));
+  return hit ? hit.type : null;
+}
+
+/**
+ * Диагностика: что вообще лежит в Planfix. Отвечает на три вопроса, из-за
+ * которых иначе пришлось бы лезть в консоль: какие есть группы проектов,
+ * какие пользовательские поля (с их id) и как называются статусы задач.
+ */
+async function probe() {
+  const projects = await listAll("/project/list", "id,name,group,customFieldData", {}, 3);
+  const tasks = await listAll("/task/list", "id,name,status,project", {}, 2);
+
+  const groups = new Map();
+  for (const p of projects) {
+    const g = p.group;
+    const key = g ? `${g.id}|${g.name || ""}` : "—|без группы";
+    const item = groups.get(key) || {
+      id: g ? Number(g.id) : null,
+      name: g ? g.name || "" : "(без группы)",
+      count: 0,
+      mappedTo: typeForGroup(g),
+      example: p.name,
+    };
+    item.count++;
+    groups.set(key, item);
+  }
+
+  const fields = new Map();
+  for (const p of projects) {
+    for (const item of p.customFieldData || []) {
+      const id = Number(item?.field?.id);
+      if (!id) continue;
+      const known = fields.get(id) || {
+        id,
+        name: item.field.name || "",
+        sample: null,
+        usedBy: 0,
+      };
+      known.usedBy++;
+      if (known.sample == null && item.value != null) {
+        known.sample = typeof item.value === "object" ? item.value.value : item.value;
+      }
+      fields.set(id, known);
+    }
+  }
+
+  const statuses = new Map();
+  for (const t of tasks) {
+    const name = t?.status?.name || "(без статуса)";
+    const item = statuses.get(name) || { name, id: t?.status?.id ?? null, count: 0, treatedAsDone: isDoneStatus(name) };
+    item.count++;
+    statuses.set(name, item);
+  }
+
+  return {
+    projectsSampled: projects.length,
+    tasksSampled: tasks.length,
+    groups: [...groups.values()].sort((a, b) => b.count - a.count),
+    fields: [...fields.values()].sort((a, b) => a.id - b.id),
+    taskStatuses: [...statuses.values()].sort((a, b) => b.count - a.count),
+    expertiseFieldConfigured: FIELD_EXPERTISE_TYPE,
+  };
+}
+
 async function syncProjectToPlanfix(kase) {
   const body = {
     name: kase.name,
@@ -148,9 +230,9 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 200;
 
 /** Постранично забирает список объектов Planfix (/project/list, /task/list). */
-async function listAll(path, fields, extraBody = {}) {
+async function listAll(path, fields, extraBody = {}, maxPages = MAX_PAGES) {
   const items = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const data = await planfixRequest("POST", path, {
       offset: page * PAGE_SIZE,
       pageSize: PAGE_SIZE,
@@ -177,7 +259,18 @@ function listAllTasks() {
 // Статусы задач в Planfix настраиваются в аккаунте, поэтому "завершённость"
 // определяем по названию статуса, а не по числовому id: список названий
 // известен и меняется редко.
-const DONE_STATUS_NAMES = new Set(["завершенная", "завершённая", "завершена", "завершено", "выполнена", "закрыта", "отменена", "отменённая", "отмененная"]);
+const DONE_STATUS_NAMES = new Set([
+  "завершенная", "завершённая", "завершена", "завершено", "выполнена",
+  "закрыта", "закрытая", "отменена", "отменённая", "отмененная",
+  // Свои названия статусов можно дописать в .env через запятую,
+  // не трогая код: PLANFIX_DONE_STATUSES="Сдана,Принята"
+  ...String(process.env.PLANFIX_DONE_STATUSES || "")
+    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
+]);
+
+function isDoneStatus(name) {
+  return DONE_STATUS_NAMES.has(String(name || "").trim().toLowerCase());
+}
 
 /** "01-09-2026" или {date:"01-09-2026"} -> "2026-09-01" для базы. */
 function planfixDateToIso(value) {
@@ -199,12 +292,11 @@ function peopleToText(value) {
 /** Приводит задачу Planfix к тому виду, в котором она хранится у нас. */
 function readTask(task) {
   const statusName = task?.status?.name || null;
-  const key = String(statusName || "").trim().toLowerCase();
   return {
     planfixId: Number(task.id),
     name: String(task.name || "").trim() || `Задача #${task.id}`,
     statusName,
-    isDone: DONE_STATUS_NAMES.has(key),
+    isDone: isDoneStatus(statusName),
     assignees: peopleToText(task?.assignees),
     assigner: peopleToText(task?.assigner),
     startDate: planfixDateToIso(task?.startDateTime),
@@ -215,7 +307,7 @@ function readTask(task) {
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
-  listAllProjects, listAllTasks, readTask, planfixDateToIso,
+  listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };
