@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="build" content="2026-08-28.4">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -126,6 +127,10 @@
       <div class="col-header">
         <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
         <div class="col-head-actions">
+        <button class="upload-btn" id="casesTasksBtn" type="button" title="Все задачи по проектам">
+          <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1.2 1.2L7.5 5"/><path d="m4 12 1.2 1.2L7.5 11"/><path d="m4 18 1.2 1.2L7.5 17"/></svg>
+          Задачи<span class="col-count hidden" id="casesTasksCount"></span>
+        </button>
         <button class="icon-btn hidden" id="planfixSyncBtn" type="button" title="Сверить с Planfix">
           <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
         </button>
@@ -291,6 +296,29 @@
       </div>
     </div>
     <div class="folder-body" id="trashList"></div>
+  </div>
+
+  <div class="folder-view section hidden" id="tasksSection" data-view="tasks">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Задачи</h1>
+        <p class="page-sub" id="tasksSummary">Задачи по проектам из Planfix</p>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <div class="seg" id="tasksScope">
+          <button class="seg-btn active" type="button" data-scope="all">Все</button>
+          <button class="seg-btn" type="button" data-scope="mine">Мои</button>
+        </div>
+        <div class="seg" id="tasksState">
+          <button class="seg-btn active" type="button" data-state="open">Текущие</button>
+          <button class="seg-btn" type="button" data-state="done">Завершённые</button>
+        </div>
+      </div>
+    </div>
+    <div class="folder-toolbar">
+      <input type="text" id="tasksSearch" placeholder="Поиск по задаче или проекту">
+    </div>
+    <div class="folder-body" id="tasksBody"></div>
   </div>
 
   <div class="folder-view section hidden" id="historySection" data-view="history">

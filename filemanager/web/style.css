@@ -1317,6 +1317,46 @@ button.primary:hover { background: #2569c9; }
 .picker-item.hidden { display: none; }
 .picker-empty { padding: 14px 10px; text-align: center; color: var(--text-muted); font-size: var(--fs-meta); }
 
+/* ===== Страница «Задачи» =====
+   Таблица, а не карточки: по задачам ходят глазами по столбцам —
+   срок, проект, исполнитель, — и колонки для этого честнее. */
+.tasks-table { width: 100%; border-collapse: collapse; }
+
+.tasks-table th {
+  text-align: left; font-size: var(--fs-meta); font-weight: 600;
+  color: var(--text-muted); padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-card); z-index: 1;
+}
+
+.tasks-table td { padding: 10px; border-bottom: 1px solid var(--border); font-size: var(--fs-body); vertical-align: top; }
+.tasks-table tr:hover td { background: var(--bg-subtle); }
+
+.task-num { color: var(--text-muted); font-variant-numeric: tabular-nums; width: 62px; }
+.task-title { font-weight: 500; }
+.task-project-type { display: block; font-size: var(--fs-meta); color: var(--text-muted); }
+.task-project-name { color: var(--accent-on-tint); }
+.task-date { font-variant-numeric: tabular-nums; white-space: nowrap; width: 108px; }
+.task-people { color: var(--text-secondary); font-size: var(--fs-meta); }
+.task-actions { width: 132px; text-align: right; }
+
+/* Просроченная строка целиком читается тревожно — как в Планфиксе. */
+.tasks-table tr.overdue .task-title,
+.tasks-table tr.overdue .task-date { color: var(--danger); font-weight: 600; }
+.tasks-table tr.is-done .task-title { color: var(--text-muted); text-decoration: line-through; }
+
+.task-done-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-secondary);
+  font-size: var(--fs-meta); font-family: inherit; cursor: pointer;
+}
+.task-done-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; }
+.task-done-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); background: var(--accent-bg); }
+.task-done-btn[disabled] { opacity: .5; pointer-events: none; }
+.task-done-mark { color: var(--success); font-size: var(--fs-meta); white-space: nowrap; }
+
 /* Диагностика и отчёт сверки с Planfix */
 .planfix-result { margin-top: 6px; max-height: 52vh; overflow-y: auto; }
 .pf-block { margin-top: 16px; }

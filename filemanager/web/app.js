@@ -411,6 +411,36 @@ function openPendingDeepLink() {
 let currentUser = null;
 
 /** Инициалы для кружка в панели: из "Иванов Иван" — "ИИ", из "kirill" — "KI". */
+/**
+ * Вешает обработчик, только если узел есть на странице.
+ *
+ * Браузер и сервер обновляются не синхронно: пользователь может держать
+ * открытой старую страницу или получить закэшированный index.html. Раньше
+ * такое несовпадение роняло весь скрипт на первой же отсутствующей кнопке,
+ * и переставало работать всё, что описано ниже по файлу. Теперь пропадает
+ * только сама кнопка.
+ */
+// Метка сборки. Она же лежит в index.html: если страница в браузере
+// старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
+// половина кнопок будет отсутствовать.
+const APP_BUILD = "2026-08-28.4";
+
+function checkBuildMatch() {
+  const meta = document.querySelector('meta[name="build"]');
+  const pageBuild = meta ? meta.content : null;
+  if (pageBuild === APP_BUILD) return;
+  console.warn(`Страница собрана как ${pageBuild || "без метки"}, скрипт — ${APP_BUILD}`);
+  setTimeout(() => showToast("Страница устарела — обновите её (Ctrl+F5)"), 1200);
+}
+
+function bind(el, event, handler) {
+  if (!el) {
+    console.warn("Элемент интерфейса не найден — обработчик не назначен", event);
+    return;
+  }
+  el.addEventListener(event, handler);
+}
+
 function initialsFor(name) {
   const clean = String(name || "").trim();
   if (!clean) return "—";
@@ -437,11 +467,15 @@ function applyPermissionsUI() {
   // у сотрудника эти пункты всё равно упирались бы в отказ сервера.
   const rootOnlyAdmin = p.role !== "admin";
   // Сверка читает весь аккаунт Planfix и заводит папки — это админское действие.
-  els.planfixSyncBtn.classList.toggle("hidden", rootOnlyAdmin);
-  els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
-    .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
-  els.createCasesMenu.querySelectorAll(".create-menu-sep")
-    .forEach((sep) => sep.classList.toggle("hidden", rootOnlyAdmin));
+  // Узлы проверяем: страница у пользователя может быть старее скрипта, и
+  // тогда вход не должен падать целиком из-за одной кнопки.
+  if (els.planfixSyncBtn) els.planfixSyncBtn.classList.toggle("hidden", rootOnlyAdmin);
+  if (els.createCasesMenu) {
+    els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
+      .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
+    els.createCasesMenu.querySelectorAll(".create-menu-sep")
+      .forEach((sep) => sep.classList.toggle("hidden", rootOnlyAdmin));
+  }
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
@@ -453,6 +487,7 @@ function applyPermissionsUI() {
 
 // Запускает подходящий начальный экран после входа/загрузки страницы.
 function enterAppForUser() {
+  checkBuildMatch();
   const allowed = applyPermissionsUI();
 
   // Пришли по ссылке на конкретную папку — открываем сразу её.
@@ -823,6 +858,7 @@ function showSection(name, pushHistory) {
   if (name === "trash") loadTrash();
   if (name === "recent") loadRecent();
   if (name === "history") loadHistory();
+  if (name === "tasks") loadTasksPage();
 
   if (!pushHistory || PICKER_MODE) return;
   // В "Файлах" адрес показывает открытую папку (как и раньше),
@@ -1622,6 +1658,7 @@ let gpExpertOrder = [];
 
 /** Счётчик выбранных — видно, сколько уже отмечено, не пролистывая список. */
 function updateGpExpertsCount() {
+  if (!els.gpExpertsCount) return;
   const n = gpExpertOrder.length;
   els.gpExpertsCount.textContent = n
     ? `Выбрано: ${n}`
@@ -1634,6 +1671,7 @@ function updateGpExpertsCount() {
  * запрос — иначе легко "потерять" выбранного и снять галочку вслепую.
  */
 function filterGpExperts() {
+  if (!els.gpExpertSearch) return;
   const query = (els.gpExpertSearch.value || "").trim().toLowerCase();
   let shown = 0;
   els.gpExpertsList.querySelectorAll(".picker-item").forEach((item) => {
@@ -1654,7 +1692,7 @@ function filterGpExperts() {
 }
 
 
-els.gpExpertSearch.addEventListener("input", filterGpExperts);
+bind(els.gpExpertSearch, "input", filterGpExperts);
 
 function renderGpExpertsOrder() {
   if (!gpExpertOrder.length) {
@@ -1710,7 +1748,7 @@ async function openGpForm() {
   }
 
   els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
-  els.gpExpertSearch.value = "";
+  if (els.gpExpertSearch) els.gpExpertSearch.value = "";
   els.gpOverlay.classList.remove("hidden");
 
   gpExpertOrder = [];
@@ -1999,6 +2037,173 @@ function renderCaseBanner(project) {
   }
 }
 
+/* ---------- Страница «Задачи» ----------
+   Все задачи проектов в одном месте: видно, что горит, и можно завершить
+   задачу, не уходя в Planfix. Завершение идёт через Planfix — он остаётся
+   источником правды, у себя помечаем только после его подтверждения. */
+
+const tasksFilters = { scope: "all", state: "open", q: "" };
+let tasksCache = [];
+let tasksPeople = [];
+
+function taskDateCell(value) {
+  const text = value ? formatWhen(new Date(value).getTime()).split(" ")[0] : "";
+  return escapeHtml(text);
+}
+
+function renderTasksPage(data) {
+  const body = document.getElementById("tasksBody");
+  const summary = document.getElementById("tasksSummary");
+  const counts = data.counts || { open: 0, done: 0, overdue: 0 };
+
+  summary.textContent = counts.overdue
+    ? `В работе ${counts.open}, из них просрочено ${counts.overdue}. Завершено ${counts.done}.`
+    : `В работе ${counts.open}. Завершено ${counts.done}.`;
+
+  const badge = document.getElementById("casesTasksCount");
+  if (badge) {
+    badge.textContent = counts.open ? String(counts.open) : "";
+    badge.classList.toggle("hidden", !counts.open);
+  }
+
+  if (!data.tasks.length) {
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">${
+      tasksFilters.q ? "Ничего не нашли" :
+      tasksFilters.state === "done" ? "Завершённых задач пока нет" :
+      "Открытых задач нет — всё сделано"
+    }</div>`;
+    return;
+  }
+
+  const rows = data.tasks.map((t) => {
+    const overdue = !t.is_done && t.end_date && new Date(t.end_date) < new Date();
+    const typeLabel = t.case_type === "research" ? "Независимые исследования" : "Экспертизы";
+    return `
+      <tr class="${t.is_done ? "is-done" : ""}${overdue ? " overdue" : ""}" data-task-id="${t.id}">
+        <td class="task-num">${t.planfix_id}</td>
+        <td class="task-title">${escapeHtml(t.name)}</td>
+        <td>
+          <span class="task-project-type">${typeLabel}</span>
+          <span class="task-project-name" data-open-case="${escapeHtml(t.folder_path)}">${escapeHtml(t.case_name)}</span>
+        </td>
+        <td class="task-date">${taskDateCell(t.end_date)}</td>
+        <td class="task-people">${escapeHtml(t.assigner || "")}</td>
+        <td class="task-people">${escapeHtml(t.assignees || "")}</td>
+        <td class="task-actions">${
+          t.is_done
+            ? `<span class="task-done-mark">${svgCheck} завершена</span>`
+            : `<button class="task-done-btn" type="button" data-complete="${t.id}">${svgCheck} Завершить</button>`
+        }</td>
+      </tr>`;
+  }).join("");
+
+  body.innerHTML = `
+    <table class="tasks-table">
+      <thead>
+        <tr>
+          <th>№</th><th>Название</th><th>Проект</th>
+          <th>Окончание</th><th>Постановщик</th><th>Исполнители</th><th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  body.querySelectorAll("[data-complete]").forEach((btn) => {
+    btn.addEventListener("click", () => completeTask(btn.dataset.complete, btn));
+  });
+  body.querySelectorAll("[data-open-case]").forEach((cell) => {
+    cell.style.cursor = "pointer";
+    cell.addEventListener("click", () => {
+      const path = cell.dataset.openCase;
+      showSection("files", true);
+      goToFolder(path, buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, path), true);
+    });
+  });
+}
+
+async function loadTasksPage() {
+  const body = document.getElementById("tasksBody");
+  body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+  const params = new URLSearchParams();
+  if (tasksFilters.scope === "mine") params.set("mine", "1");
+  params.set("done", tasksFilters.state === "done" ? "1" : "0");
+  if (tasksFilters.q) params.set("q", tasksFilters.q);
+  try {
+    const data = await apiFetch(`/api/cases/tasks/all?${params.toString()}`);
+    tasksCache = data.tasks;
+    if (data.people) tasksPeople = data.people;
+    if (currentUser && data.myPlanfixName !== undefined) currentUser.planfix_name = data.myPlanfixName;
+    renderTasksPage(data);
+  } catch (err) {
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить задачи: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function completeTask(id, btn) {
+  const task = tasksCache.find((t) => String(t.id) === String(id));
+  if (task && !confirm(`Завершить задачу «${task.name}»?\nОна будет закрыта и в Planfix.`)) return;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/api/cases/tasks/${id}/complete`, { method: "POST" });
+    showToast("Задача завершена");
+    loadTasksPage();
+  } catch (err) {
+    btn.disabled = false;
+    alert("Не удалось завершить задачу: " + err.message);
+  }
+}
+
+bind(document.getElementById("casesTasksBtn"), "click", () => showSection("tasks", true));
+
+/**
+ * "Мои задачи" опираются на имя человека в Planfix: логин в ИСУ
+ * ("kirill") и исполнитель в задаче ("Кирилл Базаев") никогда не совпадут.
+ * Поэтому при первом нажатии просим выбрать себя из тех, на кого задачи
+ * заведены, и запоминаем выбор.
+ */
+async function ensurePlanfixName() {
+  if (currentUser && currentUser.planfix_name) return true;
+  const people = (tasksPeople || []).filter(Boolean);
+  const list = people.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const answer = prompt(
+    "Как вас зовут в Planfix? Введите номер из списка или имя целиком.\n\n" + list);
+  if (answer === null) return false;
+  const byIndex = people[Number(answer.trim()) - 1];
+  const name = (byIndex || answer).trim();
+  if (!name) return false;
+  try {
+    await apiFetch("/api/auth/me/planfix-name", { method: "POST", body: JSON.stringify({ name }) });
+    if (currentUser) currentUser.planfix_name = name;
+    showToast(`Ваше имя в Planfix: ${name}`);
+    return true;
+  } catch (err) {
+    alert("Не удалось сохранить имя: " + err.message);
+    return false;
+  }
+}
+
+document.querySelectorAll("#tasksScope .seg-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    if (btn.dataset.scope === "mine" && !(await ensurePlanfixName())) return;
+    tasksFilters.scope = btn.dataset.scope;
+    document.querySelectorAll("#tasksScope .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    loadTasksPage();
+  });
+});
+
+document.querySelectorAll("#tasksState .seg-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tasksFilters.state = btn.dataset.state;
+    document.querySelectorAll("#tasksState .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    loadTasksPage();
+  });
+});
+
+bind(document.getElementById("tasksSearch"), "input", debounce((e) => {
+  tasksFilters.q = e.target.value.trim();
+  loadTasksPage();
+}, 300));
+
 /* ---- Окно Planfix: диагностика и перенос ----
    Кнопка в шапке колонки открывает окно, а не запускает перенос сразу:
    операция читает весь аккаунт Planfix и заводит папки, такое не должно
@@ -2130,17 +2335,17 @@ async function showLastSync() {
   }
 }
 
-els.planfixSyncBtn.addEventListener("click", () => {
+bind(els.planfixSyncBtn, "click", () => {
   planfixOverlay.classList.remove("hidden");
   planfixResult.innerHTML = "";
   showLastSync();
 });
 
-document.getElementById("planfixCloseBtn").addEventListener("click", () => {
+bind(document.getElementById("planfixCloseBtn"), "click", () => {
   planfixOverlay.classList.add("hidden");
 });
 
-document.getElementById("planfixProbeBtn").addEventListener("click", async () => {
+bind(document.getElementById("planfixProbeBtn"), "click", async () => {
   const btn = document.getElementById("planfixProbeBtn");
   btn.disabled = true;
   planfixResult.innerHTML = '<div class="empty-hint" style="padding:16px;">Спрашиваю Planfix…</div>';
@@ -2153,7 +2358,7 @@ document.getElementById("planfixProbeBtn").addEventListener("click", async () =>
   }
 });
 
-document.getElementById("planfixRunBtn").addEventListener("click", async () => {
+bind(document.getElementById("planfixRunBtn"), "click", async () => {
   const btn = document.getElementById("planfixRunBtn");
   btn.disabled = true;
   planfixResult.innerHTML = '<div class="empty-hint" style="padding:16px;">Переношу проекты и задачи…</div>';
@@ -2235,7 +2440,7 @@ async function loadCaseTasks(project) {
   `;
 }
 
-document.getElementById("caseTasksToggle").addEventListener("click", () => {
+bind(document.getElementById("caseTasksToggle"), "click", () => {
   const body = document.getElementById("caseTasksBody");
   const arrow = document.getElementById("caseTasksArrow");
   body.classList.toggle("hidden");
