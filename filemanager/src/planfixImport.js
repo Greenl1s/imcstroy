@@ -60,8 +60,8 @@ function typeOf(project) {
 }
 
 /** Стадия и признак отмены — в Planfix это одно поле "Этап проекта". */
-function stageOf(project) {
-  const raw = norm(customField(project, planfix.FIELD_STAGE));
+function stageOf(project, stageFieldId) {
+  const raw = norm(customField(project, stageFieldId || planfix.FIELD_STAGE));
   if (CANCELLED_VALUES.has(raw)) return { stage: "done", isCancelled: true };
   const stage = STAGE_FROM_PLANFIX[raw];
   if (!stage) return { stage: null, isCancelled: false };
@@ -69,18 +69,25 @@ function stageOf(project) {
 }
 
 /** Разбирает карточку Planfix в поля нашего проекта. */
-function readProject(project) {
-  const { stage, isCancelled } = stageOf(project);
+function readProject(project, fieldIds = {}) {
+  const ids = {
+    stage: fieldIds.stage || planfix.FIELD_STAGE,
+    status: fieldIds.status || planfix.FIELD_STATUS,
+    organization: fieldIds.organization || planfix.FIELD_ORGANIZATION,
+    caseNumber: fieldIds.caseNumber || planfix.FIELD_CASE_NUMBER,
+    expertiseType: fieldIds.expertiseType || planfix.FIELD_EXPERTISE_TYPE,
+  };
+  const { stage, isCancelled } = stageOf(project, ids.stage);
   return {
     planfixId: Number(project.id),
     name: String(project.name || "").trim(),
     type: typeOf(project),
     stage,
     isCancelled,
-    status: STATUS_FROM_PLANFIX[norm(customField(project, planfix.FIELD_STATUS))] || "waiting",
-    caseNumber: customField(project, planfix.FIELD_CASE_NUMBER),
-    organization: customField(project, planfix.FIELD_ORGANIZATION),
-    expertiseType: customField(project, planfix.FIELD_EXPERTISE_TYPE),
+    status: STATUS_FROM_PLANFIX[norm(customField(project, ids.status))] || "waiting",
+    caseNumber: customField(project, ids.caseNumber),
+    organization: customField(project, ids.organization),
+    expertiseType: customField(project, ids.expertiseType),
   };
 }
 
@@ -218,12 +225,22 @@ async function findCase(parsed) {
 
 /** Переносит проекты. Возвращает отчёт, который потом видно в интерфейсе. */
 async function importProjects(report) {
-  const projects = await planfix.listAllProjects();
+  const { projects, fieldIds } = await planfix.listAllProjects();
   report.projectsSeen = projects.length;
+  report.fieldIds = fieldIds;
+  // Ни у одного проекта не пришло ни одного значения поля — почти всегда
+  // это значит, что поля не запросились, а не что они пустые у всех.
+  const withValues = projects.filter((p) => (p.customFieldData || []).length).length;
+  if (projects.length && !withValues) {
+    report.warnings.push(
+      "Planfix не вернул значения полей проектов — проверьте связь в окне Planfix: " +
+      "без «Этапа проекта» карточки переносить некуда."
+    );
+  }
 
   const known = [];
   for (const project of projects) {
-    const parsed = readProject(project);
+    const parsed = readProject(project, fieldIds);
     try {
       if (!parsed.name) {
         report.skipped.push({ name: `#${parsed.planfixId}`, why: "в Planfix у проекта пустое наименование" });
@@ -324,6 +341,7 @@ function emptyReport() {
     tasksSynced: 0,
     foldersCreated: 0,
     unchanged: 0,
+    warnings: [],
     created: [],
     adopted: [],
     updated: [],

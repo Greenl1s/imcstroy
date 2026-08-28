@@ -105,6 +105,92 @@ function typeForGroup(group) {
 }
 
 /**
+ * Диагностика: что лежит в Planfix и что из этого мы читаем. Отвечает на
+ * вопросы, из-за которых иначе пришлось бы лезть в консоль: какие есть
+ * группы проектов, какие поля (с их id и примером значения) и как
+ * называются статусы задач.
+ */
+async function probe() {
+  const ids = await resolveFieldIds();
+  const wanted = [ids.stage, ids.status, ids.organization, ids.caseNumber, ids.expertiseType].filter(Boolean);
+  const projects = await listAll(
+    "/project/list",
+    ["id", "name", "group", "customFieldData", ...wanted].join(","),
+    {}, 3
+  );
+  const tasks = await listAll("/task/list", "id,name,status,project", {}, 2);
+
+  const groups = new Map();
+  for (const p of projects) {
+    const g = p.group;
+    const key = g ? `${g.id}|${g.name || ""}` : "—|без группы";
+    const item = groups.get(key) || {
+      id: g ? Number(g.id) : null,
+      name: g ? g.name || "" : "(без группы)",
+      count: 0,
+      mappedTo: typeForGroup(g),
+      example: p.name,
+    };
+    item.count++;
+    groups.set(key, item);
+  }
+
+  // Поля берём из справочника аккаунта, а рядом кладём реально пришедшее
+  // значение: так видно и что поле есть, и что оно читается.
+  const sampleByField = new Map();
+  let projectsWithValues = 0;
+  for (const p of projects) {
+    const data = p.customFieldData || [];
+    if (data.length) projectsWithValues++;
+    for (const item of data) {
+      const id = Number(item?.field?.id);
+      if (!id || sampleByField.has(id)) continue;
+      const v = item.value;
+      sampleByField.set(id, {
+        name: item.field.name || "",
+        sample: v == null ? null : (typeof v === "object" ? v.value : v),
+      });
+    }
+  }
+
+  const known = new Map();
+  for (const f of ids.catalogue.fields) known.set(f.id, { id: f.id, name: f.name, sample: null });
+  for (const [id, info] of sampleByField) {
+    const item = known.get(id) || { id, name: info.name, sample: null };
+    item.name = item.name || info.name;
+    item.sample = info.sample;
+    known.set(id, item);
+  }
+
+  const statuses = new Map();
+  for (const t of tasks) {
+    const name = t?.status?.name || "(без статуса)";
+    const item = statuses.get(name) || { name, id: t?.status?.id ?? null, count: 0, treatedAsDone: isDoneStatus(name) };
+    item.count++;
+    statuses.set(name, item);
+  }
+
+  return {
+    projectsSampled: projects.length,
+    tasksSampled: tasks.length,
+    projectsWithValues,
+    groups: [...groups.values()].sort((a, b) => b.count - a.count),
+    fields: [...known.values()].sort((a, b) => a.id - b.id),
+    taskStatuses: [...statuses.values()].sort((a, b) => b.count - a.count),
+    expertiseFieldConfigured: ids.expertiseType,
+    fieldMapping: [
+      { need: "Этап проекта", id: ids.stage },
+      { need: "Статус проекта", id: ids.status },
+      { need: "Структура", id: ids.organization },
+      { need: "Номер договора / дела", id: ids.caseNumber },
+      { need: "Тип экспертизы", id: ids.expertiseType },
+    ],
+    catalogueSource: ids.catalogue.source,
+    catalogueTried: ids.catalogue.tried,
+  };
+}
+
+/**
  * Диагностика: что вообще лежит в Planfix. Отвечает на три вопроса, из-за
  * которых иначе пришлось бы лезть в консоль: какие есть группы проектов,
  * какие пользовательские поля (с их id) и как называются статусы задач.
@@ -246,9 +332,90 @@ async function listAll(path, fields, extraBody = {}, maxPages = MAX_PAGES) {
   return items;
 }
 
-/** Все проекты аккаунта — с группой и пользовательскими полями. */
-function listAllProjects() {
-  return listAll("/project/list", "id,name,group,description,customFieldData");
+/**
+ * Справочник пользовательских полей проекта: id и название.
+ *
+ * Нужен потому, что Planfix не отдаёт значения полей "оптом": их надо
+ * запрашивать по конкретным id в параметре fields. Поэтому сначала
+ * спрашиваем, какие поля вообще есть. Адрес справочника отличается по
+ * версиям API — пробуем известные по очереди и запоминаем сработавший.
+ */
+const FIELD_LIST_ENDPOINTS = [
+  ["GET", "/project/fields"],
+  ["GET", "/project/field/list"],
+  ["GET", "/projectField/list"],
+  ["POST", "/project/fields", {}],
+];
+
+let fieldCatalogueCache = null;
+
+async function fetchFieldCatalogue({ force = false } = {}) {
+  if (fieldCatalogueCache && !force) return fieldCatalogueCache;
+  const tried = [];
+  for (const [method, path, body] of FIELD_LIST_ENDPOINTS) {
+    try {
+      const data = await planfixRequest(method, path, body);
+      const list = data?.fields || data?.projectFields || data?.customFields || [];
+      if (Array.isArray(list) && list.length) {
+        fieldCatalogueCache = {
+          source: path,
+          tried,
+          fields: list
+            .map((f) => ({ id: Number(f?.id), name: String(f?.name || ""), type: f?.type ?? null }))
+            .filter((f) => f.id),
+        };
+        return fieldCatalogueCache;
+      }
+      tried.push(`${path}: пустой список`);
+    } catch (err) {
+      tried.push(`${path}: ${err.message}`);
+    }
+  }
+  fieldCatalogueCache = { source: null, tried, fields: [] };
+  return fieldCatalogueCache;
+}
+
+// Поля узнаём по названию: не надо ничего прописывать руками, а
+// переименование поля в Planfix ломает только его одно, а не весь импорт.
+const FIELD_NAME_PATTERNS = {
+  stage: /этап/i,
+  status: /статус/i,
+  organization: /структур/i,
+  caseNumber: /номер\s*(договора|дела)/i,
+  expertiseType: /тип\s*эксперт/i,
+};
+
+/**
+ * "Что нам нужно" -> id поля в Planfix. Приоритет: название из
+ * справочника, затем значение из окружения, затем зашитые id.
+ */
+async function resolveFieldIds() {
+  const catalogue = await fetchFieldCatalogue();
+  const byName = (re) => {
+    const hit = catalogue.fields.find((f) => re.test(f.name));
+    return hit ? hit.id : null;
+  };
+  return {
+    stage: byName(FIELD_NAME_PATTERNS.stage) || FIELD_STAGE,
+    status: byName(FIELD_NAME_PATTERNS.status) || FIELD_STATUS,
+    organization: byName(FIELD_NAME_PATTERNS.organization) || FIELD_ORGANIZATION,
+    caseNumber: byName(FIELD_NAME_PATTERNS.caseNumber) || FIELD_CASE_NUMBER,
+    expertiseType: byName(FIELD_NAME_PATTERNS.expertiseType) || FIELD_EXPERTISE_TYPE,
+    catalogue,
+  };
+}
+
+/**
+ * Все проекты аккаунта вместе со значениями нужных полей. Поля
+ * перечисляем по id прямо в fields — иначе Planfix возвращает карточки
+ * без customFieldData, и импорт видит проекты без этапа и без номера.
+ */
+async function listAllProjects() {
+  const ids = await resolveFieldIds();
+  const wanted = [ids.stage, ids.status, ids.organization, ids.caseNumber, ids.expertiseType].filter(Boolean);
+  const fields = ["id", "name", "group", "description", "customFieldData", ...wanted].join(",");
+  const projects = await listAll("/project/list", fields);
+  return { projects, fieldIds: ids };
 }
 
 /** Все задачи аккаунта — с привязкой к проекту, статусом и сроками. */
@@ -260,7 +427,8 @@ function listAllTasks() {
 // определяем по названию статуса, а не по числовому id: список названий
 // известен и меняется редко.
 const DONE_STATUS_NAMES = new Set([
-  "завершенная", "завершённая", "завершена", "завершено", "выполнена",
+  "завершенная", "завершённая", "завершена", "завершено",
+  "выполненная", "выполнена", "выполнено",
   "закрыта", "закрытая", "отменена", "отменённая", "отмененная",
   // Свои названия статусов можно дописать в .env через запятую,
   // не трогая код: PLANFIX_DONE_STATUSES="Сдана,Принята"
@@ -308,6 +476,7 @@ module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
+  fetchFieldCatalogue, resolveFieldIds,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };
