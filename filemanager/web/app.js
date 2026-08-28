@@ -148,8 +148,10 @@ const els = {
   gpExpertsOrderList: document.getElementById("gpExpertsOrderList"),
 };
 
-const svgFolder = `<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
-const svgFile = `<svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+// Иконки списка — заливкой, а не контуром: папка узнаётся боковым зрением
+// по силуэту и цвету, как в привычных файловых менеджерах.
+const svgFolder = `<svg class="icon icon-solid" viewBox="0 0 24 24"><path class="folder-tab" d="M2.5 6.6c0-1.2 1-2.1 2.1-2.1h4.2c.6 0 1.1.2 1.5.6l1.6 1.5H12L2.5 9.4V6.6z"/><path class="folder-body" d="M2.5 8.5c0-1.1.9-2 2-2h15c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2h-15c-1.1 0-2-.9-2-2v-9z"/></svg>`;
+const svgFile = `<svg class="icon icon-solid" viewBox="0 0 24 24"><path class="page-body" d="M6.5 2.5h6.6L19.5 9v11.5c0 1.1-.9 2-2 2h-11c-1.1 0-2-.9-2-2v-16c0-1.1.9-2 2-2z"/><path class="page-fold" d="M13.1 2.5 19.5 9h-4.4c-1.1 0-2-.9-2-2V2.5z"/></svg>`;
 const svgLink = `<svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`;
 const svgTrash = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>`;
 const svgDownload = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`;
@@ -182,6 +184,14 @@ function fileKind(name) {
 function iconHtml(entry) {
   if (entry.isDir) return `<span class="ficon ficon-folder">${svgFolder}</span>`;
   return `<span class="ficon ficon-${fileKind(entry.name)}">${svgFile}</span>`;
+}
+
+/** Дата и время — двумя выровненными столбцами, как в привычных дисках. */
+function whenHtml(ms) {
+  const text = formatWhen(ms);
+  if (!text) return "";
+  const [date, time] = text.split(" ");
+  return `<span class="row-when"><span class="when-date">${date}</span><span class="when-time">${time}</span></span>`;
 }
 
 function formatSize(bytes) {
@@ -1303,14 +1313,13 @@ function renderColumnList(key) {
       : "";
     const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
     if (entry.isDir) row.classList.add("is-dir");
-    const when = formatWhen(entry.mtime);
     row.innerHTML = `
       ${selState.active ? `<input type="checkbox" class="select-checkbox" ${selState.selected.has(entry.fullPath) ? "checked" : ""}>` : ""}
       <span class="left">
         ${iconHtml(entry)}<span class="row-name">${escapeHtml(entry.name)}</span>${pathHint}
       </span>
       <span class="right">
-        ${when ? `<span class="row-when">${escapeHtml(when)}</span>` : ""}
+        ${whenHtml(entry.mtime)}
         ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
       </span>
     `;
@@ -2624,7 +2633,7 @@ function renderFolderRows() {
       <div class="left">${iconHtml(entry)}<span class="row-name">${escapeHtml(entry.name)}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
-        <span class="row-when">${escapeHtml(formatWhen(entry.mtime))}</span>
+        ${whenHtml(entry.mtime)}
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
       </div>
     `;

@@ -1,40 +1,42 @@
-/* Golos Text — гарнитура Paratype, нарисованная под русский текст.
-   Лежит в образе рядом с сайтом: внешних загрузок и сторонних CDN нет. */
+/* Onest — гротеск того же класса, что в интерфейсах Яндекса, но рисованный
+   от кириллицы. Взял его вместо Inter намеренно: Inter стоит сегодня в
+   каждом втором интерфейсе и читается как шрифт по умолчанию.
+   Лежит в образе рядом с сайтом, внешних загрузок нет. */
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 400; font-display: swap;
-  src: url("/fonts/golos-text-cyrillic-400-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/onest-cyrillic-400-normal.woff2") format("woff2");
   unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 400; font-display: swap;
-  src: url("/fonts/golos-text-latin-400-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/onest-latin-400-normal.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 500; font-display: swap;
-  src: url("/fonts/golos-text-cyrillic-500-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("/fonts/onest-cyrillic-500-normal.woff2") format("woff2");
   unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 500; font-display: swap;
-  src: url("/fonts/golos-text-latin-500-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("/fonts/onest-latin-500-normal.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 600; font-display: swap;
-  src: url("/fonts/golos-text-cyrillic-600-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("/fonts/onest-cyrillic-600-normal.woff2") format("woff2");
   unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 600; font-display: swap;
-  src: url("/fonts/golos-text-latin-600-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("/fonts/onest-latin-600-normal.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 700; font-display: swap;
-  src: url("/fonts/golos-text-cyrillic-700-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/fonts/onest-cyrillic-700-normal.woff2") format("woff2");
   unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
 }
 @font-face {
-  font-family: "Golos Text"; font-style: normal; font-weight: 700; font-display: swap;
-  src: url("/fonts/golos-text-latin-700-normal.woff2") format("woff2");
+  font-family: "Onest"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/fonts/onest-latin-700-normal.woff2") format("woff2");
 }
 
 :root {
@@ -173,7 +175,7 @@
 
 body {
   margin: 0;
-  font-family: "Golos Text", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-family: "Onest", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   background: var(--bg-page);
   color: var(--text-primary);
   min-height: 100vh;
@@ -442,7 +444,7 @@ button.primary:hover { background: #2569c9; }
    были два разных визуальных языка: «кнопки с рамками» и плоский список
    с разделителями. */
 .row-item {
-  min-height: 42px;
+  min-height: 46px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   display: flex; align-items: center; gap: 10px;
@@ -554,7 +556,7 @@ button.primary:hover { background: #2569c9; }
 .file-row {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px;
-  min-height: 44px;
+  min-height: 46px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
   font-size: 14px;
@@ -576,13 +578,14 @@ button.primary:hover { background: #2569c9; }
 /* Дата изменения — вспомогательная колонка справа: одинаковой ширины,
    чтобы даты выстраивались в столбик, и цифры моноширинные. */
 .row-when {
+  display: inline-flex; gap: 14px;
   color: var(--text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  min-width: 122px;
-  text-align: right;
 }
+.when-date { min-width: 78px; text-align: right; }
+.when-time { min-width: 36px; text-align: right; }
 
 .row-item .left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .row-item .left .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1130,27 +1133,35 @@ button.primary:hover { background: #2569c9; }
 /* ================= Иконки по типу файла =================
    Раньше все файлы были одинаковой серой иконкой и список читался
    сплошной массой. Теперь тип виден боковым зрением. */
+/* Иконка строки — сам знак, без плитки-подложки: список дышит, а тип
+   объекта всё равно читается по силуэту и цвету. */
 .ficon {
-  width: 30px; height: 30px; flex: 0 0 30px;
-  border-radius: 8px;
+  width: 26px; height: 26px; flex: 0 0 26px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--bg-subtle);
   color: var(--text-muted);
 }
-.ficon .icon { width: 16px; height: 16px; flex: 0 0 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
-.ficon-folder { background: #e8f1ec; color: #2f6b4f; }
-.ficon-doc    { background: #e8f0fd; color: #2f6fdb; }
-.ficon-sheet  { background: #e4f5ee; color: #14855f; }
-.ficon-pdf    { background: #fbeceb; color: #cf4436; }
-.ficon-img    { background: #f2ebfa; color: #7d51c4; }
-.ficon-zip    { background: #fdf2dd; color: #a8760a; }
-.ficon-other  { background: var(--bg-subtle); color: var(--text-muted); }
+.ficon .icon-solid { width: 24px; height: 24px; flex: 0 0 24px; fill: currentColor; stroke: none; }
 
-.row-item:hover .ficon-folder, .file-row:hover .ficon-folder { background: #d8e8df; }
+/* Папка — тёплая, двухтонная: язычок темнее корпуса. */
+.ficon-folder { color: #f5c24a; }
+.ficon-folder .folder-tab { fill: #e0a92f; }
+.ficon-folder .folder-body { fill: currentColor; }
 
-/* Папка в списке читается чуть заметнее файла. */
-.row-item .row-name, .file-row .row-name { font-weight: 500; }
-.row-item.is-dir .row-name, .file-row.is-dir .row-name { font-weight: 600; }
+/* Файл — светлая страница со сплошным уголком в цвете типа. */
+.ficon .page-body { fill: currentColor; opacity: .3; }
+.ficon .page-fold { fill: currentColor; }
+.ficon-doc    { color: #3b6fd4; }
+.ficon-sheet  { color: #1e8a63; }
+.ficon-pdf    { color: #cf4436; }
+.ficon-img    { color: #7d51c4; }
+.ficon-zip    { color: #b0810f; }
+.ficon-other  { color: #8b8f88; }
+
+
+
+/* Ровный спокойный список: папка чуть плотнее файла, но без жира. */
+.row-item .row-name, .file-row .row-name { font-weight: 400; }
+.row-item.is-dir .row-name, .file-row.is-dir .row-name { font-weight: 500; }
 
 /* Кнопки действий в строке проявляются на наведении и не шумят постоянно. */
 .file-row .perm-btn, .row-item .perm-btn { opacity: 0; transition: opacity .12s ease; }
