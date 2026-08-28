@@ -24,10 +24,12 @@ async function listDir(relPath) {
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const entryAbs = path.join(abs, entry.name);
+    // Дату изменения отдаём и для папок — список показывает её в строке
+    // так же, как для файлов.
+    const stat = await fsp.stat(entryAbs);
     if (entry.isDirectory()) {
-      folders.push({ name: entry.name });
+      folders.push({ name: entry.name, mtime: stat.mtimeMs });
     } else {
-      const stat = await fsp.stat(entryAbs);
       files.push({ name: entry.name, size: stat.size, mtime: stat.mtimeMs });
     }
   }
