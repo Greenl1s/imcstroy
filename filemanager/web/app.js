@@ -578,9 +578,12 @@ function renderTrash() {
 async function restoreFromTrash(item) {
   try {
     const result = await apiFetch(`/api/trash/${item.id}/restore`, { method: "POST" });
+    const back = (result.reopenedCases || []).length;
     showToast(result.renamed
       ? `Восстановлено под именем «${result.name}» — прежнее было занято`
-      : `«${item.name}» вернулось на место`);
+      : back
+        ? `«${item.name}» вернулось на место, проект снова доступен`
+        : `«${item.name}» вернулось на место`);
     await loadTrash();
     refreshFilesAfterTrashChange();
   } catch (err) {
@@ -3154,6 +3157,19 @@ els.downloadSelectedBtn.addEventListener("click", () => {
   requestDownload(items);
 });
 
+/**
+ * Удалили папку проекта — он перестаёт предлагаться в выборе (ГП и
+ * прочее). Это важное следствие, поэтому говорим о нём вслух, а не
+ * оставляем человека гадать, куда делся проект из списка.
+ */
+function reportClosedCases(res) {
+  const closed = (res && res.closedCases) || [];
+  if (!closed.length) return;
+  showToast(closed.length === 1
+    ? `Проект «${closed[0]}» больше не предлагается в выборе`
+    : `Проектов убрано из выбора: ${closed.length}`);
+}
+
 /* ---------- Контекстное меню (правый клик по файлу/папке) ---------- */
 
 let ctxMenuTarget = null; // { path, name, isDir, context }
@@ -3248,9 +3264,10 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
     } else if (action === "delete") {
       if (!confirm(`Удалить «${target.name}»? Объект уедет в корзину.`)) return;
       try {
-        await apiFetch(`/api/resources?path=${encodeURIComponent(target.path)}`, { method: "DELETE" });
+        const res = await apiFetch(`/api/resources?path=${encodeURIComponent(target.path)}`, { method: "DELETE" });
         refreshContext(target.context);
         refreshTrashBadge();
+        reportClosedCases(res);
       } catch (err) {
         alert("Не удалось удалить: " + err.message);
       }
