@@ -70,7 +70,7 @@
     <div class="side-bottom">
       <div class="side-disk" id="diskUsageWidget" title="Загрузка…">
         <div class="side-disk-top"><span>Место на диске</span><span id="diskUsageFree">…</span></div>
-        <div class="side-disk-track"><div class="side-disk-fill" id="diskUsageFill" style="width:0%;"></div></div>
+        <div class="side-disk-track"><div class="side-disk-fill" id="diskUsageFill"></div></div>
       </div>
       <button class="side-item side-logout" id="logoutBtn" type="button">
         <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
@@ -86,8 +86,17 @@
     <div class="col" data-col="db">
       <div class="col-header">
         <span>База данных<span class="col-count hidden" id="dbCount"></span></span>
-        <div style="display:flex; gap:6px;">
-          <button class="add-btn" id="mkdirDbBtn" aria-label="Новая папка">+</button>
+<div class="create-wrap">
+          <button class="create-btn" id="createDbBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="create-menu hidden" id="createDbMenu" role="menu">
+            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+            <div class="create-menu-sep"></div>
+            <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
+          </div>
         </div>
       </div>
       <div class="col-toolbar" id="dbToolbar">
@@ -95,6 +104,8 @@
         <select class="col-sort-select" id="dbSortSelect">
           <option value="name-asc">Имя А-Я</option>
           <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
           <option value="size-asc">Размер ↑</option>
           <option value="size-desc">Размер ↓</option>
         </select>
@@ -114,10 +125,20 @@
     <div class="col" data-col="cases">
       <div class="col-header">
         <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
-        <div style="display:flex; gap:6px;">
-          <button class="add-btn" id="addGpBtn" title="Добавить гарантийное письмо" aria-label="Добавить ГП" style="width:auto; padding:0 8px; font-size:11px;">ГП</button>
-          <button class="add-btn" id="addProjectBtn" title="Новый проект (экспертиза/НИ)" aria-label="Новый проект" style="width:auto; padding:0 8px; font-size:11px;">Проект</button>
-          <button class="add-btn" id="mkdirCasesBtn" aria-label="Новая папка">+</button>
+<div class="create-wrap">
+          <button class="create-btn" id="createCasesBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="create-menu hidden" id="createCasesMenu" role="menu">
+            <button type="button" data-create="project"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/><path d="M13 3v5h5"/><path d="M9 14l2 2 4-4"/></svg>Новый проект</button>
+            <button type="button" data-create="gp"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 6 8 6 8-6"/></svg>Гарантийное письмо</button>
+            <div class="create-menu-sep"></div>
+            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+            <div class="create-menu-sep"></div>
+            <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
+          </div>
         </div>
       </div>
       <div class="col-toolbar" id="casesToolbar">
@@ -125,6 +146,8 @@
         <select class="col-sort-select" id="casesSortSelect">
           <option value="name-asc">Имя А-Я</option>
           <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
           <option value="size-asc">Размер ↑</option>
           <option value="size-desc">Размер ↓</option>
         </select>
@@ -173,7 +196,7 @@
         <div id="planfixTasksBody" class="hidden" style="padding:12px 14px;">
           <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:10px;"></div>
           <div style="display:flex; gap:8px; margin-top:10px;">
-            <input type="text" id="planfixCustomTaskInput" placeholder="Своя задача, которой нет в списке" style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <input type="text" id="planfixCustomTaskInput" placeholder="Своя задача, которой нет в списке" style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:14px;">
             <button type="button" class="secondary" id="planfixCustomTaskAddBtn">+ Добавить</button>
           </div>
           <p id="planfixTasksError" class="error-text" style="margin-top:8px;"></p>
@@ -181,28 +204,24 @@
         </div>
       </div>
       <div class="folder-actions" id="folderActions">
+        <div class="create-wrap">
+          <button class="create-btn" id="createFolderViewBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="create-menu hidden" id="createFolderViewMenu" role="menu">
+            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+          </div>
+        </div>
+        <button class="upload-btn" id="uploadTriggerBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Загрузить
+        </button>
         <button class="upload-btn" id="downloadFolderBtn" type="button" title="Скачать эту папку целиком">
           <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
           Скачать папку
         </button>
-        <div class="add-menu-wrap">
-          <button class="upload-btn" id="addMenuBtn" type="button">Добавить</button>
-          <div class="add-menu hidden" id="addMenu">
-            <button type="button" id="addFolderOption">
-              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
-              Новая папка
-            </button>
-            <button type="button" id="addDocxOption">
-              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-              Текстовый документ
-            </button>
-            <button type="button" id="addXlsxOption">
-              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-              Таблица
-            </button>
-          </div>
-        </div>
-        <button class="upload-btn primary-action" id="uploadTriggerBtn" type="button">Загрузить</button>
         <input type="file" id="uploadInput" multiple hidden>
         <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
       </div>
@@ -220,6 +239,8 @@
         <select id="folderSortSelect">
           <option value="name-asc">Имя А-Я</option>
           <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
           <option value="size-asc">Размер ↑</option>
           <option value="size-desc">Размер ↓</option>
         </select>
@@ -292,7 +313,7 @@
     <div id="usersList" class="users-list"></div>
 
     <div class="add-user-form">
-      <h3>Добавить пользователя</h3>
+      <h2>Добавить пользователя</h2>
       <div class="add-user-row">
         <label>Логин<input id="newUserLogin" autocomplete="off"></label>
         <label>Пароль<input id="newUserPassword" type="text" autocomplete="off"></label>
@@ -326,7 +347,7 @@
     <div id="folderPermList" class="users-list"></div>
 
     <div class="add-user-form">
-      <h3>Выдать доступ</h3>
+      <h2>Выдать доступ</h2>
       <div class="add-user-row">
         <label>Пользователь
           <select id="folderPermUserSelect"></select>
@@ -637,7 +658,7 @@
         Закрыть
       </button>
     </div>
-    <div id="moveBreadcrumbs" class="breadcrumbs" style="margin-top:8px; font-size:13px;"></div>
+    <div id="moveBreadcrumbs" class="breadcrumbs" style="margin-top:8px; font-size:14px;"></div>
     <div id="moveFolderList" style="max-height:280px; overflow-y:auto; margin-top:10px; border:1px solid var(--border); border-radius:8px;"></div>
     <button type="button" class="upload-btn" id="moveNewFolderBtn" style="margin-top:10px;">+ Новая папка</button>
     <p id="moveError" class="error-text"></p>

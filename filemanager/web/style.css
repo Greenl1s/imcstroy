@@ -1,24 +1,81 @@
+/* Golos Text — гарнитура Paratype, нарисованная под русский текст.
+   Лежит в образе рядом с сайтом: внешних загрузок и сторонних CDN нет. */
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/golos-text-cyrillic-400-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/golos-text-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("/fonts/golos-text-cyrillic-500-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("/fonts/golos-text-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("/fonts/golos-text-cyrillic-600-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("/fonts/golos-text-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/fonts/golos-text-cyrillic-700-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Golos Text"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/fonts/golos-text-latin-700-normal.woff2") format("woff2");
+}
+
 :root {
-  --bg-page: #f1f0ec;
-  --bg-card: #ffffff;
-  --bg-subtle: #f6f5f2;
-  --border: #e5e3dd;
-  --border-strong: #d5d2ca;
-  --text-primary: #232320;
-  --text-secondary: #63625c;
-  --text-muted: #97958d;
-  --accent: #2f6fdb;
-  --accent-strong: #2559b8;
-  --accent-bg: #eaf1fd;
-  --success: #1d9e75;
+  /* Фон — светлая бумага с холодноватым зелёным подтоном: он взят из
+     акцента, а не из дежурного «тёплого бежевого». */
+  --bg-page: #e8ebe5;
+  --bg-card: #fbfcfa;
+  --bg-subtle: #f0f2ee;
+  --border: #dfe3dc;
+  --border-strong: #c8cec5;
+  --text-primary: #1d221f;
+  --text-secondary: #53574f;
+  --text-muted: #656a61;
+  --accent: #2f6b4f;
+  --accent-strong: #245640;
+  --accent-bg: #e8f1ec;
+  /* Акцент поверх подложки: сам --accent даёт на ней лишь 4.2:1. */
+  --accent-on-tint: #1d4a36;
+  --success: #147a58;
   --success-bg: #e4f5ee;
-  --warning: #c9860d;
+  --warning: #8a5c07;
+  /* Тёмная боковая панель — отдельная группа токенов. */
+  --rail-bg: #232a28;
+  --rail-text: #c9c6bd;
+  --rail-text-strong: #fbfaf7;
+  --rail-text-muted: #8f8d85;
+  --rail-accent: #7fc0a1;
   --radius: 12px;
   --radius-sm: 8px;
-  --danger: #d84c3e;
-  --danger-bg: #fbecea;
-  --shadow-card: 0 1px 2px rgba(35,35,32,.04), 0 10px 26px -14px rgba(35,35,32,.16);
-  --shadow-pop: 0 16px 40px -12px rgba(35,35,32,.28);
+  --danger: #a63a2a;
+  --danger-bg: #f8eae7;
+  /* Шкала шрифта: пять ступеней с явной разницей, без 11.5 / 12.5 / 13.5. */
+  --fs-meta: 12px;
+  --fs-body: 14px;
+  --fs-lead: 16px;
+  --fs-title: 20px;
+  --fs-display: 26px;
+  /* Тени со смещением и умеренным размытием — ближний свет, а не ореол. */
+  --shadow-card: 0 1px 2px rgba(29,35,33,.05), 0 6px 14px -8px rgba(29,35,33,.16);
+  --shadow-raise: 0 2px 4px rgba(29,35,33,.07), 0 10px 18px -10px rgba(29,35,33,.2);
+  --shadow-pop: 0 6px 10px -6px rgba(29,35,33,.20), 0 14px 18px -14px rgba(29,35,33,.3);
 }
 
 /* Бейджи стадий проекта (экспертизы/НИ) */
@@ -53,7 +110,7 @@
 }
 .case-chat-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600;
+  padding: 10px 14px; cursor: pointer; font-size: 14px; font-weight: 600;
   user-select: none;
 }
 .case-chat-header:hover { background: var(--bg-page); }
@@ -63,7 +120,7 @@
   border-top: 1px solid var(--border);
 }
 .case-chat-msg {
-  max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+  max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 14px;
   line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
 .case-chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
@@ -73,12 +130,12 @@
   display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border);
 }
 .case-chat-form input {
-  flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px;
+  flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px;
 }
 
 /* Строка задачи в разделе "Задачи Planfix" */
 .pf-task-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--bg-page); border-radius: 8px; }
-.pf-task-row label.pf-task-title { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.pf-task-row label.pf-task-title { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
 .pf-task-details { display: flex; gap: 8px; padding-left: 24px; }
 .pf-task-details select, .pf-task-details input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; }
 .pf-task-details.hidden { display: none; }
@@ -86,13 +143,13 @@
 /* Контекстное меню (правый клик по файлу/папке) */
 .context-menu {
   position: fixed; z-index: 1000; background: var(--bg-card);
-  border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 6px; min-width: 180px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop); padding: 6px; min-width: 180px;
   display: flex; flex-direction: column;
 }
 .context-menu button {
   background: none; border: none; text-align: left; padding: 8px 12px;
-  font-size: 13px; border-radius: 6px; cursor: pointer; color: var(--text-primary);
+  font-size: 14px; border-radius: 6px; cursor: pointer; color: var(--text-primary);
 }
 .context-menu button:hover { background: var(--bg-page); }
 .context-menu button.danger-item { color: var(--danger); }
@@ -116,7 +173,7 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, Inter, Arial, sans-serif;
+  font-family: "Golos Text", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   background: var(--bg-page);
   color: var(--text-primary);
   min-height: 100vh;
@@ -157,7 +214,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -185,11 +242,11 @@ button.primary {
 
 button.primary:hover { background: #2569c9; }
 
-.error-text { color: var(--danger); font-size: 13px; margin: 0; min-height: 16px; }
+.error-text { color: var(--danger); font-size: 14px; margin: 0; min-height: 16px; }
 
 /* Зоны прикрепления файлов в форме создания проекта */
 .pf-attach-zone { margin-top: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; }
-.pf-attach-zone-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; }
+.pf-attach-zone-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }
 .pf-attach-file-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .pf-attach-file-row { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 5px 8px; background: var(--bg-page); border-radius: 6px; }
 .pf-attach-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -203,15 +260,15 @@ button.primary:hover { background: #2569c9; }
   font-size: 12px; color: var(--text-muted);
   text-align: center; padding: 10px 8px 4px;
 }
-.pf-attach-zone.drag-over .pf-attach-hint { color: var(--accent); }
+.pf-attach-zone.drag-over .pf-attach-hint { color: var(--accent-on-tint); }
 
 .pf-attach-count {
   display: inline-block; margin-left: 8px;
-  font-size: 11px; font-weight: 700;
+  font-size: 12px; font-weight: 700;
   background: var(--accent-bg); color: var(--accent-strong);
   border-radius: 999px; padding: 1px 7px;
 }
-.pf-attach-file-row button { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 13px; }
+.pf-attach-file-row button { border: none; background: none; color: var(--danger); cursor: pointer; font-size: 14px; }
 
 /* App shell */
 /* Раньше карточки прижимались к верху и под ними оставалось пустое поле
@@ -224,10 +281,10 @@ button.primary:hover { background: #2569c9; }
   display: flex;
   flex-direction: column;
   gap: 3px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* Навигация — тихий тёмный фон, работа идёт на светлом. */
+  background: var(--rail-bg);
+  border: 1px solid var(--rail-bg);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
   padding: 12px 10px;
 }
 
@@ -238,7 +295,7 @@ button.primary:hover { background: #2569c9; }
   cursor: pointer; text-align: left;
   transition: background .12s ease;
 }
-.side-profile:hover { background: var(--bg-subtle); }
+.side-profile:hover { background: rgba(255,255,255,.07); }
 
 .side-avatar {
   width: 34px; height: 34px; flex: 0 0 34px;
@@ -248,42 +305,43 @@ button.primary:hover { background: #2569c9; }
   font-size: 12px; font-weight: 700; letter-spacing: .02em;
 }
 .side-profile-text { display: flex; flex-direction: column; min-width: 0; }
-.side-profile-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-profile-role { font-size: 11.5px; color: var(--text-muted); }
+.side-profile-name { font-size: 14px; font-weight: 600; color: var(--rail-text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-profile-role { font-size: 12px; color: var(--rail-text-muted); }
 
 .side-item {
   display: flex; align-items: center; gap: 11px;
   width: 100%; min-height: 38px; padding: 0 10px;
   border: none; background: transparent;
   border-radius: var(--radius-sm);
-  font-size: 13.5px; font-weight: 500; color: var(--text-secondary);
+  font-size: 14px; font-weight: 500; color: var(--rail-text);
   cursor: pointer; text-align: left;
   transition: background .12s ease, color .12s ease;
 }
 .side-item svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .side-item span:not(.side-badge) { flex: 1; }
-.side-item:hover { background: var(--bg-subtle); color: var(--text-primary); }
-.side-item.active { background: var(--accent-bg); color: var(--accent-strong); font-weight: 600; }
+.side-item:hover { background: rgba(255,255,255,.07); color: var(--rail-text-strong); }
+.side-item.active { background: rgba(255,255,255,.1); color: var(--rail-text-strong); font-weight: 600; }
+.side-item.active svg { stroke: var(--rail-accent); }
 
 .side-badge {
-  font-size: 11px; font-weight: 700;
-  background: var(--bg-subtle); color: var(--text-secondary);
+  font-size: 12px; font-weight: 700;
+  background: rgba(255,255,255,.14); color: var(--rail-text-strong);
   border-radius: 999px; padding: 1px 7px;
 }
-.side-item.active .side-badge { background: #fff; color: var(--accent-strong); }
+.side-item.active .side-badge { background: var(--accent); color: #fff; }
 
-.side-divider { height: 1px; background: var(--border); margin: 8px 4px; }
+.side-divider { height: 1px; background: rgba(255,255,255,.1); margin: 8px 4px; }
 
 .side-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 
 .side-disk { padding: 8px 10px 4px; }
-.side-disk-top { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-muted); margin-bottom: 6px; }
-.side-disk-track { height: 5px; background: var(--bg-subtle); border-radius: 3px; overflow: hidden; }
-.side-disk-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s ease; }
+.side-disk-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--rail-text-muted); margin-bottom: 6px; }
+.side-disk-track { height: 5px; background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; }
+.side-disk-fill { height: 100%; width: 100%; transform-origin: left center; transform: scaleX(0); background: var(--rail-accent); border-radius: 3px; transition: transform .4s ease; }
 .side-disk-fill.disk-warn { background: var(--warning); }
 .side-disk-fill.disk-danger { background: var(--danger); }
 
-.side-logout { color: var(--text-muted); }
+.side-logout { color: var(--rail-text-muted); }
 
 /* ===== Всплывающее окно со ссылками ===== */
 .side-links-wrap { position: relative; }
@@ -292,7 +350,6 @@ button.primary:hover { background: #2569c9; }
   position: absolute; left: calc(100% + 14px); top: -6px;
   width: 250px; z-index: 900;
   background: var(--bg-card);
-  border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-pop);
   padding: 8px;
@@ -309,14 +366,14 @@ button.primary:hover { background: #2569c9; }
 
 .links-popover-header {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-muted); padding: 4px 8px 10px;
 }
 
 .links-popover-item {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 8px; border-radius: var(--radius-sm);
-  font-size: 13.5px; color: var(--text-primary); text-decoration: none;
+  font-size: 14px; color: var(--text-primary); text-decoration: none;
 }
 .links-popover-item:hover { background: var(--bg-subtle); }
 .links-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 7px; }
@@ -347,16 +404,18 @@ button.primary:hover { background: #2569c9; }
 
 .col-header {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 11px; font-weight: 700; margin-bottom: 12px;
-  text-transform: uppercase; letter-spacing: .08em;
-  color: var(--text-muted);
+  /* Раньше это была мелкая серая подпись капслоком — теперь заголовок
+     раздела читается как заголовок. */
+  font-size: var(--fs-title); font-weight: 600; margin-bottom: 14px;
+  letter-spacing: -.01em;
+  color: var(--text-primary);
 }
 
 .col-header > span:first-child { display: flex; align-items: center; gap: 8px; }
 
 .col-count {
-  font-size: 11px; font-weight: 700; letter-spacing: 0;
-  color: var(--text-secondary);
+  font-size: var(--fs-meta); font-weight: 700; letter-spacing: 0;
+  color: var(--text-muted);
   background: var(--bg-subtle);
   border-radius: 999px; padding: 1px 7px;
 }
@@ -367,7 +426,7 @@ button.primary:hover { background: #2569c9; }
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text-muted);
-  font-size: 15px; line-height: 1;
+  font-size: 16px; line-height: 1;
   cursor: pointer;
 }
 
@@ -388,7 +447,7 @@ button.primary:hover { background: #2569c9; }
   border-radius: var(--radius-sm);
   display: flex; align-items: center; gap: 10px;
   padding: 0 8px;
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
   text-decoration: none;
@@ -401,7 +460,7 @@ button.primary:hover { background: #2569c9; }
 .row-item .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
 .empty-hint {
-  font-size: 13px; color: var(--text-muted);
+  font-size: 14px; color: var(--text-muted);
   padding: 28px 12px; text-align: center; line-height: 1.6;
 }
 
@@ -430,7 +489,7 @@ button.primary:hover { background: #2569c9; }
 .folder-actions { display: flex; align-items: center; gap: 8px; }
 
 /* Верхняя строка — путь до текущей папки (без неё самой). */
-.breadcrumbs { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.breadcrumbs { font-size: 14px; color: var(--text-secondary); display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .breadcrumbs .crumb-sep { color: var(--text-muted); padding: 0 2px; }
 
 /* Вторая строка — стрелка «наверх» и название открытой папки. */
@@ -438,7 +497,7 @@ button.primary:hover { background: #2569c9; }
 
 .folder-title {
   margin: 0;
-  font-size: 21px; font-weight: 700; letter-spacing: -.01em;
+  font-size: var(--fs-display); font-weight: 700; letter-spacing: -.02em;
   color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -459,7 +518,7 @@ button.primary:hover { background: #2569c9; }
   cursor: pointer; padding: 2px 6px; border-radius: 6px;
   transition: background .12s ease, color .12s ease;
 }
-.breadcrumbs .crumb:hover { color: var(--accent); background: var(--accent-bg); }
+.breadcrumbs .crumb:hover { color: var(--accent-on-tint); background: var(--accent-bg); }
 
 
 .upload-btn, .back-btn {
@@ -468,7 +527,7 @@ button.primary:hover { background: #2569c9; }
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg-card);
-  font-size: 13px; font-weight: 500;
+  font-size: 14px; font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
   transition: border-color .15s ease, color .15s ease, background .15s ease;
@@ -498,7 +557,7 @@ button.primary:hover { background: #2569c9; }
   min-height: 44px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
-  font-size: 13.5px;
+  font-size: 14px;
   cursor: pointer;
   transition: background .12s ease;
 }
@@ -512,7 +571,26 @@ button.primary:hover { background: #2569c9; }
 
 .file-row .right { display: flex; align-items: center; gap: 10px; }
 
-.file-row .size { color: var(--text-muted); font-size: 12px; }
+.file-row .size { color: var(--text-muted); font-size: 12px; min-width: 62px; text-align: right; }
+
+/* Дата изменения — вспомогательная колонка справа: одинаковой ширины,
+   чтобы даты выстраивались в столбик, и цифры моноширинные. */
+.row-when {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 122px;
+  text-align: right;
+}
+
+.row-item .left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.row-item .left .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+@media (max-width: 1180px) {
+  .row-when { display: none; }
+}
 
 .delete-btn {
   width: 26px; height: 26px;
@@ -523,7 +601,7 @@ button.primary:hover { background: #2569c9; }
   flex-shrink: 0;
 }
 
-.delete-btn:hover { color: var(--danger); background: #fbeceb; }
+.delete-btn:hover { color: var(--danger); background: var(--danger-bg); }
 
 .download-btn {
   width: 26px; height: 26px;
@@ -534,7 +612,7 @@ button.primary:hover { background: #2569c9; }
   flex-shrink: 0;
 }
 
-.download-btn:hover { color: var(--accent); background: var(--accent-bg); }
+.download-btn:hover { color: var(--accent-on-tint); background: var(--accent-bg); }
 
 .perm-btn {
   width: 26px; height: 26px;
@@ -545,7 +623,7 @@ button.primary:hover { background: #2569c9; }
   flex-shrink: 0;
 }
 
-.perm-btn:hover { color: var(--accent); background: var(--accent-bg); }
+.perm-btn:hover { color: var(--accent-on-tint); background: var(--accent-bg); }
 
 .rename-btn {
   width: 26px; height: 26px;
@@ -556,7 +634,7 @@ button.primary:hover { background: #2569c9; }
   flex-shrink: 0;
 }
 
-.rename-btn:hover { color: var(--accent); background: var(--accent-bg); }
+.rename-btn:hover { color: var(--accent-on-tint); background: var(--accent-bg); }
 
 /* Users management modal */
 .modal-overlay {
@@ -611,7 +689,7 @@ button.primary:hover { background: #2569c9; }
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .user-row .user-name {
@@ -620,7 +698,7 @@ button.primary:hover { background: #2569c9; }
 }
 
 .user-row .role-badge {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -641,7 +719,7 @@ button.primary:hover { background: #2569c9; }
   padding-top: 16px;
 }
 
-.add-user-form h3 {
+.add-user-form h2 {
   font-size: 14px;
   font-weight: 600;
   margin: 0 0 12px;
@@ -669,14 +747,52 @@ button.primary:hover { background: #2569c9; }
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   padding: 0 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
+
+/* Формы в модальных окнах: подпись сверху, поля одной высоты и ширины.
+   Раньше часть полей оставалась с браузерным оформлением и разной длиной —
+   форма выглядела собранной из кусков. */
+.modal-panel form label {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: var(--fs-meta); color: var(--text-secondary);
+}
+
+.modal-panel form input[type="text"],
+.modal-panel form input[type="number"],
+.modal-panel form input[type="date"],
+.modal-panel form input[type="password"],
+.modal-panel form select,
+.modal-panel form textarea {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 0 10px;
+  font-size: var(--fs-body);
+  font-family: inherit;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+
+.modal-panel form textarea { padding: 9px 10px; line-height: 1.45; resize: vertical; }
+
+.modal-panel form input:focus,
+.modal-panel form select:focus,
+.modal-panel form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.modal-panel form ::placeholder { color: var(--text-muted); }
 
 .perm-checks {
   display: flex;
   gap: 16px;
   margin-bottom: 14px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .perm-checks label {
@@ -695,9 +811,8 @@ button.primary:hover { background: #2569c9; }
   max-height: 60vh;
   overflow-y: auto;
   background: var(--bg-card);
-  border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.16);
+  box-shadow: var(--shadow-pop);
   z-index: 900;
   animation: upload-panel-in 0.25s ease;
 }
@@ -713,7 +828,7 @@ button.primary:hover { background: #2569c9; }
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -751,8 +866,13 @@ button.primary:hover { background: #2569c9; }
 
 .upload-panel-total-fill {
   height: 100%;
+  width: 100%;
+  /* Раньше здесь анимировалась ширина — это заставляет браузер пересчитывать
+     раскладку на каждом кадре. Масштаб считает только композитор. */
+  transform-origin: left center;
+  transform: scaleX(0);
   background: var(--accent);
-  transition: width 0.25s ease;
+  transition: transform 0.25s ease;
 }
 
 .upload-panel-total-fill.has-error { background: var(--danger); }
@@ -803,9 +923,12 @@ button.primary:hover { background: #2569c9; }
 
 .upload-progress-fill {
   height: 100%;
+  width: 100%;
   border-radius: 4px;
+  transform-origin: left center;
+  transform: scaleX(0);
   background: var(--accent);
-  transition: width 0.18s linear, background-color 0.2s ease;
+  transition: transform 0.18s linear, background-color 0.2s ease;
 }
 
 .upload-progress-fill.uploading {
@@ -823,7 +946,7 @@ button.primary:hover { background: #2569c9; }
 }
 
 .upload-item-error {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--danger);
   margin-top: 4px;
 }
@@ -832,11 +955,11 @@ button.primary:hover { background: #2569c9; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; padding: 36px 20px; margin-top: 10px;
   border: 2px dashed var(--border-strong); border-radius: 12px;
-  color: var(--text-secondary); font-size: 13px; text-align: center;
+  color: var(--text-secondary); font-size: 14px; text-align: center;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 .upload-dropzone svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.6; }
-.upload-dropzone.drag-over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.upload-dropzone.drag-over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-on-tint); }
 
 /* Перетаскивание файлов с компьютера прямо в интерфейс:
    колонка / открытая папка подсвечиваются рамкой, строка-папка — заливкой. */
@@ -851,7 +974,7 @@ button.primary:hover { background: #2569c9; }
 .row-item.drag-over {
   background: var(--accent-bg);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-on-tint);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
@@ -886,7 +1009,7 @@ button.primary:hover { background: #2569c9; }
 
 .upload-choice-btn:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-on-tint);
   background: var(--accent-bg);
 }
 
@@ -896,7 +1019,7 @@ button.primary:hover { background: #2569c9; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   flex: 1;
   background: var(--accent-bg);
@@ -937,7 +1060,7 @@ button.primary:hover { background: #2569c9; }
   border: 1px solid transparent;
   background: var(--bg-subtle) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2397958d' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 9px center / 14px 14px;
   padding: 0 8px 0 29px;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-primary);
   transition: background-color .15s ease, border-color .15s ease;
 }
@@ -946,7 +1069,7 @@ button.primary:hover { background: #2569c9; }
   height: 32px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  font-size: 11px;
+  font-size: 12px;
   padding: 0 4px;
   max-width: 92px;
   background: var(--bg-subtle);
@@ -976,7 +1099,7 @@ button.primary:hover { background: #2569c9; }
   border: 1px solid transparent;
   background: var(--bg-subtle) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2397958d' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px center / 15px 15px;
   padding: 0 12px 0 33px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-primary);
 }
 
@@ -984,7 +1107,7 @@ button.primary:hover { background: #2569c9; }
   height: 36px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: 14px;
   padding: 0 8px;
   background: var(--bg-subtle);
   color: var(--text-secondary);
@@ -999,7 +1122,7 @@ button.primary:hover { background: #2569c9; }
 }
 
 .search-path-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-left: 6px;
 }
@@ -1015,7 +1138,7 @@ button.primary:hover { background: #2569c9; }
   color: var(--text-muted);
 }
 .ficon .icon { width: 16px; height: 16px; flex: 0 0 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
-.ficon-folder { background: #eef2fb; color: #4a6fa8; }
+.ficon-folder { background: #e8f1ec; color: #2f6b4f; }
 .ficon-doc    { background: #e8f0fd; color: #2f6fdb; }
 .ficon-sheet  { background: #e4f5ee; color: #14855f; }
 .ficon-pdf    { background: #fbeceb; color: #cf4436; }
@@ -1023,7 +1146,7 @@ button.primary:hover { background: #2569c9; }
 .ficon-zip    { background: #fdf2dd; color: #a8760a; }
 .ficon-other  { background: var(--bg-subtle); color: var(--text-muted); }
 
-.row-item:hover .ficon-folder, .file-row:hover .ficon-folder { background: #e3ebf9; }
+.row-item:hover .ficon-folder, .file-row:hover .ficon-folder { background: #d8e8df; }
 
 /* Папка в списке читается чуть заметнее файла. */
 .row-item .row-name, .file-row .row-name { font-weight: 500; }
@@ -1042,7 +1165,7 @@ button.primary:hover { background: #2569c9; }
   z-index: 2000;
   background: #2b2b28;
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   padding: 10px 18px;
   border-radius: 999px;
   box-shadow: var(--shadow-pop);
@@ -1063,22 +1186,22 @@ button.primary:hover { background: #2569c9; }
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
 }
-.page-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
+.page-sub { margin: 4px 0 0; font-size: 14px; color: var(--text-muted); }
 
 .day-label {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-muted); padding: 16px 8px 6px;
 }
 .day-label:first-child { padding-top: 4px; }
 
-.row-path { font-size: 11.5px; color: var(--text-muted); margin-left: 10px; }
+.row-path { font-size: 12px; color: var(--text-muted); margin-left: 10px; }
 .who { font-size: 12px; color: var(--text-secondary); }
 
 .seg { display: flex; gap: 2px; background: var(--bg-subtle); border-radius: var(--radius-sm); padding: 3px; }
 .seg-btn {
   border: none; background: transparent; cursor: pointer;
   padding: 6px 13px; border-radius: 6px;
-  font-size: 12.5px; color: var(--text-secondary);
+  font-size: 12px; color: var(--text-secondary);
 }
 .seg-btn.active { background: var(--bg-card); color: var(--text-primary); font-weight: 600; box-shadow: 0 1px 2px rgba(35,35,32,.08); }
 
@@ -1092,7 +1215,7 @@ button.primary:hover { background: #2569c9; }
   display: flex; align-items: center; gap: 12px;
   padding: 0 8px 8px; margin-bottom: 2px;
   border-bottom: 1px solid var(--border);
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
   color: var(--text-muted);
 }
 .trash-head .th-name { flex: 1; padding-left: 42px; }
@@ -1123,7 +1246,7 @@ button.primary:hover { background: #2569c9; }
 .ev {
   display: flex; align-items: baseline; gap: 12px;
   padding: 9px 8px; border-radius: var(--radius-sm);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 .ev:hover { background: var(--bg-subtle); }
 .ev-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; align-self: center; }
@@ -1135,50 +1258,73 @@ button.primary:hover { background: #2569c9; }
 .ev-time { flex: 0 0 42px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .ev-text { flex: 1; color: var(--text-secondary); }
 .ev-text b { color: var(--text-primary); font-weight: 600; }
-.ev .stage-badge { font-size: 10px; padding: 2px 8px; }
+.ev .stage-badge { font-size: 12px; padding: 2px 8px; }
 
 /* Add menu dropdown */
-.add-menu-wrap {
-  position: relative;
-}
+/* ===== Кнопка «Создать» и её меню =====
+   Раньше действия колонки жили в мелких серых чипах ("ГП", "Проект", "+"),
+   которые читались как выключенные. Теперь это одна заметная кнопка, а типы
+   документов — строки меню: добавить новый тип не значит уплотнить шапку. */
+.create-wrap { position: relative; flex-shrink: 0; }
 
-.add-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-  padding: 6px;
-  min-width: 200px;
-  z-index: 500;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.add-menu button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: none;
-  background: transparent;
-  padding: 9px 10px;
-  border-radius: 7px;
-  font-size: 13px;
-  color: var(--text-primary);
+.create-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 12px 0 10px;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff;
+  font-size: var(--fs-body); font-weight: 600; font-family: inherit;
+  letter-spacing: 0; text-transform: none;
   cursor: pointer;
-  text-align: left;
+  box-shadow: 0 1px 2px rgba(35,35,32,.16);
+  transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
 }
 
-.add-menu button:hover { background: var(--accent-bg); color: var(--accent); }
+.create-btn:hover { background: var(--accent-strong); border-color: var(--accent-strong); box-shadow: var(--shadow-raise); }
+.create-btn:active { background: var(--accent-strong); box-shadow: none; }
+.create-btn svg { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.create-btn .create-chevron { width: 14px; height: 14px; flex: 0 0 14px; stroke-width: 2; opacity: .8; transition: transform .15s ease; }
+.create-btn[aria-expanded="true"] .create-chevron { transform: rotate(180deg); }
 
-.add-menu button svg {
-  width: 18px; height: 18px;
-  flex: 0 0 18px;
-  fill: none; stroke: currentColor; stroke-width: 1.7;
+.create-menu {
+  position: absolute;
+  top: calc(100% + 8px); right: 0;
+  background: var(--bg-card);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
+  min-width: 232px;
+  z-index: 500;
+  display: flex; flex-direction: column; gap: 1px;
+  animation: create-menu-in .13s ease-out;
 }
+
+@keyframes create-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.create-menu button {
+  display: flex; align-items: center; gap: 10px;
+  border: none; background: transparent;
+  padding: 9px 10px; border-radius: 7px;
+  font-size: var(--fs-body); font-family: inherit;
+  color: var(--text-primary);
+  cursor: pointer; text-align: left;
+}
+
+.create-menu button:hover { background: var(--accent-bg); color: var(--accent-on-tint); }
+
+.create-menu button svg {
+  width: 18px; height: 18px; flex: 0 0 18px;
+  fill: none; stroke: var(--text-muted); stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.create-menu button:hover svg { stroke: var(--accent-on-tint); }
+
+.create-menu-sep { height: 1px; background: var(--border); margin: 5px 8px; }
+
+/* В открытой папке меню раскрывается от левого края — кнопка стоит первой. */
+#createFolderViewMenu { right: auto; left: 0; }
 
 @media (max-width: 720px) {
   .upload-panel { left: 12px; right: 12px; width: auto; }

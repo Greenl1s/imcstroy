@@ -62,14 +62,17 @@ const els = {
   historyList: document.getElementById("historyList"),
   historyActor: document.getElementById("historyActor"),
   historyAction: document.getElementById("historyAction"),
-  addProjectBtn: document.getElementById("addProjectBtn"),
   projectFormOverlay: document.getElementById("projectFormOverlay"),
   projectFormCloseBtn: document.getElementById("projectFormCloseBtn"),
   projectForm: document.getElementById("projectForm"),
   projectFormError: document.getElementById("projectFormError"),
   uploadInput: document.getElementById("uploadInput"),
-  mkdirDbBtn: document.getElementById("mkdirDbBtn"),
-  mkdirCasesBtn: document.getElementById("mkdirCasesBtn"),
+  createDbBtn: document.getElementById("createDbBtn"),
+  createDbMenu: document.getElementById("createDbMenu"),
+  createCasesBtn: document.getElementById("createCasesBtn"),
+  createCasesMenu: document.getElementById("createCasesMenu"),
+  createFolderViewBtn: document.getElementById("createFolderViewBtn"),
+  createFolderViewMenu: document.getElementById("createFolderViewMenu"),
   addToolBtn: document.getElementById("addToolBtn"),
   profileBtn: document.getElementById("profileBtn"),
   usersOverlay: document.getElementById("usersOverlay"),
@@ -99,11 +102,6 @@ const els = {
   casesSortSelect: document.getElementById("casesSortSelect"),
   folderSearchInput: document.getElementById("folderSearchInput"),
   folderSortSelect: document.getElementById("folderSortSelect"),
-  addMenuBtn: document.getElementById("addMenuBtn"),
-  addMenu: document.getElementById("addMenu"),
-  addFolderOption: document.getElementById("addFolderOption"),
-  addDocxOption: document.getElementById("addDocxOption"),
-  addXlsxOption: document.getElementById("addXlsxOption"),
   folderPermOverlay: document.getElementById("folderPermOverlay"),
   folderPermTitle: document.getElementById("folderPermTitle"),
   folderPermCloseBtn: document.getElementById("folderPermCloseBtn"),
@@ -130,7 +128,6 @@ const els = {
   casesDownloadSelectedBtn: document.getElementById("casesDownloadSelectedBtn"),
   casesDeleteSelectedBtn: document.getElementById("casesDeleteSelectedBtn"),
   casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
-  addGpBtn: document.getElementById("addGpBtn"),
   gpOverlay: document.getElementById("gpOverlay"),
   gpCloseBtn: document.getElementById("gpCloseBtn"),
   gpForm: document.getElementById("gpForm"),
@@ -210,16 +207,27 @@ function joinPath(base, name) {
 }
 
 // Папки всегда сверху и сортируются по имени; файлы — по выбранному критерию.
+/** Дата изменения одним понятным форматом: 27.08.2026 11:57. */
+function formatWhen(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 function sortEntries(entries, sortMode) {
   const [field, dir] = (sortMode || "name-asc").split("-");
   const mul = dir === "desc" ? -1 : 1;
-  const folders = entries.filter((e) => e.isDir)
-    .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }) * mul);
-  const files = entries.filter((e) => !e.isDir)
-    .sort((a, b) => {
-      if (field === "size") return ((a.size || 0) - (b.size || 0)) * mul;
-      return a.name.localeCompare(b.name, "ru", { numeric: true }) * mul;
-    });
+  const byName = (a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }) * mul;
+  const byField = (a, b) => {
+    if (field === "size") return ((a.size || 0) - (b.size || 0)) * mul;
+    if (field === "date") return ((a.mtime || 0) - (b.mtime || 0)) * mul;
+    return byName(a, b);
+  };
+  // Папки всегда впереди файлов, но по дате сортируются на равных.
+  const folders = entries.filter((e) => e.isDir).sort(field === "date" ? byField : byName);
+  const files = entries.filter((e) => !e.isDir).sort(byField);
   return [...folders, ...files];
 }
 
@@ -412,9 +420,13 @@ function applyPermissionsUI() {
   els.linksBtn.parentElement.classList.toggle("hidden", !(p.can_tools || p.role === "admin"));
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
-  // Папки прямо в корне "Дела" заводит только администратор — у сотрудника
-  // эта кнопка всё равно упиралась бы в отказ сервера.
-  els.mkdirCasesBtn.classList.toggle("hidden", p.role !== "admin");
+  // Создавать что-либо прямо в корне "Дела" может только администратор —
+  // у сотрудника эти пункты всё равно упирались бы в отказ сервера.
+  const rootOnlyAdmin = p.role !== "admin";
+  els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
+    .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
+  els.createCasesMenu.querySelectorAll(".create-menu-sep")
+    .forEach((sep) => sep.classList.toggle("hidden", rootOnlyAdmin));
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
@@ -1291,12 +1303,16 @@ function renderColumnList(key) {
       : "";
     const canManagePerms = key === "cases" && currentUser && currentUser.role === "admin";
     if (entry.isDir) row.classList.add("is-dir");
+    const when = formatWhen(entry.mtime);
     row.innerHTML = `
       ${selState.active ? `<input type="checkbox" class="select-checkbox" ${selState.selected.has(entry.fullPath) ? "checked" : ""}>` : ""}
-      <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-        ${iconHtml(entry)}<span class="row-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</span>${pathHint}
+      <span class="left">
+        ${iconHtml(entry)}<span class="row-name">${escapeHtml(entry.name)}</span>${pathHint}
       </span>
-      ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
+      <span class="right">
+        ${when ? `<span class="row-when">${escapeHtml(when)}</span>` : ""}
+        ${selState.active || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
+      </span>
     `;
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -1361,19 +1377,99 @@ async function loadColumns() {
   loadColumnList("cases");
 }
 
-els.mkdirDbBtn.addEventListener("click", () => createFolderIn(DB_PATH, () => loadColumnList("db")));
-els.mkdirCasesBtn.addEventListener("click", () => createFolderIn(CASES_PATH, () => loadColumnList("cases")));
-
 async function createFolderIn(basePath, onDone) {
   const name = prompt("Название новой папки:");
   if (!name) return;
-  const target = (basePath.endsWith("/") ? basePath : basePath + "/") + name;
+  const target = joinPath(basePath, name);
   try {
     await apiFetch("/api/folder", { method: "POST", body: JSON.stringify({ path: target }) });
     onDone();
   } catch (err) {
     alert("Не удалось создать папку: " + err.message);
   }
+}
+
+async function createDocumentIn(basePath, type, label, onDone) {
+  const name = prompt(`Название ${label} (можно без расширения):`);
+  if (name === null) return;
+  try {
+    const { name: savedName } = await apiFetch("/api/create-file", {
+      method: "POST",
+      body: JSON.stringify({ path: basePath, type, name }),
+    });
+    await onDone();
+    openFile(joinPath(basePath, savedName), savedName);
+  } catch (err) {
+    alert("Не удалось создать документ: " + err.message);
+  }
+}
+
+/* ---------- Кнопка «Создать» (колонки и открытая папка) ----------
+   Один компонент на все три места: типы документов — строки меню, поэтому
+   новый тип добавляется одной строкой и не уплотняет шапку. */
+
+const openCreateMenus = [];
+
+function closeCreateMenus() {
+  for (const { btn, menu } of openCreateMenus) {
+    menu.classList.add("hidden");
+    btn.setAttribute("aria-expanded", "false");
+  }
+  openCreateMenus.length = 0;
+}
+
+document.addEventListener("click", closeCreateMenus);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeCreateMenus();
+});
+
+function wireCreateMenu(btn, menu, getTarget) {
+  if (!btn || !menu) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wasOpen = !menu.classList.contains("hidden");
+    closeCreateMenus();
+    if (wasOpen) return;
+    menu.classList.remove("hidden");
+    btn.setAttribute("aria-expanded", "true");
+    openCreateMenus.push({ btn, menu });
+  });
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  menu.querySelectorAll("[data-create]").forEach((item) => {
+    item.addEventListener("click", () => {
+      closeCreateMenus();
+      const { path, refresh } = getTarget();
+      const action = item.dataset.create;
+      if (action === "folder") createFolderIn(path, refresh);
+      else if (action === "docx") createDocumentIn(path, "docx", "текстового документа", refresh);
+      else if (action === "xlsx") createDocumentIn(path, "xlsx", "таблицы", refresh);
+      else if (action === "project") openProjectForm();
+      else if (action === "gp") openGpForm();
+      else if (action === "upload") pickFilesFor(path, refresh);
+    });
+  });
+}
+
+wireCreateMenu(els.createDbBtn, els.createDbMenu, () => ({
+  path: DB_PATH,
+  refresh: () => loadColumnList("db"),
+}));
+wireCreateMenu(els.createCasesBtn, els.createCasesMenu, () => ({
+  path: CASES_PATH,
+  refresh: () => loadColumnList("cases"),
+}));
+wireCreateMenu(els.createFolderViewBtn, els.createFolderViewMenu, () => ({
+  path: currentPath,
+  refresh: () => renderFolder(currentPath),
+}));
+
+// Куда класть выбранные файлы и что обновить после загрузки. Диалог выбора
+// файлов открывается из разных мест, поэтому цель запоминаем явно.
+let uploadTarget = null;
+
+function pickFilesFor(path, refresh) {
+  uploadTarget = { path, refresh };
+  els.uploadInput.click();
 }
 
 /* ---------- Гарантийные письма (ГП) ---------- */
@@ -1642,7 +1738,6 @@ els.gpTermDays.addEventListener("input", () => {
   els.gpTermWords.value = capitalizeFirst(numberToWordsRu(els.gpTermDays.value));
 });
 
-els.addGpBtn.addEventListener("click", openGpForm);
 els.gpCloseBtn.addEventListener("click", () => {
   els.gpOverlay.classList.add("hidden");
 });
@@ -1707,50 +1802,6 @@ els.gpForm.addEventListener("submit", async (e) => {
     submitBtn.textContent = "Создать";
   }
 });
-
-/* ---------- Добавить (новая папка / docx / xlsx) в текущей папке ---------- */
-
-els.addMenuBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  els.addMenu.classList.toggle("hidden");
-});
-
-document.addEventListener("click", () => {
-  els.addMenu.classList.add("hidden");
-});
-
-els.addMenu.addEventListener("click", (e) => e.stopPropagation());
-
-els.addFolderOption.addEventListener("click", async () => {
-  els.addMenu.classList.add("hidden");
-  const name = prompt("Название новой папки:");
-  if (!name) return;
-  try {
-    await apiFetch("/api/folder", { method: "POST", body: JSON.stringify({ path: joinPath(currentPath, name) }) });
-    renderFolder(currentPath);
-  } catch (err) {
-    alert("Не удалось создать папку: " + err.message);
-  }
-});
-
-els.addDocxOption.addEventListener("click", () => createNewDocument("docx", "текстового документа"));
-els.addXlsxOption.addEventListener("click", () => createNewDocument("xlsx", "таблицы"));
-
-async function createNewDocument(type, label) {
-  els.addMenu.classList.add("hidden");
-  const name = prompt(`Название ${label} (можно без расширения):`);
-  if (name === null) return;
-  try {
-    const { name: savedName } = await apiFetch("/api/create-file", {
-      method: "POST",
-      body: JSON.stringify({ path: currentPath, type, name }),
-    });
-    await renderFolder(currentPath);
-    openFile(joinPath(currentPath, savedName), savedName);
-  } catch (err) {
-    alert("Не удалось создать документ: " + err.message);
-  }
-}
 
 /* ---------- Folder (single big panel) view ---------- */
 
@@ -2346,7 +2397,6 @@ async function openProjectForm() {
   els.projectFormOverlay.classList.remove("hidden");
 }
 
-els.addProjectBtn.addEventListener("click", openProjectForm);
 els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
 
 /* ---- Управление списком организаций ("Структура") ---- */
@@ -2574,6 +2624,7 @@ function renderFolderRows() {
       <div class="left">${iconHtml(entry)}<span class="row-name">${escapeHtml(entry.name)}</span>${pathHint}</div>
       <div class="right">
         <span class="size">${entry.isDir ? "" : formatSize(entry.size)}</span>
+        <span class="row-when">${escapeHtml(formatWhen(entry.mtime))}</span>
         ${selectMode || !canManagePerms ? "" : `<button class="perm-btn" title="Доступ" aria-label="Доступ">${svgDots}</button>`}
       </div>
     `;
@@ -3022,6 +3073,7 @@ els.downloadFolderBtn.addEventListener("click", () => {
 });
 
 els.uploadTriggerBtn.addEventListener("click", () => {
+  uploadTarget = null;
   document.getElementById("uploadModalOverlay").classList.remove("hidden");
 });
 
@@ -3041,7 +3093,11 @@ els.uploadInput.addEventListener("change", () => {
   const files = Array.from(els.uploadInput.files || []);
   els.uploadInput.value = "";
   document.getElementById("uploadModalOverlay").classList.add("hidden");
-  if (files.length > 0) uploadFiles(files, currentPath, () => renderFolder(currentPath));
+  const target = uploadTarget;
+  uploadTarget = null;
+  if (files.length === 0) return;
+  if (target) uploadFiles(files, target.path, target.refresh);
+  else uploadFiles(files, currentPath, () => renderFolder(currentPath));
 });
 
 els.uploadFolderInput.addEventListener("change", () => {
@@ -3281,8 +3337,9 @@ function updateUploadPanel() {
 
   if (els.uploadPanelTotalFill) {
     const width = `${settled === total && errorCount === 0 ? 100 : Math.round(overall)}%`;
-    if (els.uploadPanelTotalFill.style.width !== width) {
-      els.uploadPanelTotalFill.style.width = width;
+    if (els.uploadPanelTotalFill.dataset.pct !== width) {
+      els.uploadPanelTotalFill.dataset.pct = width;
+      els.uploadPanelTotalFill.style.transform = `scaleX(${parseFloat(width) / 100})`;
     }
     els.uploadPanelTotalFill.classList.toggle("has-error", errorCount > 0 && settled === total);
     // Общая полоска не нужна, когда файл всего один — у него своя.
@@ -3308,7 +3365,7 @@ function updateUploadPanel() {
 
     const width = `${item.status === "error" ? 100 : item.progress}%`;
     if (width !== nodes.lastWidth) {
-      nodes.fill.style.width = width;
+      nodes.fill.style.transform = `scaleX(${parseFloat(width) / 100})`;
       nodes.lastWidth = width;
     }
     const fillClass = `upload-progress-fill ${item.status}`;
@@ -3665,7 +3722,7 @@ async function loadDiskUsage() {
     const freeEl = document.getElementById("diskUsageFree");
     const widget = document.getElementById("diskUsageWidget");
 
-    fill.style.width = `${data.percentUsed}%`;
+    fill.style.transform = `scaleX(${data.percentUsed / 100})`;
     fill.classList.remove("disk-warn", "disk-danger");
     if (data.percentUsed >= 90) fill.classList.add("disk-danger");
     else if (data.percentUsed >= 75) fill.classList.add("disk-warn");
