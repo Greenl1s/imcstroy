@@ -1992,15 +1992,21 @@ function renderProbe(data) {
         : `<td class="pf-warn">не переносится — определим по префиксу «ЭКС.»/«НИ.»</td>`,
     ]));
 
+  const usedIds = new Set((data.fieldMapping || []).map((m) => Number(m.id)).filter(Boolean));
   const fields = pfTable(["Поле проекта", "id", "Пример значения"],
-    data.fields.map((f) => {
-      const configured = Number(f.id) === Number(data.expertiseFieldConfigured);
-      return [
-        `<td>${escapeHtml(f.name || "(без названия)")}${configured ? ' <span class="pf-ok">— тип экспертизы</span>' : ""}</td>`,
-        `<td class="num">${f.id}</td>`,
-        `<td>${escapeHtml(String(f.sample == null ? "—" : f.sample)).slice(0, 60)}</td>`,
-      ];
-    }));
+    data.fields.map((f) => [
+      `<td>${escapeHtml(f.name || "(без названия)")}${usedIds.has(Number(f.id)) ? ' <span class="pf-ok">— читаем</span>' : ""}</td>`,
+      `<td class="num">${f.id}</td>`,
+      `<td>${escapeHtml(String(f.sample == null ? "—" : f.sample)).slice(0, 60)}</td>`,
+    ]));
+
+  const mapping = pfTable(["Что нужно импорту", "Какое поле берём"],
+    (data.fieldMapping || []).map((m) => [
+      `<td>${escapeHtml(m.need)}</td>`,
+      m.id
+        ? `<td class="pf-ok num">${m.id}</td>`
+        : '<td class="pf-warn">не найдено — эти данные не перенесутся</td>',
+    ]));
 
   const statuses = pfTable(["Статус задачи", "Задач", "Считается завершённой"],
     data.taskStatuses.map((st) => [
@@ -2016,17 +2022,27 @@ function renderProbe(data) {
     </div>
     <div class="pf-block">
       <h3>Поля проекта</h3>
-      ${fields}
-      ${data.expertiseFieldConfigured
-        ? ""
-        : '<p class="page-sub">Тип экспертизы пока не настроен: найдите нужное поле в таблице и пропишите его id в .env как PLANFIX_FIELD_EXPERTISE_TYPE.</p>'}
+      ${data.fields.length
+        ? fields
+        : `<p class="pf-warn">Planfix не вернул ни одного поля. Справочник полей опрошен по адресам: ${
+            escapeHtml((data.catalogueTried || []).join("; ") || "—")}</p>`}
+      ${data.projectsSampled && !data.projectsWithValues
+        ? '<p class="pf-warn">Значения полей не пришли ни у одного проекта — переносить карточки не по чему.</p>'
+        : ""}
+    </div>
+    <div class="pf-block">
+      <h3>Что импорт читает</h3>
+      ${mapping}
+      <p class="page-sub">Поля определяются по названию${
+        data.catalogueSource ? ` (справочник: ${escapeHtml(data.catalogueSource)})` : ""
+      }; настраивать id вручную не нужно.</p>
     </div>
     <div class="pf-block">
       <h3>Статусы задач</h3>
       ${statuses}
       <p class="page-sub">Свои названия завершённых статусов добавляются в .env: PLANFIX_DONE_STATUSES="Сдана,Принята".</p>
     </div>
-    <p class="page-sub">Смотрели ${data.projectsSampled} проектов и ${data.tasksSampled} задач.</p>
+    <p class="page-sub">Смотрели ${data.projectsSampled} проектов (значения полей пришли у ${data.projectsWithValues}) и ${data.tasksSampled} задач.</p>
   `;
 }
 
@@ -2041,6 +2057,7 @@ function renderSyncReport(report) {
 
   planfixResult.innerHTML = `
     <p class="row-subtitle"><strong>Итог: ${escapeHtml(syncSummary(report))}</strong></p>
+    ${(report.warnings || []).map((w) => `<p class="pf-warn">${escapeHtml(w)}</p>`).join("")}
     ${list("Новые проекты", report.created, (x) =>
       `<li>${escapeHtml(x.name)}${x.foldersCreated ? ` — папок создано ${x.foldersCreated}` : ""}</li>`)}
     ${list("Подхвачены существующие папки", report.adopted, (x) => `<li>${escapeHtml(x.name)} — ${escapeHtml(x.folder)}</li>`)}
