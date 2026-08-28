@@ -388,9 +388,6 @@ function openPendingDeepLink() {
 /* ---------- Права доступа и адаптация интерфейса под пользователя ---------- */
 
 let currentUser = null;
-// Если у пользователя открыт доступ ровно к одному разделу с файлами
-// ("db" или "cases") — работаем сразу в нём, без экрана с колонками.
-let singleColumnMode = null;
 
 /** Инициалы для кружка в панели: из "Иванов Иван" — "ИИ", из "kirill" — "KI". */
 function initialsFor(name) {
@@ -415,17 +412,14 @@ function applyPermissionsUI() {
   els.linksBtn.parentElement.classList.toggle("hidden", !(p.can_tools || p.role === "admin"));
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
+  // Папки прямо в корне "Дела" заводит только администратор — у сотрудника
+  // эта кнопка всё равно упиралась бы в отказ сервера.
+  els.mkdirCasesBtn.classList.toggle("hidden", p.role !== "admin");
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
   if (p.can_db) allowed.push("db");
   if (p.can_cases) allowed.push("cases");
-
-  // Если раздел всего один, экрана с колонками нет — значит и подниматься
-  // из корня этого раздела некуда.
-  singleColumnMode = allowed.length === 1 && (allowed[0] === "db" || allowed[0] === "cases")
-    ? allowed[0]
-    : null;
 
   return allowed;
 }
@@ -457,14 +451,11 @@ function enterAppForUser() {
     return;
   }
 
-  if (singleColumnMode === "db") {
-    goToFolder(DB_PATH, [{ label: "База данных", path: DB_PATH }], false);
-  } else if (singleColumnMode === "cases") {
-    goToFolder(CASES_PATH, [{ label: "Дела", path: CASES_PATH }], false);
-  } else {
-    showColumnsUI();
-    loadColumns();
-  }
+  // Экран с колонками показываем всегда: даже если раздел всего один,
+  // пользователь ждёт увидеть свою колонку ("Дела" или "База данных"),
+  // а не оказаться сразу внутри неё.
+  showColumnsUI();
+  loadColumns();
 }
 
 /* ---------- Корзина ---------- */
@@ -863,7 +854,6 @@ els.loginForm.addEventListener("submit", async (e) => {
 els.logoutBtn.addEventListener("click", async () => {
   try { await apiFetch("/api/auth/logout", { method: "POST" }); } catch (e) {}
   currentUser = null;
-  singleColumnMode = null;
   showLogin();
 });
 
@@ -1276,10 +1266,15 @@ function renderColumnList(key) {
   }
   container.innerHTML = "";
   if (sorted.length === 0) {
+    // Сотруднику без выданных правил "Дела" честнее объяснить, что дело не
+    // в пустой папке, а в том, что доступ ещё не выдали.
+    const noRulesYet = key === "cases" && currentUser && currentUser.role !== "admin";
     container.innerHTML = `<div class="empty-hint">${
       state.searching
         ? "Ничего не найдено"
-        : "Здесь пока пусто<br>Перетащите сюда файлы или папки"
+        : noRulesYet
+          ? "Пока нет дел, к которым вам открыт доступ.<br>Обратитесь к администратору."
+          : "Здесь пока пусто<br>Перетащите сюда файлы или папки"
     }</div>`;
     return;
   }
@@ -2512,13 +2507,7 @@ window.addEventListener("popstate", (e) => {
   }
   showSection("files", false);
   if (!state || state.view === "columns") {
-    if (singleColumnMode) {
-      const rootPath = singleColumnMode === "db" ? DB_PATH : CASES_PATH;
-      const rootLabel = singleColumnMode === "db" ? "База данных" : "Дела";
-      goToFolder(rootPath, [{ label: rootLabel, path: rootPath }], false);
-    } else {
-      goToColumns(false);
-    }
+    goToColumns(false);
   } else if (state.view === "folder") {
     goToFolder(state.path, state.trail || [], false);
   }
@@ -2559,7 +2548,10 @@ async function renderFolder(path) {
 function renderFolderRows() {
   const source = folderSearching ? folderSearchResults : currentFolderEntries;
   const list = sortEntries(source, els.folderSortSelect.value);
-  const inCasesTree = currentTrail[0] && currentTrail[0].path === CASES_PATH;
+  // Считаем по самому пути, а не по началу "хлебных крошек": в папку можно
+  // попасть по ссылке или из карточки проекта, и тогда крошки начинаются не
+  // с корня "Дела", а кнопка доступа пропадала.
+  const inCasesTree = String(currentPath || "").startsWith(CASES_PATH);
   const canManagePerms = inCasesTree && currentUser && currentUser.role === "admin";
   els.folderList.innerHTML = "";
   if (list.length === 0) {
@@ -2672,9 +2664,7 @@ function renderBreadcrumbs() {
   els.breadcrumbs.classList.toggle("hidden", parents.length === 0);
 
   els.folderTitle.textContent = current ? current.label : "";
-  // Из корня единственного доступного раздела подниматься некуда.
-  const canGoUp = currentTrail.length > 1 || !singleColumnMode;
-  els.backBtn.classList.toggle("hidden", !canGoUp);
+  els.backBtn.classList.remove("hidden");
 }
 
 els.backBtn.addEventListener("click", () => {
@@ -2772,7 +2762,13 @@ function showContextMenu(event, path, name, isDir, context) {
   const inCases = context === "cases" || path.startsWith(CASES_PATH);
   ctxMenuEl.querySelector('[data-ctx-action="move"]').classList.toggle("hidden", inCases);
 
-  const menuWidth = 210, menuHeight = 270; // с запасом, чтобы не вылезало за край экрана
+  // Настройка персонального доступа есть только внутри "Дела" и только у
+  // администратора. Раньше это была лишь кнопка "…", появлявшаяся при
+  // наведении, — её было легко не найти.
+  const canManagePerms = inCases && currentUser && currentUser.role === "admin";
+  ctxMenuEl.querySelector('[data-ctx-action="perms"]').classList.toggle("hidden", !canManagePerms);
+
+  const menuWidth = 210, menuHeight = 310; // с запасом, чтобы не вылезало за край экрана
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
   ctxMenuEl.style.left = `${Math.max(8, x)}px`;
@@ -2842,6 +2838,8 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
       await copyItemInPlace(target.path, target.context);
     } else if (action === "share") {
       await shareLinkFor(target.path, target.isDir);
+    } else if (action === "perms") {
+      openFolderPermissions(target.path, target.name);
     } else if (action === "delete") {
       if (!confirm(`Удалить «${target.name}»? Объект уедет в корзину.`)) return;
       try {
