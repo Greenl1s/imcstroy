@@ -5,7 +5,7 @@ async function listForPath(path) {
   const res = await db.query(
     `SELECT fp.id, fp.path, fp.access, u.id AS user_id, u.username
      FROM fm_folder_permissions fp
-     JOIN fm_users u ON u.id = fp.user_id
+     JOIN users u ON u.id = fp.user_id
      WHERE fp.path = $1
      ORDER BY u.username ASC`,
     [normalize(path)]
