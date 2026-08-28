@@ -38,6 +38,16 @@ async function listDir(relPath) {
   return { folders, files };
 }
 
+/** Есть ли такой путь внутри хранилища (без выброса исключения). */
+async function pathExists(relPath) {
+  try {
+    await fsp.stat(safeResolve(relPath));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 async function ensureDir(relPath) {
   const abs = safeResolve(relPath);
   await fsp.mkdir(abs, { recursive: true });
@@ -226,6 +236,6 @@ function zipContentDisposition(relPaths) {
 }
 
 module.exports = {
-  DATA_ROOT, zipContentDisposition, safeResolve, listDir, ensureDir, removeEntry, renameEntry, moveEntry, copyEntry,
+  DATA_ROOT, zipContentDisposition, safeResolve, listDir, pathExists, ensureDir, removeEntry, renameEntry, moveEntry, copyEntry,
   searchTree, buildTree, absolutePathFor,
 };

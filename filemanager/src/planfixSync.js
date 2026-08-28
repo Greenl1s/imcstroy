@@ -8,6 +8,10 @@ const FIELD_STAGE = 76010;        // "Этап проекта"
 const FIELD_STATUS = 76040;       // "Статус проекта"
 const FIELD_ORGANIZATION = 76014; // "Структура"
 const FIELD_CASE_NUMBER = 76006;  // "Номер договора / Номер дела"
+// "Тип экспертизы" — id этого поля отличается в разных аккаунтах, поэтому
+// он берётся из окружения (PLANFIX_FIELD_EXPERTISE_TYPE) и правится без
+// пересборки образа.
+const FIELD_EXPERTISE_TYPE = Number(process.env.PLANFIX_FIELD_EXPERTISE_TYPE || 0) || null;
 
 const STAGE_TO_PLANFIX = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
 const STATUS_TO_PLANFIX = { waiting: "Ожидание", in_progress: "В работе", problem: "Проблема" };
@@ -135,7 +139,83 @@ async function createPlanfixTask({ name, projectId, assigneeId, deadlineIso }) {
   return created.id;
 }
 
+
+/* ---------------- Чтение из Planfix (импорт) ---------------- */
+
+const PAGE_SIZE = 100;
+// Дальше этого не идём даже если Planfix отдаёт бесконечность: страховка
+// от зацикливания на чужом API.
+const MAX_PAGES = 200;
+
+/** Постранично забирает список объектов Planfix (/project/list, /task/list). */
+async function listAll(path, fields, extraBody = {}) {
+  const items = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const data = await planfixRequest("POST", path, {
+      offset: page * PAGE_SIZE,
+      pageSize: PAGE_SIZE,
+      fields,
+      ...extraBody,
+    });
+    const chunk = data?.projects || data?.tasks || [];
+    items.push(...chunk);
+    if (chunk.length < PAGE_SIZE) break;
+  }
+  return items;
+}
+
+/** Все проекты аккаунта — с группой и пользовательскими полями. */
+function listAllProjects() {
+  return listAll("/project/list", "id,name,group,description,customFieldData");
+}
+
+/** Все задачи аккаунта — с привязкой к проекту, статусом и сроками. */
+function listAllTasks() {
+  return listAll("/task/list", "id,name,status,project,assigner,assignees,startDateTime,endDateTime");
+}
+
+// Статусы задач в Planfix настраиваются в аккаунте, поэтому "завершённость"
+// определяем по названию статуса, а не по числовому id: список названий
+// известен и меняется редко.
+const DONE_STATUS_NAMES = new Set(["завершенная", "завершённая", "завершена", "завершено", "выполнена", "закрыта", "отменена", "отменённая", "отмененная"]);
+
+/** "01-09-2026" или {date:"01-09-2026"} -> "2026-09-01" для базы. */
+function planfixDateToIso(value) {
+  const raw = typeof value === "object" && value ? value.date || value.datetime : value;
+  if (!raw) return null;
+  const m = String(raw).match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const m2 = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m2 ? m2[0] : null;
+}
+
+function peopleToText(value) {
+  const users = value?.users || (Array.isArray(value) ? value : []);
+  const names = users.map((u) => u?.name).filter(Boolean);
+  if (names.length) return names.join(", ");
+  return value?.name || null;
+}
+
+/** Приводит задачу Planfix к тому виду, в котором она хранится у нас. */
+function readTask(task) {
+  const statusName = task?.status?.name || null;
+  const key = String(statusName || "").trim().toLowerCase();
+  return {
+    planfixId: Number(task.id),
+    name: String(task.name || "").trim() || `Задача #${task.id}`,
+    statusName,
+    isDone: DONE_STATUS_NAMES.has(key),
+    assignees: peopleToText(task?.assignees),
+    assigner: peopleToText(task?.assigner),
+    startDate: planfixDateToIso(task?.startDateTime),
+    endDate: planfixDateToIso(task?.endDateTime),
+  };
+}
+
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
+  listAllProjects, listAllTasks, readTask, planfixDateToIso,
+  FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
+  GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };

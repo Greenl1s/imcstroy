@@ -188,6 +188,46 @@ cases.delete("/planfix/stage-tasks/:id", auth.requireAdmin, async (req, res) => 
   res.json({ ok: true });
 });
 
+/* ---------------- Перенос из Planfix ---------------- */
+
+const planfixImport = require("./planfixImport");
+
+/** Когда сверялись в последний раз и чем она кончилась. */
+cases.get("/planfix/sync-status", async (req, res) => {
+  const { rows } = await db.query(
+    "SELECT id, started_at, finished_at, trigger, ok, report, error FROM planfix_sync_runs ORDER BY id DESC LIMIT 1"
+  );
+  res.json({ last: rows[0] || null });
+});
+
+/**
+ * Запустить сверку вручную. Только администратор: операция читает весь
+ * аккаунт Planfix и заводит проекты с папками.
+ */
+cases.post("/planfix/sync", auth.requireAdmin, async (req, res) => {
+  try {
+    const report = await planfixImport.runSync({ trigger: "manual" });
+    res.json({ ok: true, report });
+  } catch (err) {
+    console.error("Сверка с Planfix не удалась:", err);
+    res.status(500).json({ message: err.message, report: err.report || null });
+  }
+});
+
+/** Задачи проекта: текущие и завершённые, зеркало Planfix. */
+cases.get("/:id/tasks", loadCase, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT id, planfix_id, name, status_name, is_done, assignees, assigner, start_date, end_date
+       FROM case_tasks WHERE case_id = $1
+      ORDER BY is_done ASC, end_date NULLS LAST, id`,
+    [req.params.id]
+  );
+  res.json({
+    tasks: rows,
+    syncedAt: req.case.planfix_tasks_synced_at || null,
+  });
+});
+
 /** Список сотрудников Planfix — для выбора исполнителя. */
 cases.get("/planfix/employees", async (req, res) => {
   try {

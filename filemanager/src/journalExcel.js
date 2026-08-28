@@ -9,11 +9,11 @@ const TYPE_LABEL = { expertise: "Экспертизы", research: "Незави�
 const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль" };
 
 const HEADERS = [
-  "Стадия", "Структура", "Условное наименование", "Тип проекта", "Год начала проекта",
+  "Стадия", "Структура", "Условное наименование", "Тип проекта", "Тип экспертизы", "Год начала проекта",
   "Описание", "Руководитель проекта", "Специалисты/Эксперты", "Заказчик", "№ дела или договора",
 ];
 const COURT_GROUP_HEADERS = ["Сторона 1", "Сторона 2", "Судья"];
-const COLUMN_WIDTHS = [12, 26, 30, 20, 12, 34, 22, 24, 26, 18, 22, 22, 20];
+const COLUMN_WIDTHS = [12, 26, 30, 20, 24, 12, 34, 22, 24, 26, 18, 22, 22, 20];
 
 /** Стадия для отображения — для архива это "Завершён"/"Отменён", а не техническая стадия. */
 function stageLabelFor(row) {
@@ -28,6 +28,7 @@ function rowToValues(row) {
     row.organization || "",
     row.name || "",
     TYPE_LABEL[row.type] || row.type || "",
+    row.expertise_type || "",
     row.year || "",
     row.description || "",
     row.manager_name || "",
@@ -51,20 +52,20 @@ function buildSheet(workbook, sheetName, rows) {
     const cell = sheet.getCell(1, col);
     cell.value = title;
   });
-  sheet.mergeCells(1, 11, 1, 13);
-  sheet.getCell(1, 11).value = "Поля судебных экспертиз";
+  sheet.mergeCells(1, 12, 1, 14);
+  sheet.getCell(1, 12).value = "Поля судебных экспертиз";
   COURT_GROUP_HEADERS.forEach((title, i) => {
-    sheet.getCell(2, 11 + i).value = title;
+    sheet.getCell(2, 12 + i).value = title;
   });
 
-  for (let c = 1; c <= 13; c++) {
+  for (let c = 1; c <= 14; c++) {
     const cell = sheet.getCell(1, c);
     cell.font = { bold: true };
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6F0FD" } };
   }
   const groupSubCell = sheet.getRow(2);
-  for (let c = 11; c <= 13; c++) {
+  for (let c = 12; c <= 14; c++) {
     groupSubCell.getCell(c).font = { bold: true };
     groupSubCell.getCell(c).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
     groupSubCell.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6F0FD" } };

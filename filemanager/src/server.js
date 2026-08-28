@@ -1143,6 +1143,33 @@ async function runTrashCleanup() {
 setTimeout(runTrashCleanup, 30 * 1000).unref();
 setInterval(runTrashCleanup, 6 * 60 * 60 * 1000).unref();
 
+// Сверка с Planfix: раз в 15 минут забираем новые проекты и задачи.
+// Планфикс — источник правды, мы только читаем; если он недоступен,
+// следующий заход просто повторит попытку.
+const planfixImport = require("./planfixImport");
+const PLANFIX_SYNC_MINUTES = Number(process.env.PLANFIX_SYNC_MINUTES || 15);
+
+async function runPlanfixSync() {
+  if (!process.env.PLANFIX_TOKEN) return;
+  try {
+    const report = await planfixImport.runSync({ trigger: "schedule" });
+    const touched = report.created.length + report.adopted.length + report.updated.length;
+    if (touched || report.tasksSynced) {
+      console.log(
+        `Planfix: проектов затронуто ${touched} (новых ${report.created.length}), ` +
+        `папок создано ${report.foldersCreated}, задач ${report.tasksSynced}`
+      );
+    }
+  } catch (err) {
+    console.error("Сверка с Planfix не удалась:", err.message);
+  }
+}
+
+if (PLANFIX_SYNC_MINUTES > 0) {
+  setTimeout(runPlanfixSync, 60 * 1000).unref();
+  setInterval(runPlanfixSync, PLANFIX_SYNC_MINUTES * 60 * 1000).unref();
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`filemanager запущен на порту ${PORT}`);
