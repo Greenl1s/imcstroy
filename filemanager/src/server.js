@@ -236,7 +236,9 @@ app.get("/api/folder-permissions", auth.requireAuth, auth.requireAdmin, async (r
     res.json({ permissions });
   } catch (err) {
     console.error("Не удалось получить список прав доступа:", err);
-    res.status(500).json({ message: "Не удалось получить список прав доступа" });
+    // Окно доступно только администратору — показываем настоящую причину,
+    // иначе такие сбои приходится ловить по логам контейнера.
+    res.status(500).json({ message: "Не удалось получить список прав доступа: " + err.message });
   }
 });
 
@@ -250,7 +252,7 @@ app.post("/api/folder-permissions", auth.requireAuth, auth.requireAdmin, async (
     res.json({ permission });
   } catch (err) {
     console.error("Не удалось сохранить право доступа:", err);
-    res.status(500).json({ message: "Не удалось сохранить право доступа" });
+    res.status(500).json({ message: "Не удалось сохранить право доступа: " + err.message });
   }
 });
 
@@ -260,7 +262,7 @@ app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, a
     res.json({ ok: true });
   } catch (err) {
     console.error("Не удалось удалить право доступа:", err);
-    res.status(500).json({ message: "Не удалось удалить право доступа" });
+    res.status(500).json({ message: "Не удалось убрать право доступа: " + err.message });
   }
 });
 
