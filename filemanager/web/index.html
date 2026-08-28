@@ -125,7 +125,11 @@
     <div class="col" data-col="cases">
       <div class="col-header">
         <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
-<div class="create-wrap">
+        <div class="col-head-actions">
+        <button class="icon-btn hidden" id="planfixSyncBtn" type="button" title="Сверить с Planfix">
+          <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
+        </button>
+        <div class="create-wrap">
           <button class="create-btn" id="createCasesBtn" type="button" aria-haspopup="menu" aria-expanded="false">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
           </button>
@@ -139,6 +143,7 @@
             <div class="create-menu-sep"></div>
             <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
           </div>
+        </div>
         </div>
       </div>
       <div class="col-toolbar" id="casesToolbar">
@@ -175,6 +180,14 @@
         <h1 class="folder-title" id="folderTitle"></h1>
       </div>
       <div id="caseBanner" class="case-banner hidden"></div>
+      <div id="caseTasksBox" class="case-chat-box hidden">
+        <div class="case-chat-header" id="caseTasksToggle">
+          <span id="caseTasksTitle">Задачи проекта</span>
+          <span id="caseTasksArrow">▾</span>
+        </div>
+        <div id="caseTasksBody" class="case-tasks-body"></div>
+      </div>
+
       <div id="caseChatBox" class="case-chat-box hidden">
         <div class="case-chat-header" id="caseChatToggle">
           <span>💬 Спросить ассистента по проекту</span>

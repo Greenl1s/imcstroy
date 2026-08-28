@@ -70,6 +70,7 @@ const els = {
   createDbBtn: document.getElementById("createDbBtn"),
   createDbMenu: document.getElementById("createDbMenu"),
   createCasesBtn: document.getElementById("createCasesBtn"),
+  planfixSyncBtn: document.getElementById("planfixSyncBtn"),
   createCasesMenu: document.getElementById("createCasesMenu"),
   createFolderViewBtn: document.getElementById("createFolderViewBtn"),
   createFolderViewMenu: document.getElementById("createFolderViewMenu"),
@@ -433,6 +434,8 @@ function applyPermissionsUI() {
   // Создавать что-либо прямо в корне "Дела" может только администратор —
   // у сотрудника эти пункты всё равно упирались бы в отказ сервера.
   const rootOnlyAdmin = p.role !== "admin";
+  // Сверка читает весь аккаунт Planfix и заводит папки — это админское действие.
+  els.planfixSyncBtn.classList.toggle("hidden", rootOnlyAdmin);
   els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
     .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
   els.createCasesMenu.querySelectorAll(".create-menu-sep")
@@ -1868,12 +1871,14 @@ async function updateCaseBanner(path) {
   try {
     const project = await apiFetch(`/api/cases/by-path?path=${encodeURIComponent(path)}`);
     renderCaseBanner(project);
+    loadCaseTasks(project);
     openCaseChatFor(project.id);
     openPlanfixTasksFor(project);
   } catch {
     banner.classList.add("hidden");
     chatBox.classList.add("hidden");
     tasksBox.classList.add("hidden");
+    document.getElementById("caseTasksBox").classList.add("hidden");
   }
 }
 
@@ -1945,6 +1950,115 @@ function renderCaseBanner(project) {
     });
   }
 }
+
+/* ---- Сверка с Planfix вручную ---- */
+
+function syncSummary(report) {
+  const parts = [];
+  if (report.created.length) parts.push(`новых проектов ${report.created.length}`);
+  if (report.adopted.length) parts.push(`подхвачено папок ${report.adopted.length}`);
+  if (report.updated.length) parts.push(`обновлено ${report.updated.length}`);
+  if (report.foldersCreated) parts.push(`создано папок ${report.foldersCreated}`);
+  if (report.tasksSynced) parts.push(`задач ${report.tasksSynced}`);
+  if (report.skipped.length) parts.push(`пропущено ${report.skipped.length}`);
+  if (report.errors.length) parts.push(`ошибок ${report.errors.length}`);
+  return parts.length ? parts.join(", ") : "изменений нет";
+}
+
+els.planfixSyncBtn.addEventListener("click", async () => {
+  const btn = els.planfixSyncBtn;
+  btn.classList.add("busy");
+  showToast("Сверяюсь с Planfix…");
+  try {
+    const { report } = await apiFetch("/api/cases/planfix/sync", { method: "POST" });
+    showToast("Planfix: " + syncSummary(report));
+    // Проекты могли появиться в любой стадии — обновляем то, что открыто.
+    if (currentSection === "files") {
+      if (els.folderView && !els.folderView.classList.contains("hidden")) renderFolder(currentPath);
+      else loadColumnList("cases");
+    }
+    if (report.skipped.length || report.errors.length) {
+      const lines = [
+        ...report.skipped.map((x) => `• ${x.name} — ${x.why}`),
+        ...report.errors.map((x) => `• ${x.name} — ошибка: ${x.error}`),
+      ];
+      alert("Часть карточек Planfix не перенесена:\n\n" + lines.join("\n"));
+    }
+  } catch (err) {
+    showToast("Не удалось свериться: " + err.message);
+  } finally {
+    btn.classList.remove("busy");
+  }
+});
+
+/* ---- Задачи проекта: зеркало Planfix ----
+   Показываем то, что уже перенесено сверкой, а не ходим в чужой API на
+   каждое открытие папки: страница открывается мгновенно и работает,
+   даже когда Planfix недоступен. */
+
+function taskDateText(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+function taskRowHtml(task) {
+  const overdue = !task.is_done && task.end_date && new Date(task.end_date) < new Date();
+  const due = taskDateText(task.end_date);
+  return `
+    <div class="task-row${task.is_done ? " task-done" : ""}">
+      <span class="task-mark">${task.is_done ? svgCheck : ""}</span>
+      <span class="task-name">${escapeHtml(task.name)}</span>
+      <span class="task-who">${escapeHtml(task.assignees || "")}</span>
+      <span class="task-due${overdue ? " task-overdue" : ""}">${escapeHtml(due)}</span>
+    </div>`;
+}
+
+async function loadCaseTasks(project) {
+  const box = document.getElementById("caseTasksBox");
+  const body = document.getElementById("caseTasksBody");
+  const title = document.getElementById("caseTasksTitle");
+  box.classList.remove("hidden");
+  body.innerHTML = '<div class="empty-hint" style="padding:12px;">Загрузка…</div>';
+
+  let data;
+  try {
+    data = await apiFetch(`/api/cases/${project.id}/tasks`);
+  } catch (err) {
+    title.textContent = "Задачи проекта";
+    body.innerHTML = `<div class="empty-hint" style="padding:12px;">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const open = data.tasks.filter((t) => !t.is_done);
+  const done = data.tasks.filter((t) => t.is_done);
+  title.textContent = data.tasks.length
+    ? `Задачи проекта — в работе ${open.length}, завершено ${done.length}`
+    : "Задачи проекта";
+
+  if (!data.tasks.length) {
+    body.innerHTML = `<div class="empty-hint" style="padding:12px;">${
+      project.planfix_id
+        ? "По этому проекту в Planfix пока нет задач."
+        : "Проект ещё не связан с Planfix — задачи появятся после сверки."
+    }</div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    ${open.length ? `<div class="task-group">Сейчас в работе</div>${open.map(taskRowHtml).join("")}` : ""}
+    ${done.length ? `<div class="task-group">Завершённые</div>${done.map(taskRowHtml).join("")}` : ""}
+  `;
+}
+
+document.getElementById("caseTasksToggle").addEventListener("click", () => {
+  const body = document.getElementById("caseTasksBody");
+  const arrow = document.getElementById("caseTasksArrow");
+  body.classList.toggle("hidden");
+  arrow.textContent = body.classList.contains("hidden") ? "▸" : "▾";
+});
 
 /* ---- Чат-ассистент внутри карточки проекта ---- */
 
@@ -2605,6 +2719,47 @@ async function renderFolder(path) {
 // либо, в режиме поиска, folderSearchResults) — без повторного запроса
 // к серверу. Используется при переключении режима выбора, отметке
 // чекбоксов и смене сортировки.
+// Корни стадий внутри "Дела" — именно в них лежат папки проектов, и
+// именно там имеет смысл делить список на "Экспертизы" и "Независимые
+// исследования", как это сделано в Планфиксе.
+const STAGE_ROOT_PATHS = [
+  `${CASES_PATH}/01.Планы`,
+  `${CASES_PATH}/02.Активные проекты`,
+  `${CASES_PATH}/03.Проекты на контроле`,
+  `${CASES_PATH}/04.Архив/Завершенные`,
+  `${CASES_PATH}/04.Архив/Отмененные`,
+];
+
+const PROJECT_GROUPS = [
+  { label: "Экспертизы", test: (name) => name.startsWith("ЭКС.") },
+  { label: "Независимые исследования", test: (name) => name.startsWith("НИ.") },
+  { label: "Прочее", test: () => true },
+];
+
+/**
+ * Делит содержимое папки стадии на группы по типу проекта. Пустые группы
+ * не показываются: если на стадии одни НИ — будет только их заголовок.
+ * Возвращает null там, где деление не имеет смысла (обычная папка).
+ */
+function groupProjectEntries(list, path) {
+  if (!STAGE_ROOT_PATHS.includes(path)) return null;
+  const dirs = list.filter((e) => e.isDir);
+  const rest = list.filter((e) => !e.isDir);
+  if (!dirs.length) return null;
+
+  const groups = PROJECT_GROUPS.map((g) => ({ label: g.label, items: [] }));
+  for (const entry of dirs) {
+    const idx = PROJECT_GROUPS.findIndex((g) => g.test(entry.name));
+    groups[idx].items.push(entry);
+  }
+  const filled = groups.filter((g) => g.items.length);
+  // Один-единственный тип, да ещё и "Прочее" — заголовок ничего не
+  // добавляет, показываем обычным списком.
+  if (filled.length === 1 && filled[0].label === "Прочее") return null;
+  if (rest.length) filled.push({ label: "Файлы", items: rest });
+  return filled;
+}
+
 function renderFolderRows() {
   const source = folderSearching ? folderSearchResults : currentFolderEntries;
   const list = sortEntries(source, els.folderSortSelect.value);
@@ -2622,7 +2777,17 @@ function renderFolderRows() {
     }</div>`;
     return;
   }
-  for (const entry of list) {
+  const groups = folderSearching ? null : groupProjectEntries(list, currentPath);
+  const ordered = groups ? groups.flatMap((g) => [{ groupLabel: g.label }, ...g.items]) : list;
+
+  for (const entry of ordered) {
+    if (entry.groupLabel) {
+      const head = document.createElement("div");
+      head.className = "row-group";
+      head.textContent = entry.groupLabel;
+      els.folderList.appendChild(head);
+      continue;
+    }
     const row = document.createElement("div");
     row.className = "file-row" + (entry.isDir ? " is-dir" : "") + (selectMode ? " selectable" : "") + (selectedPaths.has(entry.fullPath) ? " selected" : "");
     const pathHint = folderSearching

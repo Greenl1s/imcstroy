@@ -1272,6 +1272,53 @@ button.primary:hover { background: #2569c9; }
 .ev .stage-badge { font-size: 12px; padding: 2px 8px; }
 
 /* Add menu dropdown */
+/* Служебная иконка-кнопка в шапке колонки (сверка с Planfix). */
+.col-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.icon-btn {
+  width: 34px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn:hover { color: var(--accent-on-tint); border-color: var(--accent); background: var(--accent-bg); }
+.icon-btn.busy { pointer-events: none; opacity: .6; }
+.icon-btn.busy svg { animation: icon-spin 1s linear infinite; }
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+
+/* Заголовок группы внутри списка папок ("Экспертизы", "Независимые
+   исследования") — как разделение проектов в Планфиксе. */
+.row-group {
+  font-size: var(--fs-meta); font-weight: 700;
+  color: var(--text-secondary);
+  padding: 16px 8px 6px;
+}
+.row-group:first-child { padding-top: 4px; }
+
+/* Задачи проекта */
+.case-tasks-body { padding: 4px 0 8px; }
+.task-group {
+  font-size: var(--fs-meta); font-weight: 700; color: var(--text-secondary);
+  padding: 10px 14px 4px;
+}
+.task-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  align-items: center; gap: 10px;
+  padding: 7px 14px;
+  font-size: var(--fs-body);
+}
+.task-row + .task-row { border-top: 1px solid var(--border); }
+.task-mark { color: var(--success); display: inline-flex; }
+.task-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-who { color: var(--text-muted); font-size: var(--fs-meta); }
+.task-due { color: var(--text-muted); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; min-width: 82px; text-align: right; }
+.task-overdue { color: var(--danger); font-weight: 600; }
+.task-done .task-name { color: var(--text-muted); text-decoration: line-through; }
+
 /* ===== Кнопка «Создать» и её меню =====
    Раньше действия колонки жили в мелких серых чипах ("ГП", "Проект", "+"),
    которые читались как выключенные. Теперь это одна заметная кнопка, а типы
