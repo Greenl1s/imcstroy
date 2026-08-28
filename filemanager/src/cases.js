@@ -231,6 +231,132 @@ cases.get("/planfix/probe", auth.requireAdmin, async (req, res) => {
   }
 });
 
+/* ---------------- Задачи всех проектов (отдельная страница) ---------------- */
+
+const folderAccessLib = require("./folderAccess");
+
+/**
+ * Сотрудник видит задачи только тех проектов, к папкам которых у него
+ * есть доступ. Админ видит всё.
+ */
+async function visibleTasks(rows, user) {
+  if (user.role === "admin") return rows;
+  if (!user.can_cases) return [];
+  const rules = await folderAccessLib.getUserRules(user.id);
+  return rows.filter((r) => folderAccessLib.resolveAccess(rules, r.folder_path));
+}
+
+const TASKS_QUERY = `
+  SELECT t.id, t.planfix_id, t.name, t.status_name, t.status_id, t.is_done,
+         t.assignees, t.assigner, t.start_date, t.end_date, t.completed_at,
+         c.id AS case_id, c.name AS case_name, c.type AS case_type,
+         c.stage AS case_stage, c.folder_path
+    FROM case_tasks t
+    JOIN cases c ON c.id = t.case_id
+   WHERE c.deleted_at IS NULL
+`;
+
+/**
+ * Все задачи разом — для отдельной страницы "Задачи".
+ * mine=1 — только те, где я в исполнителях; done=1/0 — фильтр по
+ * завершённости (по умолчанию показываем незавершённые).
+ */
+cases.get("/tasks/all", async (req, res) => {
+  try {
+    const { rows } = await db.query(`${TASKS_QUERY} ORDER BY t.is_done, t.end_date NULLS LAST, t.planfix_id DESC`);
+    let list = await visibleTasks(rows, req.user);
+
+    if (req.query.done === "1") list = list.filter((t) => t.is_done);
+    else if (req.query.done !== "all") list = list.filter((t) => !t.is_done);
+
+    if (req.query.mine === "1") {
+      // Сравниваем с именем, под которым человек значится в Planfix:
+      // логин ИСУ ("kirill") и исполнитель ("Кирилл Базаев") — разные вещи.
+      const me = String(req.user.planfix_name || "").trim().toLowerCase();
+      list = me
+        ? list.filter((t) => String(t.assignees || "").toLowerCase().includes(me))
+        : [];
+    }
+
+    const q = String(req.query.q || "").trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) =>
+        t.name.toLowerCase().includes(q) || String(t.case_name || "").toLowerCase().includes(q));
+    }
+
+    // Счётчики считаем по всему, что человеку видно, а не по текущему
+    // фильтру — иначе цифра прыгает вслед за фильтром и ничего не значит.
+    const all = await visibleTasks(rows, req.user);
+    res.json({
+      tasks: list.slice(0, 500),
+      total: list.length,
+      // Кем задачи вообще бывают заняты — из этого списка человек
+      // выбирает себя, чтобы заработал фильтр "Мои".
+      people: [...new Set(all.flatMap((t) => String(t.assignees || "").split(",").map((x) => x.trim())))]
+        .filter(Boolean).sort((a, b) => a.localeCompare(b, "ru")),
+      myPlanfixName: req.user.planfix_name || null,
+      counts: {
+        open: all.filter((t) => !t.is_done).length,
+        done: all.filter((t) => t.is_done).length,
+        overdue: all.filter((t) => !t.is_done && t.end_date && new Date(t.end_date) < new Date()).length,
+      },
+    });
+  } catch (err) {
+    console.error("Не удалось получить список задач:", err);
+    res.status(500).json({ message: "Не удалось получить список задач: " + err.message });
+  }
+});
+
+/**
+ * Каким статусом Planfix помечает завершение. Берём из окружения, а если
+ * там пусто — вычисляем по уже перенесённым задачам: у завершённых виден
+ * их статус, самый частый и есть нужный.
+ */
+async function doneStatusId() {
+  const fromEnv = Number(process.env.PLANFIX_DONE_STATUS_ID || 0);
+  if (fromEnv) return fromEnv;
+  const { rows } = await db.query(
+    `SELECT status_id, COUNT(*)::int AS c FROM case_tasks
+      WHERE is_done = true AND status_id IS NOT NULL
+      GROUP BY status_id ORDER BY c DESC LIMIT 1`
+  );
+  return rows.length ? Number(rows[0].status_id) : null;
+}
+
+/**
+ * Завершить задачу. Сначала Planfix, потом у себя: если он не согласился,
+ * у нас ничего не меняется и человек видит причину, а не молчаливое
+ * расхождение двух систем.
+ */
+cases.post("/tasks/:id/complete", async (req, res) => {
+  try {
+    const { rows } = await db.query(`${TASKS_QUERY} AND t.id = $1`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ message: "Задача не найдена" });
+    const [task] = await visibleTasks(rows, req.user);
+    if (!task) return res.status(403).json({ message: "Нет доступа к этой задаче" });
+    if (task.is_done) return res.json({ ok: true, alreadyDone: true });
+
+    const statusId = await doneStatusId();
+    await planfixSync.completeTask(task.planfix_id, statusId);
+
+    await db.query(
+      `UPDATE case_tasks
+          SET is_done = true, status_id = $2, completed_at = now(), completed_by = $3, updated_at = now()
+        WHERE id = $1`,
+      [task.id, statusId, req.user.id]
+    );
+    events.log(req.user, "task_done", {
+      path: task.folder_path,
+      name: task.name,
+      details: { case: task.case_name },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось завершить задачу:", err);
+    res.status(502).json({ message: "Planfix не принял завершение задачи: " + err.message });
+  }
+});
+
 /** Задачи проекта: текущие и завершённые, зеркало Planfix. */
 cases.get("/:id/tasks", loadCase, async (req, res) => {
   const { rows } = await db.query(

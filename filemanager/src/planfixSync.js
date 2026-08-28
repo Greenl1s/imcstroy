@@ -464,6 +464,7 @@ function readTask(task) {
     planfixId: Number(task.id),
     name: String(task.name || "").trim() || `Задача #${task.id}`,
     statusName,
+    statusId: task?.status?.id != null ? Number(task.status.id) : null,
     isDone: isDoneStatus(statusName),
     assignees: peopleToText(task?.assignees),
     assigner: peopleToText(task?.assigner),
@@ -472,10 +473,28 @@ function readTask(task) {
   };
 }
 
+
+/**
+ * Переводит задачу в завершённый статус. Planfix — источник правды по
+ * задачам, поэтому сначала меняем там, и только если он согласился,
+ * помечаем у себя: иначе в ИСУ будет "сделано", а в Planfix нет.
+ */
+async function completeTask(taskId, statusId) {
+  if (!statusId) {
+    throw new Error(
+      "Не известен статус завершения в Planfix. Откройте окно Planfix → «Проверить связь» " +
+      "и укажите его в .env как PLANFIX_DONE_STATUS_ID."
+    );
+  }
+  await planfixRequest("POST", `/task/${taskId}`, { status: { id: Number(statusId) } });
+  return true;
+}
+
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
+  completeTask,
   fetchFieldCatalogue, resolveFieldIds,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,

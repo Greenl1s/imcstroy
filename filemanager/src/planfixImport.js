@@ -324,12 +324,13 @@ async function importTasks(report) {
       const parsed = planfix.readTask(task);
       const { rowCount } = await db.query(
         `INSERT INTO case_tasks
-           (case_id, planfix_id, name, status_name, is_done, assignees, assigner, start_date, end_date, seen_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), now())
+           (case_id, planfix_id, name, status_name, status_id, is_done, assignees, assigner, start_date, end_date, seen_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())
          ON CONFLICT (planfix_id) DO UPDATE SET
            case_id = EXCLUDED.case_id,
            name = EXCLUDED.name,
            status_name = EXCLUDED.status_name,
+           status_id = EXCLUDED.status_id,
            is_done = EXCLUDED.is_done,
            assignees = EXCLUDED.assignees,
            assigner = EXCLUDED.assigner,
@@ -337,7 +338,7 @@ async function importTasks(report) {
            end_date = EXCLUDED.end_date,
            seen_at = now(),
            updated_at = now()`,
-        [kase.id, parsed.planfixId, parsed.name, parsed.statusName, parsed.isDone,
+        [kase.id, parsed.planfixId, parsed.name, parsed.statusName, parsed.statusId, parsed.isDone,
          parsed.assignees, parsed.assigner, parsed.startDate, parsed.endDate]
       );
       report.tasksSynced += rowCount;

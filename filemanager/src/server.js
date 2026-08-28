@@ -187,8 +187,21 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
       can_tools: req.user.can_tools,
       can_db: req.user.can_db,
       can_cases: req.user.can_cases,
+      planfix_name: req.user.planfix_name,
     },
   });
+});
+
+/** Своё имя в Planfix человек указывает сам — это не админская настройка. */
+app.post("/api/auth/me/planfix-name", auth.requireAuth, async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  try {
+    await db.query("UPDATE users SET planfix_name = $2 WHERE id = $1", [req.user.id, name || null]);
+    res.json({ ok: true, planfix_name: name || null });
+  } catch (err) {
+    console.error("Не удалось сохранить имя в Planfix:", err);
+    res.status(500).json({ message: "Не удалось сохранить имя" });
+  }
 });
 
 /* ---------------- Инструменты (ссылки) ---------------- */
