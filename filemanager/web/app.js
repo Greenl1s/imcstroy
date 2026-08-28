@@ -145,6 +145,8 @@ const els = {
   gpTermDays: document.getElementById("gpTermDays"),
   gpTermWords: document.getElementById("gpTermWords"),
   gpExpertsList: document.getElementById("gpExpertsList"),
+  gpExpertSearch: document.getElementById("gpExpertSearch"),
+  gpExpertsCount: document.getElementById("gpExpertsCount"),
   gpExpertsOrderBox: document.getElementById("gpExpertsOrderBox"),
   gpExpertsOrderList: document.getElementById("gpExpertsOrderList"),
 };
@@ -1615,6 +1617,42 @@ function numberToWordsRu(num) {
 // отметки галочек, а переставить местами можно стрелками.
 let gpExpertOrder = [];
 
+/** Счётчик выбранных — видно, сколько уже отмечено, не пролистывая список. */
+function updateGpExpertsCount() {
+  const n = gpExpertOrder.length;
+  els.gpExpertsCount.textContent = n
+    ? `Выбрано: ${n}`
+    : "Никого не выбрано";
+  els.gpExpertsCount.classList.toggle("has-selection", n > 0);
+}
+
+/**
+ * Поиск по списку. Уже отмеченных не прячем даже при непопадании в
+ * запрос — иначе легко "потерять" выбранного и снять галочку вслепую.
+ */
+function filterGpExperts() {
+  const query = (els.gpExpertSearch.value || "").trim().toLowerCase();
+  let shown = 0;
+  els.gpExpertsList.querySelectorAll(".picker-item").forEach((item) => {
+    const checked = item.querySelector("input").checked;
+    const hit = !query || item.dataset.name.includes(query) || checked;
+    item.classList.toggle("hidden", !hit);
+    if (hit) shown++;
+  });
+  const empty = els.gpExpertsList.querySelector(".picker-empty");
+  if (!shown && !empty) {
+    const div = document.createElement("div");
+    div.className = "picker-empty";
+    div.textContent = "Никого не нашли";
+    els.gpExpertsList.appendChild(div);
+  } else if (shown && empty) {
+    empty.remove();
+  }
+}
+
+
+els.gpExpertSearch.addEventListener("input", filterGpExperts);
+
 function renderGpExpertsOrder() {
   if (!gpExpertOrder.length) {
     els.gpExpertsOrderBox.classList.add("hidden");
@@ -1669,9 +1707,11 @@ async function openGpForm() {
   }
 
   els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
+  els.gpExpertSearch.value = "";
   els.gpOverlay.classList.remove("hidden");
 
   gpExpertOrder = [];
+  updateGpExpertsCount();
   renderGpExpertsOrder();
 
   try {
@@ -1683,19 +1723,24 @@ async function openGpForm() {
     els.gpExpertsList.innerHTML = "";
     for (const expert of experts) {
       const label = document.createElement("label");
-      label.style.cssText = "display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;";
-      label.innerHTML = `<input type="checkbox" value="${expert.path}"> <span>${expert.name}</span>`;
+      label.className = "picker-item";
+      label.dataset.name = expert.name.toLowerCase();
+      label.innerHTML = `<input type="checkbox" value="${escapeHtml(expert.path)}"><span>${escapeHtml(expert.name)}</span>`;
       const checkbox = label.querySelector("input");
       checkbox.addEventListener("change", () => {
+        label.classList.toggle("checked", checkbox.checked);
         if (checkbox.checked) {
           gpExpertOrder.push({ path: expert.path, name: expert.name });
         } else {
           gpExpertOrder = gpExpertOrder.filter((e) => e.path !== expert.path);
         }
+        updateGpExpertsCount();
         renderGpExpertsOrder();
       });
       els.gpExpertsList.appendChild(label);
     }
+    filterGpExperts();
+    updateGpExpertsCount();
   } catch (err) {
     els.gpExpertsList.innerHTML = '<div class="empty-hint">Не удалось загрузить список экспертов</div>';
   }

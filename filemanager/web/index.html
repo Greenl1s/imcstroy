@@ -515,9 +515,16 @@
         </label>
       </div>
 
-      <div>
-        <span class="row-subtitle">Эксперты</span>
-        <div id="gpExpertsList" style="display:flex; flex-direction:column; gap:6px; margin-top:6px; max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;"></div>
+      <div class="picker" id="gpExpertsPicker">
+        <div class="picker-head">
+          <span class="row-subtitle">Эксперты</span>
+          <span class="picker-count" id="gpExpertsCount">Никого не выбрано</span>
+        </div>
+        <div class="picker-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" id="gpExpertSearch" placeholder="Поиск по фамилии" autocomplete="off">
+        </div>
+        <div id="gpExpertsList" class="picker-list"></div>
       </div>
 
       <div id="gpExpertsOrderBox" class="hidden">
