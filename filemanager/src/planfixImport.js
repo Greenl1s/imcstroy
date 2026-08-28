@@ -223,6 +223,19 @@ async function findCase(parsed) {
   return null;
 }
 
+/**
+ * Проект удалили в ИСУ, но в Planfix он остался. Молча заводить его
+ * заново нельзя — человек удалял осознанно; и молча игнорировать тоже
+ * нельзя. Поэтому пропускаем и пишем причину в отчёт: захочет вернуть —
+ * восстановит папку из корзины, и связь восстановится сама.
+ */
+function skipDeleted(existing, report) {
+  report.skipped.push({
+    name: existing.name,
+    why: "проект удалён в ИСУ — верните папку из корзины, если он нужен",
+  });
+}
+
 /** Переносит проекты. Возвращает отчёт, который потом видно в интерфейсе. */
 async function importProjects(report) {
   const { projects, fieldIds } = await planfix.listAllProjects();
@@ -280,6 +293,10 @@ async function importProjects(report) {
         known.push(await createFromPlanfix(parsed, report));
         continue;
       }
+      if (existing.deleted_at) {
+        skipDeleted(existing, report);
+        continue;
+      }
       known.push(await updateFromPlanfix(existing, parsed, report));
     } catch (err) {
       report.errors.push({ name: parsed.name || `#${parsed.planfixId}`, error: err.message });
@@ -291,7 +308,7 @@ async function importProjects(report) {
 /** Зеркалит задачи Planfix по проектам, которые уже есть в ИСУ. */
 async function importTasks(report) {
   const { rows: linked } = await db.query(
-    "SELECT id, planfix_id, name FROM cases WHERE planfix_id IS NOT NULL"
+    "SELECT id, planfix_id, name FROM cases WHERE planfix_id IS NOT NULL AND deleted_at IS NULL"
   );
   if (!linked.length) return;
 
@@ -330,7 +347,7 @@ async function importTasks(report) {
   }
 
   await db.query(
-    "UPDATE cases SET planfix_tasks_synced_at = now() WHERE planfix_id IS NOT NULL"
+    "UPDATE cases SET planfix_tasks_synced_at = now() WHERE planfix_id IS NOT NULL AND deleted_at IS NULL"
   );
 }
 

@@ -19,6 +19,7 @@ const gpGenerate = require("./gpGenerate");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
 const trash = require("./trash");
+const caseLifecycle = require("./caseLifecycle");
 const events = require("./events");
 const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
 
@@ -404,9 +405,10 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
     if (!caseId) {
       return res.status(400).json({ message: "Выберите проект, к которому относится ГП" });
     }
-    const { rows: caseRows } = await db.query("SELECT * FROM cases WHERE id = $1", [caseId]);
+    const { rows: caseRows } = await db.query(
+      "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
     if (!caseRows.length) {
-      return res.status(404).json({ message: "Проект не найден" });
+      return res.status(404).json({ message: "Проект не найден или удалён" });
     }
     const kase = caseRows[0];
     const gpOutputDir = `${kase.folder_path}/Планирование проекта/ГП`;
@@ -644,12 +646,23 @@ app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true
   try {
     await trash.moveToTrash(req.query.path, req.user.id);
     events.log(req.user, "delete", { path: req.query.path });
-    res.json({ ok: true });
+    // Удалили папку проекта — сам проект больше не должен предлагаться
+    // в выборе (ГП и прочее). Запись остаётся в журнале с отметкой.
+    const closed = await caseLifecycle.markDeletedByPath(req.query.path);
+    res.json({ ok: true, closedCases: closed });
+    if (closed.length) refreshJournalAfterCaseChange();
   } catch (err) {
     console.error("Не удалось переместить в корзину:", err);
     res.status(400).json({ message: "Не удалось удалить: " + err.message });
   }
 });
+
+/** Журнал — проекция базы, после смены состава проектов его пересобираем. */
+function refreshJournalAfterCaseChange() {
+  require("./journalExcel").regenerateJournal().catch((err) => {
+    console.error("Не удалось обновить журнал регистрации:", err.message);
+  });
+}
 
 /* ---------------- Корзина ---------------- */
 
@@ -667,7 +680,10 @@ app.post("/api/trash/:id/restore", auth.requireAuth, async (req, res) => {
   try {
     const result = await trash.restore(req.params.id, req.user);
     events.log(req.user, "restore", { path: result.path, name: result.name });
-    res.json({ ok: true, ...result });
+    // Папка вернулась — вернулся и проект.
+    const reopened = await caseLifecycle.unmarkDeletedByPath(result.path);
+    res.json({ ok: true, ...result, reopenedCases: reopened });
+    if (reopened.length) refreshJournalAfterCaseChange();
   } catch (err) {
     res.status(err.status || 400).json({ message: err.message });
   }
@@ -1140,6 +1156,17 @@ async function runTrashCleanup() {
     console.error("Не удалось очистить корзину:", err);
   }
 }
+// Проекты, чьи папки исчезли мимо интерфейса, помечаем удалёнными —
+// иначе они продолжают предлагаться в выборе.
+setTimeout(async () => {
+  try {
+    const lost = await caseLifecycle.markLostCases();
+    if (lost.length) console.log(`Проекты без папок помечены удалёнными: ${lost.join(", ")}`);
+  } catch (err) {
+    console.error("Не удалось сверить проекты с диском:", err.message);
+  }
+}, 20 * 1000).unref();
+
 setTimeout(runTrashCleanup, 30 * 1000).unref();
 setInterval(runTrashCleanup, 6 * 60 * 60 * 1000).unref();
 

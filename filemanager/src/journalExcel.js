@@ -93,6 +93,7 @@ async function regenerateJournal() {
     SELECT c.*, u.username AS manager_name
     FROM cases c
     LEFT JOIN users u ON u.id = c.manager_id
+    WHERE c.deleted_at IS NULL
     ORDER BY c.created_at ASC
   `);
 

@@ -86,7 +86,8 @@ async function requireWriteOnCaseFolder(req, res, next) {
 
 /** Достаёт проект по :id и кладёт в req.case — общее для нескольких роутов. */
 async function loadCase(req, res, next) {
-  const { rows } = await db.query("SELECT * FROM cases WHERE id = $1", [req.params.id]);
+  const { rows } = await db.query(
+    "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
   if (!rows.length) return res.status(404).json({ message: "Проект не найден" });
   req.case = rows[0];
   next();
@@ -109,10 +110,13 @@ function validateName(type, name) {
   return clean;
 }
 
+// Удалённые проекты (папку убрали в корзину) в списках не показываем:
+// запись остаётся в базе ради истории, но выбирать её больше нельзя.
 const CASE_LIST_QUERY = `
   SELECT c.*, u.username AS manager_name
   FROM cases c
   LEFT JOIN users u ON u.id = c.manager_id
+  WHERE c.deleted_at IS NULL
 `;
 
 /** Живой журнал регистрации — список всех проектов. */
@@ -130,7 +134,7 @@ cases.get("/", async (req, res) => {
 cases.get("/by-path", async (req, res) => {
   const path = String(req.query.path || "");
   if (!path) return res.status(400).json({ message: "Не указан путь" });
-  const { rows } = await db.query(`${CASE_LIST_QUERY} WHERE c.folder_path = $1`, [path]);
+  const { rows } = await db.query(`${CASE_LIST_QUERY} AND c.folder_path = $1`, [path]);
   if (!rows.length) return res.status(404).json({ message: "Не найдено" });
   res.json(rows[0]);
 });
@@ -281,7 +285,7 @@ cases.post("/:id/planfix-tasks", loadCase, requireWriteOnCaseFolder, async (req,
 });
 
 cases.get("/:id", loadCase, async (req, res) => {
-  const { rows } = await db.query(`${CASE_LIST_QUERY} WHERE c.id = $1`, [req.params.id]);
+  const { rows } = await db.query(`${CASE_LIST_QUERY} AND c.id = $1`, [req.params.id]);
   res.json(rows[0]);
 });
 
@@ -395,6 +399,36 @@ cases.post("/", async (req, res) => {
     const folderPath = await caseFolders.createCaseFolders({
       name: cleanName, stage, directAssignment: !!direct_assignment,
     });
+
+    // Проект с таким названием мог быть удалён раньше: его запись осталась
+    // ради истории. Тогда заводим не вторую строку, а оживляем прежнюю —
+    // иначе упрёмся в уникальность наименования и получим невнятный отказ.
+    const { rows: deletedTwin } = await db.query(
+      "SELECT id FROM cases WHERE name = $1 AND deleted_at IS NOT NULL", [cleanName]);
+    if (deletedTwin.length) {
+      const { rows: revived } = await db.query(
+        `UPDATE cases
+            SET deleted_at = NULL, type = $2, stage = $3, status = 'waiting', is_cancelled = false,
+                court_or_customer = $4, case_number = $5, manager_id = $6, experts = $7, year = $8,
+                description = $9, organization = $10, party1 = $11, party2 = $12, judge_name = $13,
+                folder_path = $14, updated_at = now()
+          WHERE id = $1 RETURNING *`,
+        [deletedTwin[0].id, type, stage, court_or_customer || null, case_number || null,
+         manager_id || null, experts || null, year || null, description || null,
+         organization || null, party1 || null, party2 || null, judge_name || null, folderPath]
+      );
+      const restored = revived[0];
+      await db.query(
+        `INSERT INTO case_history (case_id, action, to_stage, actor_id, note)
+         VALUES ($1, 'created', $2, $3, 'Проект заведён заново после удаления')`,
+        [restored.id, stage, req.user.id]
+      );
+      events.log(req.user, "case_create", { path: folderPath, name: cleanName, isDir: true, details: { stage } });
+      res.status(201).json(restored);
+      refreshJournalSafely();
+      syncPlanfixSafely(restored.id);
+      return;
+    }
 
     const { rows } = await db.query(
       `INSERT INTO cases
