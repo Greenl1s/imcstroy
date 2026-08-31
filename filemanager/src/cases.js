@@ -13,6 +13,7 @@ const aiExtract = require("./aiExtract");
 const caseChat = require("./caseChat");
 const auth = require("./auth");
 const journalExcel = require("./journalExcel");
+const courtCase = require("./courtCase");
 
 /**
  * Пересобирает журнал и никогда не мешает основной операции — если
@@ -123,7 +124,7 @@ const CASE_LIST_QUERY = `
 /** Живой журнал регистрации — список всех проектов. */
 cases.get("/", async (req, res) => {
   const { rows } = await db.query(`${CASE_LIST_QUERY} ORDER BY c.created_at DESC`);
-  res.json(rows);
+  res.json(courtCase.decorateCases(rows));
 });
 
 /**
@@ -137,7 +138,20 @@ cases.get("/by-path", async (req, res) => {
   if (!path) return res.status(400).json({ message: "Не указан путь" });
   const { rows } = await db.query(`${CASE_LIST_QUERY} AND c.folder_path = $1`, [path]);
   if (!rows.length) return res.status(404).json({ message: "Не найдено" });
-  res.json(rows[0]);
+  res.json(courtCase.decorateCase(rows[0]));
+});
+
+/**
+ * Разбор номера дела — для подсказки прямо во время набора в карточке.
+ *
+ * Отдельный маленький адрес нужен, чтобы правило «что считается номером
+ * арбитражного дела» жило в одном месте. Иначе такой же разбор пришлось
+ * бы повторить в браузере, и однажды две копии разошлись бы.
+ */
+cases.get("/court-number", (req, res) => {
+  const value = req.query.value;
+  const number = courtCase.normalizeCaseNumber(value);
+  res.json({ number, url: number ? courtCase.kadUrl(number) : null });
 });
 
 // Типовые задачи по стадиям — Приложение 1 рабочей инструкции.
@@ -1034,7 +1048,7 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
     path: req.case.folder_path, name: req.case.name, isDir: true,
   });
 
-  res.json(rows[0]);
+  res.json(courtCase.decorateCase(rows[0]));
   refreshJournalSafely();
   syncPlanfixSafely(req.params.id);
 });
