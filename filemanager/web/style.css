@@ -516,6 +516,19 @@ button.primary:hover { background: #2569c9; }
 .folder-up-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .folder-up-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
 
+/* «На главную» — рядом с заголовком папки, но прижата вправо, чтобы не
+   спорить с названием за внимание. */
+.home-btn {
+  margin-left: auto; flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-secondary);
+  font-size: var(--fs-meta); font-family: inherit; cursor: pointer;
+}
+.home-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.home-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); background: var(--accent-bg); }
+
 .breadcrumbs .crumb {
   cursor: pointer; padding: 2px 6px; border-radius: 6px;
   transition: background .12s ease, color .12s ease;
@@ -1519,11 +1532,16 @@ label.picker-item,
 /* Заголовок группы внутри списка папок ("Экспертизы", "Независимые
    исследования") — как разделение проектов в Планфиксе. */
 .row-group {
-  font-size: var(--fs-meta); font-weight: 700;
-  color: var(--text-secondary);
-  padding: 16px 8px 6px;
+  /* Заголовок должен читаться как заголовок, а не как мелкая подпись:
+     он делит длинный список надвое, и пропустить его нельзя. */
+  font-size: var(--fs-body); font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: .01em;
+  padding: 22px 8px 8px;
+  border-bottom: 1px solid var(--border-strong);
+  margin-bottom: 4px;
 }
-.row-group:first-child { padding-top: 4px; }
+.row-group:first-child { padding-top: 6px; }
 
 /* Задачи проекта */
 .case-tasks-body { padding: 4px 0 8px; }

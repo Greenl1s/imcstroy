@@ -426,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.2";
+const APP_BUILD = "2026-08-31.3";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -473,6 +473,9 @@ function applyPermissionsUI() {
   // Узлы проверяем: страница у пользователя может быть старее скрипта, и
   // тогда вход не должен падать целиком из-за одной кнопки.
   if (els.planfixSyncBtn) els.planfixSyncBtn.classList.toggle("hidden", rootOnlyAdmin);
+  // Очистка истории — тоже админское и необратимое.
+  const clearHistoryBtn = document.getElementById("historyClearBtn");
+  if (clearHistoryBtn) clearHistoryBtn.classList.toggle("hidden", rootOnlyAdmin);
   if (els.createCasesMenu) {
     els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
       .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
@@ -800,6 +803,26 @@ async function loadHistoryFilters() {
   }
   historyActorsLoaded = true;
 }
+
+/**
+ * Очистка истории целиком. Действие необратимое, поэтому спрашиваем
+ * подтверждение и говорим прямо, что вернуть будет нельзя.
+ */
+bind(document.getElementById("historyClearBtn"), "click", async (e) => {
+  const btn = e.currentTarget;
+  if (!confirm("Очистить всю историю?\n\nБудут удалены все записи о том, что происходило " +
+               "в системе, и опустеет раздел «Последние». Восстановить их будет нельзя.")) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/events/clear", { method: "POST" });
+    showToast(`История очищена: удалено записей ${res.removed}`);
+    loadHistory();
+  } catch (err) {
+    alert("Не удалось очистить историю: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 async function loadHistory() {
   els.historyList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
@@ -2668,7 +2691,8 @@ bind(document.getElementById("taskNewForm"), "submit", async (e) => {
       body: JSON.stringify({
         caseId,
         names: taskNewChosen,
-        description: document.getElementById("taskNewDescription").value.trim(),
+        // Описание при постановке не спрашиваем: название задачи говорит
+        // само за себя, а подробности пишут комментарием уже в карточке.
         deadline: document.getElementById("taskNewDeadline").value || null,
         assigneeIds: [...document.querySelectorAll("#taskNewAssigneesList input:checked")]
           .map((c) => Number(c.value)),
@@ -3780,6 +3804,16 @@ els.backBtn.addEventListener("click", () => {
     goToFolder(parent.path, parentTrail, true);
     return;
   }
+  goToColumns(true);
+});
+
+// «На главную» — сразу к колонкам, минуя все промежуточные папки.
+bind(document.getElementById("folderHomeBtn"), "click", () => goToColumns(true));
+
+// Стрелка «назад» на странице задач: она открывается из колонки «Дела»,
+// туда же и возвращает.
+bind(document.getElementById("tasksBackBtn"), "click", () => {
+  showSection("files", true);
   goToColumns(true);
 });
 
