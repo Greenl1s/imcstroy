@@ -994,6 +994,25 @@ app.get("/api/events", auth.requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * Полная очистка истории. Только для администратора и только целиком —
+ * выборочно стирать записи нельзя намеренно: история для того и нужна,
+ * чтобы по ней можно было что-то восстановить, а «подчищенная» история
+ * хуже, чем никакой.
+ *
+ * Раздел «Последние» строится на тех же записях, поэтому опустеет и он.
+ */
+app.post("/api/events/clear", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const { rowCount } = await db.query("DELETE FROM fm_events");
+    console.log(`История очищена пользователем ${req.user.username}: удалено записей ${rowCount}`);
+    res.json({ ok: true, removed: rowCount });
+  } catch (err) {
+    console.error("Не удалось очистить историю:", err);
+    res.status(500).json({ message: "Не удалось очистить историю: " + err.message });
+  }
+});
+
 app.get("/api/events/actors", auth.requireAuth, async (req, res) => {
   try {
     res.json({ actors: await events.listActors() });
