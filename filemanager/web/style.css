@@ -1421,6 +1421,67 @@ label.picker-item,
   font-family: inherit; font-size: var(--fs-body);
 }
 
+/* ===== Поле «Задача»: ввод со всплывающим списком ===== */
+/* Запертое поле должно выглядеть запертым, иначе человек будет в него
+   тыкать и думать, что интерфейс сломан. */
+.modal-panel select:disabled {
+  background: var(--bg-subtle); color: var(--text-secondary);
+  cursor: not-allowed; opacity: 1;
+}
+
+.combo-row { display: flex; gap: 8px; align-items: stretch; }
+.combo-row .combo { flex: 1 1 auto; min-width: 0; }
+.combo-row .upload-btn { flex: 0 0 auto; white-space: nowrap; }
+.combo { position: relative; display: flex; align-items: center; }
+.combo input { width: 100%; padding-right: 36px; }
+.combo-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: 0; background: none; color: var(--text-muted); cursor: pointer;
+}
+.combo-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.combo-toggle:hover { color: var(--text-primary); }
+
+.combo-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  max-height: 240px; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  /* Тень со смещением вниз, а не размытым ореолом по кругу: список
+     висит НАД полем, и он должен читаться как приподнятый слой. */
+  box-shadow: 0 6px 12px -4px rgba(0, 0, 0, .18);
+  padding: 4px;
+}
+.combo-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 8px 10px; border: 0; border-radius: 7px;
+  background: none; color: var(--text-primary); text-align: left;
+  font-family: inherit; font-size: var(--fs-body); cursor: pointer;
+}
+.combo-item:hover { background: var(--bg-subtle); }
+.combo-item.picked { color: var(--text-muted); }
+.combo-picked { font-size: var(--fs-meta); color: var(--accent-on-tint); }
+.combo-empty { padding: 12px 10px; color: var(--text-muted); font-size: var(--fs-meta); }
+
+/* Уже отмеченные к постановке задачи */
+.chosen-tasks { display: flex; flex-wrap: wrap; gap: 8px; }
+.chosen-tasks:empty { display: none; }
+.chosen-task {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 12px; border-radius: 999px;
+  background: var(--accent-bg); color: var(--accent-on-tint);
+  font-size: var(--fs-meta);
+}
+.chosen-task-remove {
+  border: 0; background: none; color: inherit; cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 2px 4px; opacity: .7;
+}
+.chosen-task-remove:hover { opacity: 1; }
+
+/* Список типовых задач стадии в папке проекта */
+.stage-task-list { margin: 6px 0 0; padding-left: 20px; }
+.stage-task-list li { font-size: var(--fs-body); padding: 2px 0; }
+
 /* Таблица привязок аккаунтов к сотрудникам Planfix */
 .pf-bindings select { width: 100%; max-width: 280px; }
 .pf-bindings td { vertical-align: middle; }

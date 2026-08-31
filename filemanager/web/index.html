@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-08-31.1">
+<meta name="build" content="2026-08-31.2">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -206,19 +206,18 @@
           </form>
         </div>
       </div>
+      <!-- Задачи проекта прямо в его папке. Окно постановки — то же
+           самое, что на странице «Задачи»: один список задач, одна
+           форма, разница только в том, что проект здесь уже выбран. -->
       <div id="planfixTasksBox" class="case-chat-box hidden">
         <div class="case-chat-header" id="planfixTasksToggle">
           <span>📋 Задачи Planfix для текущей стадии</span>
           <span id="planfixTasksArrow">▾</span>
         </div>
         <div id="planfixTasksBody" class="hidden" style="padding:12px 14px;">
-          <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:10px;"></div>
-          <div style="display:flex; gap:8px; margin-top:10px;">
-            <input type="text" id="planfixCustomTaskInput" placeholder="Своя задача, которой нет в списке" style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); font-size:14px;">
-            <button type="button" class="secondary" id="planfixCustomTaskAddBtn">+ Добавить</button>
-          </div>
+          <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:8px;"></div>
           <p id="planfixTasksError" class="error-text" style="margin-top:8px;"></p>
-          <button type="button" class="primary" id="planfixTasksCreateBtn" style="margin-top:10px;">Создать в Planfix</button>
+          <button type="button" class="primary" id="planfixTasksCreateBtn" style="margin-top:10px;">Поставить задачу</button>
         </div>
       </div>
       <div class="folder-actions" id="folderActions">
@@ -359,11 +358,32 @@
             </select>
           </label>
         </div>
+        <!-- Когда окно открыто из папки проекта, проект уже известен и
+             менять его здесь нельзя — иначе задача уедет не туда. -->
+        <p class="row-subtitle hidden" id="taskNewCaseLocked" style="margin:-8px 0 0;"></p>
+        <!-- Задача: выбор из списка типовых задач текущей стадии проекта
+             плюс возможность вписать свою (она сохранится в тот же список). -->
         <div class="add-user-row">
-          <label style="flex:1 1 100%;">Что надо сделать
-            <input type="text" id="taskNewName" required maxlength="255" placeholder="Название задачи">
+          <label style="flex:1 1 100%;">Задача
+            <!-- Кнопка «в список» стоит рядом, а не под полем: выпадающий
+                 список раскрывается вниз и накрыл бы её собой. -->
+            <div class="combo-row">
+              <div class="combo" id="taskNewNameCombo">
+                <input type="text" id="taskNewName" maxlength="255" autocomplete="off"
+                       placeholder="Выберите из списка или впишите свою">
+                <button type="button" class="combo-toggle" id="taskNewNameToggle" aria-label="Показать список">
+                  <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="combo-list hidden" id="taskNewNameList"></div>
+              </div>
+              <button type="button" class="upload-btn" id="taskNewNameAdd">+ В список</button>
+            </div>
           </label>
         </div>
+        <div class="add-user-row" style="margin-top:-8px;">
+          <span class="row-subtitle" id="taskNewStageHint"></span>
+        </div>
+        <div id="taskNewChosen" class="chosen-tasks"></div>
         <div class="add-user-row">
           <label style="flex:1 1 100%;">Описание
             <textarea id="taskNewDescription" rows="3" placeholder="Необязательно" style="resize:vertical; font-family:inherit; font-size:inherit; padding:8px 10px; border:1px solid var(--border); border-radius:8px;"></textarea>
