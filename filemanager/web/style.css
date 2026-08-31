@@ -1434,6 +1434,20 @@ label.picker-item,
   font-family: inherit; font-size: var(--fs-body);
 }
 
+/* Ссылка на карточку дела в картотеке арбитражных дел */
+.kad-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 10px; padding: 3px 9px;
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  color: var(--accent-on-tint); text-decoration: none;
+  font-size: var(--fs-meta); font-weight: 500;
+  vertical-align: middle;
+}
+.kad-link svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kad-link:hover { border-color: var(--accent); background: var(--accent-bg); }
+.kad-link.inline { margin-left: 0; padding: 0; border: 0; text-decoration: underline; }
+.kad-link.inline:hover { background: none; }
+
 /* ===== Поле «Задача»: ввод со всплывающим списком ===== */
 /* Запертое поле должно выглядеть запертым, иначе человек будет в него
    тыкать и думать, что интерфейс сломан. */

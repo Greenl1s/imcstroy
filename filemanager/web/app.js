@@ -426,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.4";
+const APP_BUILD = "2026-08-31.5";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -2013,8 +2013,19 @@ function renderCaseBanner(project) {
     actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
   }
 
+  // Ссылку в картотеку показываем только когда номер действительно
+  // похож на судебное дело: у половины проектов там номер договора,
+  // и ссылка на суд в этом случае вела бы в никуда.
+  const kad = project.kad_url
+    ? `<a class="kad-link" href="${escapeHtml(project.kad_url)}" target="_blank" rel="noopener noreferrer"
+          title="Открыть карточку дела в картотеке арбитражных дел">
+         <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
+         ${escapeHtml(project.court_case_number)}
+       </a>`
+    : "";
+
   banner.innerHTML = `
-    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong></div>
+    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong>${kad}</div>
     <div class="case-banner-actions">${actions.join("")}</div>
   `;
   banner.classList.remove("hidden");
@@ -3457,6 +3468,25 @@ function fillSelect(select, items, selected, emptyLabel) {
   select.value = selected == null ? "" : String(selected);
 }
 
+/**
+ * Подсказка под номером дела: ссылка в картотеку, если номер похож на
+ * судебное дело, и прямая фраза, если не похож. Молчать нельзя: иначе
+ * непонятно, ссылки нет потому, что номер не тот, или потому что
+ * что-то сломалось.
+ */
+function renderKadHint(kadUrl, caseNumber) {
+  const hint = document.getElementById("ceKadHint");
+  if (!hint) return;
+  if (kadUrl) {
+    hint.innerHTML = `Похоже на арбитражное дело ${escapeHtml(caseNumber)} — ` +
+      `<a class="kad-link inline" href="${escapeHtml(kadUrl)}" target="_blank" rel="noopener noreferrer">` +
+      "открыть в картотеке</a>";
+  } else {
+    hint.textContent = "Если сюда вписать номер арбитражного дела (например А40-183194/2015), " +
+      "рядом появится ссылка на его карточку в картотеке.";
+  }
+}
+
 async function openCaseEdit(project) {
   if (!caseEditOverlay) return;
   caseEditProject = project;
@@ -3481,6 +3511,8 @@ async function openCaseEdit(project) {
   document.getElementById("ceTypeHint").textContent =
     "Тип определяет, в какой группе проект показывается в списке. " +
     "Название папки при его смене не меняется.";
+
+  renderKadHint(project.kad_url, project.court_case_number);
 
   caseEditOverlay.classList.remove("hidden");
 
@@ -3512,6 +3544,19 @@ async function openCaseEdit(project) {
     fillSelect(orgSelect, [], project.organization, "Не выбрана");
   }
 }
+
+// Подсказку обновляем прямо при наборе номера: разбирает его сервер,
+// чтобы правило было одно на всё приложение.
+bind(document.getElementById("ceCaseNumber"), "input", debounce(async (e) => {
+  const value = e.target.value.trim();
+  if (!value) return renderKadHint(null, null);
+  try {
+    const res = await apiFetch(`/api/cases/court-number?value=${encodeURIComponent(value)}`);
+    renderKadHint(res.url, res.number);
+  } catch {
+    // Не смогли спросить — просто оставляем подсказку как есть.
+  }
+}, 400));
 
 bind(document.getElementById("caseEditForm"), "submit", async (e) => {
   e.preventDefault();
