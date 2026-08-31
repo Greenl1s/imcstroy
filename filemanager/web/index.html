@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-08-31.3">
+<meta name="build" content="2026-08-31.4">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -728,6 +728,10 @@
           <input type="text" id="pfCaseNumber">
         </label>
       </div>
+      <label>Вид экспертизы <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfExpertiseType" list="expertiseTypeList"
+               placeholder="Например: строительно-техническая">
+      </label>
       <div class="add-user-row">
         <label>Руководитель
           <select id="pfManager"></select>
@@ -787,6 +791,99 @@
       <p id="projectFormError" class="error-text"></p>
       <div class="modal-actions">
         <button class="primary" type="submit">Создать проект</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Виды экспертиз: подсказка для поля, а не жёсткий список — вписать
+     можно любой, потому что виды со временем добавляются. -->
+<datalist id="expertiseTypeList">
+  <option value="строительно-техническая"></option>
+  <option value="пожарно-техническая"></option>
+  <option value="землеустроительная"></option>
+  <option value="почерковедческая"></option>
+  <option value="оценочная"></option>
+  <option value="автотехническая"></option>
+  <option value="электротехническая"></option>
+</datalist>
+
+<!-- Правка карточки уже заведённого проекта. Отдельное окно, а не форма
+     создания: при создании заводится папка, здесь — только данные. -->
+<div id="caseEditOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:560px;">
+    <div class="modal-header">
+      <span id="caseEditHead">Карточка проекта</span>
+      <button class="back-btn" id="caseEditCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="caseEditForm" style="display:flex; flex-direction:column; gap:14px; margin-top:10px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <div class="add-user-row">
+        <label>Что это за проект
+          <select id="ceType">
+            <option value="expertise">Экспертизы</option>
+            <option value="research">Независимые исследования</option>
+            <option value="">Прочее (без типа)</option>
+          </select>
+        </label>
+        <label>Статус
+          <select id="ceStatus">
+            <option value="waiting">Ожидание</option>
+            <option value="in_progress">В работе</option>
+            <option value="problem">Проблема</option>
+          </select>
+        </label>
+      </div>
+      <p class="row-subtitle" id="ceTypeHint" style="margin:-8px 0 0;"></p>
+
+      <label>Вид экспертизы
+        <input type="text" id="ceExpertiseType" list="expertiseTypeList"
+               placeholder="Например: строительно-техническая">
+      </label>
+      <div class="add-user-row">
+        <label>Суд / заказчик
+          <input type="text" id="ceCourt">
+        </label>
+        <label>Номер дела/договора
+          <input type="text" id="ceCaseNumber">
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label>Руководитель
+          <select id="ceManager"></select>
+        </label>
+        <label>Год начала
+          <input type="number" id="ceYear">
+        </label>
+      </div>
+      <label>Структура (организация)
+        <select id="ceOrganization">
+          <option value="">Не выбрана</option>
+        </select>
+      </label>
+      <div class="add-user-row">
+        <label>Сторона 1
+          <input type="text" id="ceParty1">
+        </label>
+        <label>Сторона 2
+          <input type="text" id="ceParty2">
+        </label>
+      </div>
+      <label>Судья
+        <input type="text" id="ceJudgeName">
+      </label>
+      <label>Эксперты
+        <input type="text" id="ceExperts" placeholder="Через запятую">
+      </label>
+      <label>Описание
+        <input type="text" id="ceDescription">
+      </label>
+
+      <p id="caseEditError" class="error-text"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="caseEditSubmit">Сохранить</button>
       </div>
     </form>
   </div>

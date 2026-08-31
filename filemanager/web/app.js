@@ -426,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.3";
+const APP_BUILD = "2026-08-31.4";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -684,6 +684,7 @@ const EVENT_KINDS = {
   case_create: { label: "Новый проект",        tone: "new",   text: (e) => `создал проект ${b(e.target_name)}` },
   case_stage:  { label: "Смена стадии",        tone: "stage", text: (e) => `перевёл проект ${b(e.target_name)} на стадию ${stageChip(e.details)}` },
   case_cancel: { label: "Отмена проекта",      tone: "del",   text: (e) => `отменил проект ${b(e.target_name)}` },
+  case_edit:   { label: "Правка проекта",      tone: "stage", text: (e) => `изменил карточку проекта ${b(e.target_name)}` },
 };
 
 const STAGE_CLASS = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" };
@@ -2007,6 +2008,7 @@ function renderCaseBanner(project) {
       <button class="upload-btn" id="caseAdvanceBtn" type="button">Переместить</button>
     `);
   }
+  actions.push(`<button class="upload-btn" id="caseEditBtn" type="button">Редактировать</button>`);
   if (!project.is_cancelled) {
     actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
   }
@@ -2040,6 +2042,8 @@ function renderCaseBanner(project) {
       }
     });
   }
+
+  bind(document.getElementById("caseEditBtn"), "click", () => openCaseEdit(project));
 
   const cancelBtn = document.getElementById("caseCancelBtn");
   if (cancelBtn) {
@@ -3426,6 +3430,131 @@ async function openProjectForm() {
 
 els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
 
+/* ---- Правка карточки уже заведённого проекта ----
+   Отдельное окно от «Нового проекта»: при создании заводится папка и
+   структура, здесь же меняются только данные карточки. Стадия тут не
+   трогается — её меняет «Переместить», потому что это переезд папки. */
+
+const caseEditOverlay = document.getElementById("caseEditOverlay");
+let caseEditProject = null;
+
+function closeCaseEdit() {
+  if (caseEditOverlay) caseEditOverlay.classList.add("hidden");
+  caseEditProject = null;
+}
+bind(document.getElementById("caseEditCloseBtn"), "click", closeCaseEdit);
+bind(caseEditOverlay, "click", (e) => { if (e.target === caseEditOverlay) closeCaseEdit(); });
+
+/** Заполняет выпадающий список значениями и выбирает нужное. */
+function fillSelect(select, items, selected, emptyLabel) {
+  select.innerHTML = emptyLabel !== undefined ? `<option value="">${escapeHtml(emptyLabel)}</option>` : "";
+  for (const it of items) {
+    const opt = document.createElement("option");
+    opt.value = it.value;
+    opt.textContent = it.label;
+    select.appendChild(opt);
+  }
+  select.value = selected == null ? "" : String(selected);
+}
+
+async function openCaseEdit(project) {
+  if (!caseEditOverlay) return;
+  caseEditProject = project;
+  document.getElementById("caseEditError").textContent = "";
+  document.getElementById("caseEditHead").textContent = `Карточка проекта: ${project.name}`;
+
+  const set = (id, value) => { document.getElementById(id).value = value == null ? "" : String(value); };
+  document.getElementById("ceType").value = project.type || "";
+  set("ceStatus", project.status || "waiting");
+  set("ceExpertiseType", project.expertise_type);
+  set("ceCourt", project.court_or_customer);
+  set("ceCaseNumber", project.case_number);
+  set("ceYear", project.year);
+  set("ceParty1", project.party1);
+  set("ceParty2", project.party2);
+  set("ceJudgeName", project.judge_name);
+  set("ceExperts", project.experts);
+  set("ceDescription", project.description);
+
+  // Название папки не переименовываем — говорим об этом сразу, чтобы
+  // никто не ждал, что «ЭКСПЕРТИЗА НИЦ» станет «ЭКС.ЭКСПЕРТИЗА НИЦ».
+  document.getElementById("ceTypeHint").textContent =
+    "Тип определяет, в какой группе проект показывается в списке. " +
+    "Название папки при его смене не меняется.";
+
+  caseEditOverlay.classList.remove("hidden");
+
+  // Справочники грузим после показа окна: без них форма всё равно
+  // рабочая, а ждать их незачем.
+  const managerSelect = document.getElementById("ceManager");
+  const orgSelect = document.getElementById("ceOrganization");
+  try {
+    const { users } = await apiFetch("/api/users");
+    fillSelect(managerSelect, users.map((u) => ({ value: u.id, label: u.username })),
+      project.manager_id, "Не выбран");
+  } catch {
+    fillSelect(managerSelect, [], project.manager_id, "Не выбран");
+  }
+  try {
+    const orgs = await apiFetch("/api/organizations");
+    fillSelect(orgSelect, orgs.map((o) => ({ value: o.name, label: o.name })),
+      project.organization, "Не выбрана");
+    // Организации может не быть в справочнике (приехала из Planfix) —
+    // тогда добавляем её отдельным пунктом, чтобы не затереть молча.
+    if (project.organization && orgSelect.value !== project.organization) {
+      const opt = document.createElement("option");
+      opt.value = project.organization;
+      opt.textContent = project.organization + " (не из справочника)";
+      orgSelect.appendChild(opt);
+      orgSelect.value = project.organization;
+    }
+  } catch {
+    fillSelect(orgSelect, [], project.organization, "Не выбрана");
+  }
+}
+
+bind(document.getElementById("caseEditForm"), "submit", async (e) => {
+  e.preventDefault();
+  if (!caseEditProject) return;
+  const submit = document.getElementById("caseEditSubmit");
+  const errorEl = document.getElementById("caseEditError");
+  const val = (id) => document.getElementById(id).value.trim();
+
+  submit.disabled = true;
+  errorEl.textContent = "";
+  try {
+    const updated = await apiFetch(`/api/cases/${caseEditProject.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        type: document.getElementById("ceType").value || null,
+        status: document.getElementById("ceStatus").value,
+        expertise_type: val("ceExpertiseType") || null,
+        court_or_customer: val("ceCourt") || null,
+        case_number: val("ceCaseNumber") || null,
+        manager_id: document.getElementById("ceManager").value || null,
+        year: val("ceYear") || null,
+        organization: document.getElementById("ceOrganization").value || null,
+        party1: val("ceParty1") || null,
+        party2: val("ceParty2") || null,
+        judge_name: val("ceJudgeName") || null,
+        experts: val("ceExperts") || null,
+        description: val("ceDescription") || null,
+      }),
+    });
+    closeCaseEdit();
+    showToast("Карточка проекта сохранена");
+    // Баннер и список групп зависят от того, что мы только что изменили.
+    caseTypeByFolder = null;
+    renderCaseBanner(updated);
+    if (!els.folderView.classList.contains("hidden")) renderFolderRows();
+  } catch (err) {
+    submit.disabled = false;
+    errorEl.textContent = "Не удалось сохранить: " + err.message;
+  } finally {
+    submit.disabled = false;
+  }
+});
+
 /* ---- Управление списком организаций ("Структура") ---- */
 
 const orgManageOverlay = document.getElementById("orgManageOverlay");
@@ -3516,6 +3645,7 @@ els.projectForm.addEventListener("submit", async (event) => {
     direct_assignment: stage === "active",
     court_or_customer: document.getElementById("pfCourt").value.trim() || null,
     case_number: document.getElementById("pfCaseNumber").value.trim() || null,
+    expertise_type: document.getElementById("pfExpertiseType").value.trim() || null,
     manager_id: document.getElementById("pfManager").value || null,
     year: document.getElementById("pfYear").value || null,
     organization: document.getElementById("pfOrganization").value.trim() || null,
@@ -3599,6 +3729,9 @@ async function renderFolder(path) {
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   updateCaseBanner(path);
   try {
+    // В корне стадии список делится по типу проекта — значит типы нужны
+    // до отрисовки, иначе группы «прыгнут» уже после показа.
+    if (STAGE_ROOT_PATHS.includes(path)) await loadCaseTypes();
     const data = await apiFetch(`/api/resources?path=${encodeURIComponent(path)}`);
     currentFolderEntries = [
       ...(data.folders || []).map((f) => ({ ...f, isDir: true })),
@@ -3635,10 +3768,44 @@ const STAGE_ROOT_PATHS = [
 ];
 
 const PROJECT_GROUPS = [
-  { label: "Экспертизы", test: (name) => name.startsWith("ЭКС.") },
-  { label: "Независимые исследования", test: (name) => name.startsWith("НИ.") },
-  { label: "Прочее", test: () => true },
+  { type: "expertise", label: "Экспертизы", test: (name) => name.startsWith("ЭКС.") },
+  { type: "research", label: "Независимые исследования", test: (name) => name.startsWith("НИ.") },
+  { type: null, label: "Прочее", test: () => true },
 ];
+
+/**
+ * Тип проекта по пути его папки — из карточек, а не из названия папки.
+ *
+ * Раньше группа определялась только префиксом («ЭКС.», «НИ.»), и проект
+ * с названием вроде «ЭКСПЕРТИЗА НИЦ» падал в «Прочее», хотя это
+ * экспертиза. Теперь решает тип в карточке, а префикс остаётся запасным
+ * вариантом для папок, за которыми проекта нет вообще.
+ */
+let caseTypeByFolder = null;
+
+async function loadCaseTypes(force = false) {
+  if (caseTypeByFolder && !force) return caseTypeByFolder;
+  try {
+    const list = await apiFetch("/api/cases");
+    caseTypeByFolder = new Map(list.map((c) => [c.folder_path, c.type || null]));
+  } catch {
+    // Без карточек просто откатываемся на префиксы — список всё равно
+    // покажется, просто разложится как раньше.
+    caseTypeByFolder = new Map();
+  }
+  return caseTypeByFolder;
+}
+
+function groupIndexFor(entry) {
+  const known = caseTypeByFolder && caseTypeByFolder.has(entry.fullPath)
+    ? caseTypeByFolder.get(entry.fullPath)
+    : undefined;
+  if (known !== undefined) {
+    const byType = PROJECT_GROUPS.findIndex((g) => g.type === known);
+    if (byType >= 0) return byType;
+  }
+  return PROJECT_GROUPS.findIndex((g) => g.test(entry.name));
+}
 
 /**
  * Делит содержимое папки стадии на группы по типу проекта. Пустые группы
@@ -3653,8 +3820,7 @@ function groupProjectEntries(list, path) {
 
   const groups = PROJECT_GROUPS.map((g) => ({ label: g.label, items: [] }));
   for (const entry of dirs) {
-    const idx = PROJECT_GROUPS.findIndex((g) => g.test(entry.name));
-    groups[idx].items.push(entry);
+    groups[groupIndexFor(entry)].items.push(entry);
   }
   const filled = groups.filter((g) => g.items.length);
   // Один-единственный тип, да ещё и "Прочее" — заголовок ничего не
