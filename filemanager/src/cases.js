@@ -339,6 +339,24 @@ const TASKS_QUERY = `
    WHERE c.deleted_at IS NULL
 `;
 
+/**
+ * Проставляет каждой строке признак «мне можно её менять» — по правам на
+ * папку проекта. Правила читаем один раз на весь список, а не на каждую
+ * задачу отдельно.
+ */
+async function withWriteFlag(rows, user, folderOf) {
+  const me = user.planfix_user_id || null;
+  const decorate = (r, canWrite) => ({
+    ...r, mine: isAssignee(r, me), byMe: isAssigner(r, me), can_write: canWrite,
+  });
+
+  if (user.role === "admin") return rows.map((r) => decorate(r, true));
+  if (!user.can_cases) return rows.map((r) => decorate(r, false));
+
+  const rules = await folderAccess.getUserRules(user.id);
+  return rows.map((r) => decorate(r, folderAccess.resolveAccess(rules, folderOf(r)) === "write"));
+}
+
 /** Я исполнитель этой задачи? Сравниваем по id, а не по имени. */
 function isAssignee(task, planfixUserId) {
   if (!planfixUserId) return false;
@@ -387,7 +405,10 @@ cases.get("/tasks/all", async (req, res) => {
     // фильтру — иначе цифра прыгает вслед за фильтром и ничего не значит.
     const overdue = (t) => !t.is_done && t.end_date && new Date(t.end_date) < new Date();
     res.json({
-      tasks: list.map((t) => ({ ...t, mine: isAssignee(t, me), byMe: isAssigner(t, me) })).slice(0, 500),
+      // can_write считаем здесь, а не спрашиваем потом по одной задаче:
+      // без него интерфейс показывал бы кнопки, которые сервер всё равно
+      // отклонит, а это хуже, чем их отсутствие.
+      tasks: await withWriteFlag(list.slice(0, 500), req.user, (t) => t.folder_path),
       total: list.length,
       me: me ? { planfixUserId: me, name: req.user.planfix_name } : null,
       // Без привязки фильтр "Мои" работать не может — интерфейс покажет
@@ -690,6 +711,54 @@ cases.patch("/tasks/:id", async (req, res) => {
   } catch (err) {
     console.error("Не удалось изменить задачу:", err);
     res.status(502).json({ message: "Planfix не принял изменение задачи: " + err.message });
+  }
+});
+
+/**
+ * Удалить задачу — для случая «поставил не то».
+ *
+ * Порядок тот же, что у завершения: сначала Planfix, и только если он
+ * согласился — убираем у себя. Иначе получилось бы, что в ИСУ задачи
+ * нет, а в Planfix она висит и вернётся ближайшей синхронизацией.
+ *
+ * Восстановить удалённую задачу нельзя, поэтому запись об удалении
+ * остаётся и в журнале действий Planfix, и в общей истории: кто, когда
+ * и что именно убрал.
+ */
+cases.delete("/tasks/:id", async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, res);
+    if (!task) return;
+    if (!(await canWriteTask(req.user, task))) {
+      return res.status(403).json({ message: "Нет прав на удаление этой задачи" });
+    }
+
+    const actor = planfixPeople.actorOf(req.user);
+    try {
+      await planfixSync.deletePlanfixTask(task.planfix_id);
+    } catch (err) {
+      await planfixPeople.logAction({
+        user: req.user, actor, action: "delete", taskId: task.id,
+        planfixTaskId: task.planfix_id, caseId: task.case_id,
+        payload: { name: task.name }, ok: false, error: err.message,
+      });
+      throw err;
+    }
+
+    await db.query("DELETE FROM case_tasks WHERE id = $1", [task.id]);
+    await planfixPeople.logAction({
+      user: req.user, actor, action: "delete", taskId: task.id,
+      planfixTaskId: task.planfix_id, caseId: task.case_id,
+      payload: { name: task.name }, ok: true,
+    });
+    events.log(req.user, "task_deleted", {
+      path: task.folder_path, name: task.name, details: { case: task.case_name },
+    });
+
+    res.json({ ok: true, name: task.name });
+  } catch (err) {
+    console.error("Не удалось удалить задачу:", err);
+    res.status(502).json({ message: "Planfix не дал удалить задачу: " + err.message });
   }
 });
 

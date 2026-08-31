@@ -664,12 +664,46 @@ async function completeTask(taskId, statusId) {
   return true;
 }
 
+/**
+ * Удаляет задачу в Planfix — для случая «поставил не то».
+ *
+ * Адрес удаления в разных версиях Planfix отличается, поэтому пробуем
+ * известные варианты по очереди, как со списком комментариев. Порядок
+ * важен: сначала то, что удаляет одну конкретную задачу.
+ *
+ * Отдельно про безопасность повторов: пробовать следующий вариант можно
+ * только после ВНЯТНОГО отказа. Если связь оборвалась, задача могла
+ * удалиться, и повтор ничего не испортит, но и ошибку глотать нельзя —
+ * поэтому такая ошибка пробрасывается наружу как есть.
+ */
+const TASK_DELETE_ENDPOINTS = [
+  ["POST", (id) => `/task/${id}/delete`],
+  ["DELETE", (id) => `/task/${id}`],
+];
+
+async function deletePlanfixTask(taskId) {
+  const id = Number(taskId);
+  let lastError = null;
+  for (const [method, makePath] of TASK_DELETE_ENDPOINTS) {
+    try {
+      await planfixRequest(method, makePath(id), method === "POST" ? {} : undefined);
+      return true;
+    } catch (err) {
+      if (!err.planfixRefused) throw err;
+      lastError = err;
+    }
+  }
+  throw new Error(
+    "Planfix не дал удалить задачу: " + (lastError?.message || "неизвестная причина")
+  );
+}
+
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
-  peopleToIds, completeTask, fetchTask,
+  peopleToIds, completeTask, deletePlanfixTask, fetchTask,
   fetchFieldCatalogue, resolveFieldIds,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
