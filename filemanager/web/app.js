@@ -426,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.6";
+const APP_BUILD = "2026-08-31.7";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -685,6 +685,10 @@ const EVENT_KINDS = {
   case_stage:  { label: "Смена стадии",        tone: "stage", text: (e) => `перевёл проект ${b(e.target_name)} на стадию ${stageChip(e.details)}` },
   case_cancel: { label: "Отмена проекта",      tone: "del",   text: (e) => `отменил проект ${b(e.target_name)}` },
   case_edit:   { label: "Правка проекта",      tone: "stage", text: (e) => `изменил карточку проекта ${b(e.target_name)}` },
+  task_created:{ label: "Новая задача",        tone: "new",   text: (e) => `поставил задачу ${b(e.target_name)}` },
+  task_done:   { label: "Задача завершена",    tone: "add",   text: (e) => `завершил задачу ${b(e.target_name)}` },
+  task_changed:{ label: "Правка задачи",       tone: "stage", text: (e) => `изменил задачу ${b(e.target_name)}` },
+  task_deleted:{ label: "Задача удалена",      tone: "del",   text: (e) => `удалил задачу ${b(e.target_name)}` },
 };
 
 const STAGE_CLASS = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" };
@@ -2164,6 +2168,13 @@ function renderTasksPage(data) {
           t.is_done
             ? `<span class="task-done-mark">${svgCheck} завершена</span>`
             : `<button class="task-done-btn" type="button" data-complete="${t.id}">${svgCheck} Завершить</button>`
+        }${
+          // Удаление показываем только тем, кто может менять этот проект:
+          // кнопка, которую сервер всё равно отклонит, хуже, чем её нет.
+          t.can_write
+            ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
+                       title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
+            : ""
         }</td>
       </tr>`;
   }).join("");
@@ -2185,6 +2196,9 @@ function renderTasksPage(data) {
   body.querySelectorAll("[data-open-task]").forEach((cell) => {
     cell.style.cursor = "pointer";
     cell.addEventListener("click", () => openTaskCard(cell.dataset.openTask));
+  });
+  body.querySelectorAll("[data-delete-task]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteTask(btn.dataset.deleteTask, btn));
   });
   body.querySelectorAll("[data-open-case]").forEach((cell) => {
     cell.style.cursor = "pointer";
@@ -2223,6 +2237,29 @@ async function completeTask(id, btn) {
   } catch (err) {
     btn.disabled = false;
     alert("Не удалось завершить задачу: " + err.message);
+  }
+}
+
+/**
+ * Удаление задачи. Спрашиваем подтверждение и прямо говорим, что она
+ * пропадёт и в Planfix: вернуть её оттуда будет нельзя.
+ *
+ * onDone — что перерисовать после удаления: список задач или карточку
+ * проекта, смотря откуда удаляли.
+ */
+async function deleteTask(id, btn, onDone, knownName) {
+  const task = tasksCache.find((t) => String(t.id) === String(id));
+  const name = knownName || (task ? task.name : "эту задачу");
+  if (!confirm(`Удалить задачу «${name}»?\n\nОна будет удалена и в Planfix. Вернуть её будет нельзя.`)) return;
+  if (btn) btn.disabled = true;
+  try {
+    await apiFetch(`/api/cases/tasks/${id}`, { method: "DELETE" });
+    showToast("Задача удалена");
+    if (onDone) onDone();
+    else loadTasksPage();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    alert("Не удалось удалить задачу: " + err.message);
   }
 }
 
@@ -2336,7 +2373,8 @@ async function openTaskCard(id) {
           </div>
           <div class="picker-list" id="taskCardAssignees">${peopleRows}</div>
         </div>
-        <div class="modal-actions" style="margin-top:10px;">
+        <div class="modal-actions" style="margin-top:10px; justify-content:space-between;">
+          <button class="back-btn danger-outline" type="button" id="taskCardDelete">Удалить задачу</button>
           <button class="primary" type="button" id="taskCardSave">Сохранить в Planfix</button>
         </div>
       </section>` : ""}
@@ -2389,6 +2427,18 @@ async function openTaskCard(id) {
       alert("Не удалось изменить задачу: " + err.message);
     }
   });
+
+  bind(document.getElementById("taskCardDelete"), "click", (e) =>
+    deleteTask(id, e.currentTarget, () => {
+      closeTaskCard();
+      // Со страницы задач обновляем список, из папки проекта — её блок.
+      if (document.getElementById("tasksSection") &&
+          !document.getElementById("tasksSection").classList.contains("hidden")) {
+        loadTasksPage();
+      } else if (planfixTasksCurrentProject) {
+        loadCaseTasks(planfixTasksCurrentProject);
+      }
+    }));
 
   bind(document.getElementById("taskCardCommentSend"), "click", async (e) => {
     const btn = e.currentTarget;
@@ -2501,12 +2551,24 @@ function renderTaskNameList(filter = "") {
         : "Для этой стадии список пуст — впишите свою задачу"
     }</div>`;
   } else {
+    // Убирать пункты из общего справочника может только администратор:
+    // список общий для всех, и случайное удаление задело бы всех разом.
+    const canRemove = currentUser && currentUser.role === "admin";
+
     list.innerHTML = items.map((t) => {
       const picked = taskNewChosen.some((n) => n.toLowerCase() === t.name.toLowerCase());
-      return `<button type="button" class="combo-item${picked ? " picked" : ""}" data-name="${escapeHtml(t.name)}">
-        ${escapeHtml(t.name)}${picked ? '<span class="combo-picked">выбрана</span>' : ""}
-      </button>`;
+      return `<div class="combo-row-item">
+        <button type="button" class="combo-item${picked ? " picked" : ""}" data-name="${escapeHtml(t.name)}">
+          ${escapeHtml(t.name)}${picked ? '<span class="combo-picked">выбрана</span>' : ""}
+        </button>${
+          canRemove && t.id
+            ? `<button type="button" class="combo-del" data-remove-template="${t.id}"
+                       data-template-name="${escapeHtml(t.name)}"
+                       title="Убрать из списка стадии" aria-label="Убрать из списка">✕</button>`
+            : ""
+        }</div>`;
     }).join("");
+
     list.querySelectorAll("[data-name]").forEach((btn) =>
       btn.addEventListener("mousedown", (e) => {
         // mousedown, а не click: click срабатывает уже после blur поля,
@@ -2516,8 +2578,41 @@ function renderTaskNameList(filter = "") {
         document.getElementById("taskNewName").value = "";
         renderTaskNameList();
       }));
+
+    list.querySelectorAll("[data-remove-template]").forEach((btn) =>
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeTaskTemplate(btn.dataset.removeTemplate, btn.dataset.templateName);
+      }));
   }
   list.classList.remove("hidden");
+}
+
+/**
+ * Убирает задачу из справочника стадии.
+ *
+ * Это правка общего списка, а не удаление поставленной задачи: уже
+ * созданные в Planfix задачи с таким названием не трогаются. Говорим
+ * это прямо в подтверждении, иначе легко перепутать одно с другим.
+ */
+async function removeTaskTemplate(id, name) {
+  if (!confirm(`Убрать «${name}» из списка задач этой стадии?\n\n` +
+               "Уже поставленные задачи с таким названием останутся — удаляется только пункт списка.")) {
+    return;
+  }
+  try {
+    await apiFetch(`/api/cases/planfix/stage-tasks/${id}`, { method: "DELETE" });
+    taskNewTemplates = taskNewTemplates.filter((t) => String(t.id) !== String(id));
+    showToast("Убрано из списка стадии");
+    renderTaskNameList(document.getElementById("taskNewName").value);
+    const hint = document.getElementById("taskNewStageHint");
+    if (hint && taskNewStage) {
+      hint.textContent = `Список задач стадии «${STAGE_LABEL[taskNewStage] || taskNewStage}» — ${taskNewTemplates.length}`;
+    }
+  } catch (err) {
+    alert("Не удалось убрать из списка: " + err.message);
+  }
 }
 
 /** Тянет справочник задач той стадии, на которой стоит выбранный проект. */
@@ -3049,6 +3144,9 @@ function taskRowHtml(task) {
       <span class="task-name">${escapeHtml(task.name)}</span>
       <span class="task-who">${escapeHtml(task.assignees || "")}</span>
       <span class="task-due${overdue ? " task-overdue" : ""}">${escapeHtml(due)}</span>
+      <button class="task-del-btn" type="button" data-delete-task="${task.id}"
+              data-task-name="${escapeHtml(task.name)}"
+              title="Удалить задачу" aria-label="Удалить задачу">✕</button>
     </div>`;
 }
 
@@ -3087,6 +3185,11 @@ async function loadCaseTasks(project) {
     ${open.length ? `<div class="task-group">Сейчас в работе</div>${open.map(taskRowHtml).join("")}` : ""}
     ${done.length ? `<div class="task-group">Завершённые</div>${done.map(taskRowHtml).join("")}` : ""}
   `;
+
+  body.querySelectorAll("[data-delete-task]").forEach((btn) => {
+    btn.addEventListener("click", () =>
+      deleteTask(btn.dataset.deleteTask, btn, () => loadCaseTasks(project), btn.dataset.taskName));
+  });
 }
 
 bind(document.getElementById("caseTasksToggle"), "click", () => {

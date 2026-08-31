@@ -1361,7 +1361,9 @@ label.picker-item,
 .task-project-name { color: var(--accent-on-tint); }
 .task-date { font-variant-numeric: tabular-nums; white-space: nowrap; width: 108px; }
 .task-people { color: var(--text-secondary); font-size: var(--fs-meta); }
-.task-actions { width: 132px; text-align: right; }
+/* Кнопка завершения и крестик удаления должны помещаться в одну строку —
+   иначе крестик сползает под кнопку и выглядит как чужой элемент. */
+.task-actions { width: 170px; text-align: right; white-space: nowrap; }
 
 /* Просроченная строка целиком читается тревожно — как в Планфиксе. */
 .tasks-table tr.overdue .task-title,
@@ -1379,6 +1381,22 @@ label.picker-item,
 .task-done-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); background: var(--accent-bg); }
 .task-done-btn[disabled] { opacity: .5; pointer-events: none; }
 .task-done-mark { color: var(--success); font-size: var(--fs-meta); white-space: nowrap; }
+
+/* Удаление задачи. Держим приглушённым и рядом с остальными действиями:
+   это редкое действие «поставил не то», а не равноправное с завершением. */
+.task-del-btn {
+  width: 26px; height: 26px; margin-left: 6px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  vertical-align: middle;
+}
+.task-del-btn:hover { background: var(--bg-subtle); color: var(--danger); }
+.task-del-btn[disabled] { opacity: .5; pointer-events: none; }
+/* В строке задачи проекта крестик появляется при наведении на строку —
+   иначе он спорит за внимание со сроком и исполнителем. */
+.task-row .task-del-btn { opacity: 0; }
+.task-row:hover .task-del-btn,
+.task-row .task-del-btn:focus-visible { opacity: 1; }
 
 /* Название задачи открывает карточку — показываем это подчёркиванием
    при наведении, а не только курсором. */
@@ -1489,6 +1507,17 @@ label.picker-item,
   font-family: inherit; font-size: var(--fs-body); cursor: pointer;
 }
 .combo-item:hover { background: var(--bg-subtle); }
+/* Строка списка: сам пункт плюс крестик «убрать из справочника». */
+.combo-row-item { display: flex; align-items: center; }
+.combo-row-item:hover { background: var(--bg-subtle); border-radius: 7px; }
+.combo-row-item .combo-item { flex: 1 1 auto; min-width: 0; }
+.combo-row-item .combo-item:hover { background: none; }
+.combo-del {
+  flex: 0 0 auto; width: 26px; height: 26px; margin-right: 4px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+}
+.combo-del:hover { background: var(--danger-bg, var(--bg-page)); color: var(--danger); }
 .combo-item.picked { color: var(--text-muted); }
 .combo-picked { font-size: var(--fs-meta); color: var(--accent-on-tint); }
 .combo-empty { padding: 12px 10px; color: var(--text-muted); font-size: var(--fs-meta); }
