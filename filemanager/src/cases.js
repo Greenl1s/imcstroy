@@ -148,13 +148,16 @@ const PLANFIX_STAGES_WITH_TASKS = ["plan", "active", "control"];
 /** Список типовых задач для стадии — теперь из общего справочника, а не зашит в код. */
 cases.get("/planfix/stage-tasks/:stage", async (req, res) => {
   if (!PLANFIX_STAGES_WITH_TASKS.includes(req.params.stage)) {
-    return res.json({ tasks: [] });
+    // Для завершённых и отменённых проектов типовых задач не бывает.
+    // Говорим это отдельным полем, чтобы интерфейс не выдавал пустой
+    // список за «список пуст, добавьте задачу».
+    return res.json({ tasks: [], stage: req.params.stage, supported: false });
   }
   const { rows } = await db.query(
     "SELECT id, name FROM planfix_task_templates WHERE stage = $1 ORDER BY position, id",
     [req.params.stage]
   );
-  res.json({ tasks: rows });
+  res.json({ tasks: rows, stage: req.params.stage, supported: true });
 });
 
 /**
@@ -522,9 +525,14 @@ cases.get("/tasks/:id", async (req, res) => {
  * для этого проекта, чтобы человек увидел результат, а не пустоту.
  */
 cases.post("/tasks", async (req, res) => {
-  const name = String(req.body?.name || "").trim();
+  // Задач может быть сразу несколько: в папке проекта отмечают галочками
+  // весь список стадии и ставят их одним нажатием. Одна задача — частный
+  // случай того же самого.
+  const names = (Array.isArray(req.body?.names) ? req.body.names : [req.body?.name])
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
   const caseId = Number(req.body?.caseId || 0);
-  if (!name) return res.status(400).json({ message: "Не указано название задачи" });
+  if (!names.length) return res.status(400).json({ message: "Не указано ни одной задачи" });
   if (!caseId) return res.status(400).json({ message: "Не выбран проект" });
 
   try {
@@ -550,50 +558,58 @@ cases.post("/tasks", async (req, res) => {
       });
     }
 
-    let created;
-    try {
-      created = await planfixSync.createPlanfixTask({
-        name,
-        description: String(req.body?.description || ""),
-        projectId: kase.planfix_id,
-        assigneeIds: req.body?.assigneeIds || [],
-        deadlineIso: req.body?.deadline || null,
-        actor,
-      });
-    } catch (err) {
-      await planfixPeople.logAction({
-        user: req.user, actor, action: "create", caseId: kase.id,
-        payload: { name }, ok: false, error: err.message,
-      });
-      throw err;
+    // Каждую задачу отправляем отдельно и результат по каждой возвращаем
+    // свой: если Planfix споткнулся на третьей из пяти, первые две уже
+    // созданы, и делать вид, что не создалось ничего, — врать.
+    const results = [];
+    for (const name of names) {
+      try {
+        const created = await planfixSync.createPlanfixTask({
+          name,
+          description: String(req.body?.description || ""),
+          projectId: kase.planfix_id,
+          assigneeIds: req.body?.assigneeIds || [],
+          deadlineIso: req.body?.deadline || null,
+          actor,
+        });
+        await planfixPeople.logAction({
+          user: req.user, actor, action: "create", caseId: kase.id,
+          planfixTaskId: created.id, payload: { name, authorApplied: created.authorApplied }, ok: true,
+        });
+        events.log(req.user, "task_created", {
+          path: kase.folder_path, name, details: { case: kase.name },
+        });
+        try {
+          await planfixImport.importOneTask(created.id, kase.id);
+        } catch (err) {
+          // Не беда: задача приедет ближайшей синхронизацией, в Planfix
+          // она уже есть.
+          console.error("Задача создана, но не подтянулась сразу:", err.message);
+        }
+        results.push({
+          name, ok: true, planfixTaskId: created.id,
+          authorApplied: created.authorApplied, authorError: created.authorError,
+        });
+      } catch (err) {
+        await planfixPeople.logAction({
+          user: req.user, actor, action: "create", caseId: kase.id,
+          payload: { name }, ok: false, error: err.message,
+        });
+        results.push({ name, ok: false, error: err.message });
+      }
     }
 
-    await planfixPeople.logAction({
-      user: req.user, actor, action: "create", caseId: kase.id,
-      planfixTaskId: created.id, payload: { name, authorApplied: created.authorApplied }, ok: true,
-    });
-    events.log(req.user, "task_created", {
-      path: kase.folder_path, name, details: { case: kase.name },
-    });
-
-    // Подтягиваем к себе только что созданную задачу, чтобы она сразу
-    // появилась в списке. Если не вышло — не беда: она приедет ближайшей
-    // синхронизацией, и в Planfix она уже есть.
-    let synced = false;
-    try {
-      synced = await planfixImport.importOneTask(created.id, kase.id);
-    } catch (err) {
-      console.error("Задача создана, но не подтянулась сразу:", err.message);
-    }
-
-    res.json({
-      ok: true,
-      planfixTaskId: created.id,
-      synced,
+    const failed = results.filter((r) => !r.ok);
+    res.status(failed.length && failed.length === results.length ? 502 : 200).json({
+      ok: !failed.length,
+      results,
+      created: results.length - failed.length,
       // Если Planfix не дал назначить постановщика, интерфейс скажет об
       // этом честно: имя ушло подписью в описании, а не потерялось.
-      authorApplied: created.authorApplied,
-      authorError: created.authorError,
+      authorApplied: results.every((r) => !r.ok || r.authorApplied !== false),
+      message: failed.length
+        ? `Не удалось поставить: ${failed.map((f) => `«${f.name}» (${f.error})`).join("; ")}`
+        : undefined,
     });
   } catch (err) {
     console.error("Не удалось создать задачу:", err);
