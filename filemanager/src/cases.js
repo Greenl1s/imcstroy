@@ -869,7 +869,7 @@ cases.post("/", async (req, res) => {
     const {
       type, name, stage, direct_assignment,
       court_or_customer, case_number, manager_id, experts, year, description,
-      organization, party1, party2, judge_name,
+      organization, party1, party2, judge_name, expertise_type,
       batchId, fileAssignments,
     } = req.body || {};
 
@@ -896,11 +896,12 @@ cases.post("/", async (req, res) => {
             SET deleted_at = NULL, type = $2, stage = $3, status = 'waiting', is_cancelled = false,
                 court_or_customer = $4, case_number = $5, manager_id = $6, experts = $7, year = $8,
                 description = $9, organization = $10, party1 = $11, party2 = $12, judge_name = $13,
-                folder_path = $14, updated_at = now()
+                folder_path = $14, expertise_type = $15, updated_at = now()
           WHERE id = $1 RETURNING *`,
         [deletedTwin[0].id, type, stage, court_or_customer || null, case_number || null,
          manager_id || null, experts || null, year || null, description || null,
-         organization || null, party1 || null, party2 || null, judge_name || null, folderPath]
+         organization || null, party1 || null, party2 || null, judge_name || null, folderPath,
+         expertise_type || null]
       );
       const restored = revived[0];
       await db.query(
@@ -918,12 +919,13 @@ cases.post("/", async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO cases
          (type, name, stage, status, court_or_customer, case_number, manager_id, experts, year, description,
-          organization, party1, party2, judge_name, folder_path)
-       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          organization, party1, party2, judge_name, folder_path, expertise_type)
+       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [type, cleanName, stage, court_or_customer || null, case_number || null,
        manager_id || null, experts || null, year || null, description || null,
-       organization || null, party1 || null, party2 || null, judge_name || null, folderPath]
+       organization || null, party1 || null, party2 || null, judge_name || null, folderPath,
+       expertise_type || null]
     );
     const created = rows[0];
 
@@ -969,25 +971,69 @@ cases.post("/", async (req, res) => {
 });
 
 /** Обновить редактируемые поля карточки (без смены стадии). */
+/**
+ * Правка карточки проекта.
+ *
+ * Здесь можно менять и тип проекта (экспертиза / независимое
+ * исследование / без типа): у проектов, приехавших из Planfix, тип
+ * иногда не распознаётся по группе, и такой проект попадает в «Прочее».
+ * Исправлять это должно быть можно руками, не пересоздавая проект.
+ *
+ * Папку при смене типа НЕ переименовываем: имя папки — это то, как
+ * проект называют люди, и переименование увело бы за собой пути, права
+ * доступа и ссылки. Тип живёт в карточке, а список группируется по нему.
+ *
+ * Стадия здесь не меняется намеренно: её смена двигает папку, и для
+ * этого есть отдельное действие «Переместить» со своей записью в
+ * истории.
+ */
 cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
   const fields = [
     "court_or_customer", "case_number", "manager_id", "experts", "year", "description", "status",
-    "organization", "party1", "party2", "judge_name",
+    "organization", "party1", "party2", "judge_name", "expertise_type",
   ];
   const sets = [];
   const values = [req.params.id];
   for (const f of fields) {
     if (req.body?.[f] !== undefined) {
-      values.push(req.body[f]);
+      values.push(req.body[f] === "" ? null : req.body[f]);
       sets.push(`${f} = $${values.length}`);
     }
   }
+
+  if (req.body?.type !== undefined) {
+    // null — это «Прочее»: проект есть, но к экспертизам и НИ не относится.
+    const type = req.body.type === "" || req.body.type === null ? null : String(req.body.type);
+    if (type !== null && !["expertise", "research"].includes(type)) {
+      return res.status(400).json({ message: "Некорректный тип проекта" });
+    }
+    values.push(type);
+    sets.push(`type = $${values.length}`);
+  }
+
   if (!sets.length) return res.status(400).json({ message: "Нечего обновлять" });
 
   const { rows } = await db.query(
     `UPDATE cases SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`,
     values
   );
+
+  // Смена типа меняет то, в какой группе проект виден, — это стоит
+  // отдельной записи в истории проекта, чтобы потом было понятно, кто
+  // и когда его перенёс.
+  if (req.body?.type !== undefined && req.body.type !== req.case.type) {
+    const label = (t) => (t === "expertise" ? "Экспертизы" : t === "research" ? "Независимые исследования" : "Прочее");
+    await db.query(
+      `INSERT INTO case_history (case_id, action, actor_id, note)
+       VALUES ($1, 'edited', $2, $3)`,
+      [req.case.id, req.user.id, `Тип проекта: «${label(req.case.type)}» → «${label(rows[0].type)}»`]
+    );
+  }
+
+  events.log(req.user, "case_edit", {
+    path: req.case.folder_path, name: req.case.name, isDir: true,
+  });
+
   res.json(rows[0]);
   refreshJournalSafely();
   syncPlanfixSafely(req.params.id);
