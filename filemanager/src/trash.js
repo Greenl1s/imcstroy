@@ -5,6 +5,7 @@ const crypto = require("crypto");
 
 const db = require("./db");
 const files = require("./files");
+const caseLifecycle = require("./caseLifecycle");
 
 // Скрытая папка внутри хранилища. Имя начинается с точки — listDir такие
 // записи пропускает, поэтому в файловом менеджере корзина не видна как
@@ -172,7 +173,13 @@ async function restore(id, user) {
   return { path: newPath, name: finalName, renamed: finalName !== entry.name };
 }
 
-/** Окончательно стирает одну запись — вернуть уже нельзя. */
+/**
+ * Окончательно стирает одну запись — вернуть уже нельзя.
+ *
+ * Если это была папка проекта, вместе с ней навсегда уходят и его
+ * задачи: пока проект лежал в корзине, они были целы и вернулись бы
+ * вместе с ним, но после очистки возвращать уже нечему.
+ */
 async function purge(id, user) {
   const entry = await getEntry(id);
   if (!entry) throw Object.assign(new Error("Запись не найдена"), { status: 404 });
@@ -180,6 +187,27 @@ async function purge(id, user) {
 
   await fsp.rm(path.join(trashRootAbs(), entry.storage_key), { recursive: true, force: true });
   await db.query("DELETE FROM fm_trash WHERE id = $1", [id]);
+
+  // Задачи чистим после того, как файлы уже стёрты: если это упадёт,
+  // корзина всё равно останется в согласованном состоянии.
+  return purgeCaseTasksSafely(entry.original_path);
+}
+
+/**
+ * Удаление задач не должно мешать очистке корзины: файлы уже стёрты, и
+ * падение на этом шаге не должно превращаться в ошибку для человека.
+ */
+async function purgeCaseTasksSafely(originalPath) {
+  try {
+    const result = await caseLifecycle.purgeTasksByPath(normalizePath(originalPath));
+    if (result.tasks) {
+      console.log(`Вместе с проектами (${result.cases.join(", ")}) удалено задач: ${result.tasks}`);
+    }
+    return result;
+  } catch (err) {
+    console.error("Не удалось удалить задачи вместе с проектом:", err.message);
+    return { tasks: 0, cases: [] };
+  }
 }
 
 /** Очистка вручную: сотрудник чистит своё, администратор — всю корзину. */
@@ -196,13 +224,16 @@ async function empty(user) {
  */
 async function purgeExpired() {
   const { rows } = await db.query(
-    `SELECT id, storage_key FROM fm_trash
+    `SELECT id, storage_key, original_path FROM fm_trash
       WHERE deleted_at < now() - ($1::int * INTERVAL '1 day')`,
     [RETENTION_DAYS]
   );
   for (const row of rows) {
     await fsp.rm(path.join(trashRootAbs(), row.storage_key), { recursive: true, force: true });
     await db.query("DELETE FROM fm_trash WHERE id = $1", [row.id]);
+    // Срок хранения истёк — это то же окончательное удаление, что и
+    // очистка корзины руками, значит и задачи уходят так же.
+    await purgeCaseTasksSafely(row.original_path);
   }
 
   let orphans = 0;

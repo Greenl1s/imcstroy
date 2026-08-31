@@ -71,4 +71,52 @@ async function markLostCases() {
   return lost.map((k) => k.name);
 }
 
-module.exports = { markDeletedByPath, unmarkDeletedByPath, markLostCases, isInside };
+/**
+ * Проект стёрли из корзины окончательно — вместе с ним навсегда уходят
+ * и его задачи.
+ *
+ * Пока проект лежит в корзине, задачи никуда не деваются: они просто не
+ * показываются (везде, где они читаются, стоит условие «проект не
+ * удалён»), и возвращаются вместе с проектом. А вот очистка корзины —
+ * действие необратимое по своей сути, и держать после него осиротевшие
+ * задачи незачем: проекта, к которому они относились, больше нет.
+ *
+ * Саму запись проекта не стираем: на неё ссылается история стадий и
+ * журнал регистрации. Она и так скрыта отовсюду отметкой deleted_at.
+ *
+ * Возвращает, сколько задач удалено и по каким проектам.
+ */
+async function purgeTasksByPath(purgedPath) {
+  const clean = String(purgedPath || "").replace(/\/+$/, "");
+  if (!clean) return { tasks: 0, cases: [] };
+
+  const { rows: affected } = await db.query(
+    `SELECT id, name FROM cases
+      WHERE folder_path = $1 OR folder_path LIKE $2`,
+    [clean, clean + "/%"]
+  );
+  if (!affected.length) return { tasks: 0, cases: [] };
+
+  const ids = affected.map((c) => c.id);
+  const { rows: removed } = await db.query(
+    "DELETE FROM case_tasks WHERE case_id = ANY($1::int[]) RETURNING case_id", [ids]);
+
+  // Отметку о том, когда задачи стёрли, ставим на сам проект: иначе
+  // потом не отличить «задач не было» от «задачи удалили вместе с ним».
+  await db.query(
+    "UPDATE cases SET tasks_purged_at = now(), updated_at = now() WHERE id = ANY($1::int[])",
+    [ids]
+  );
+
+  // В отчёт попадают только те проекты, у которых задачи действительно
+  // были: иначе в логе окажутся проекты, у которых удалять было нечего.
+  const withTasks = new Set(removed.map((r) => Number(r.case_id)));
+  return {
+    tasks: removed.length,
+    cases: affected.filter((c) => withTasks.has(Number(c.id))).map((c) => c.name),
+  };
+}
+
+module.exports = {
+  markDeletedByPath, unmarkDeletedByPath, markLostCases, purgeTasksByPath, isInside,
+};
