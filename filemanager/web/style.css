@@ -1287,12 +1287,18 @@ button.primary:hover { background: #2569c9; }
   width: 16px; height: 16px; fill: none; stroke: var(--text-muted);
   stroke-width: 1.8; stroke-linecap: round; pointer-events: none;
 }
+/* Оба селектора нарочно: внутри формы действует общее правило
+   ".modal-panel form label { flex-direction: column }", и перебить его
+   можно только такой же длинной цепочкой. Вне формы (карточка задачи)
+   работает короткий селектор. */
+.picker-search input[type="search"],
 .modal-panel form .picker-search input[type="search"] {
   width: 100%; min-height: 38px; padding: 0 10px 0 32px;
   border: 1px solid var(--border-strong); border-radius: 8px;
   background: var(--bg-card); color: var(--text-primary);
   font-size: var(--fs-body); font-family: inherit;
 }
+.picker-search input[type="search"]:focus,
 .modal-panel form .picker-search input[type="search"]:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg);
 }
@@ -1305,6 +1311,7 @@ button.primary:hover { background: #2569c9; }
 
 /* Строка выбора: галочка слева, имя рядом — на всю ширину, чтобы попадать
    кликом куда угодно, а не в саму галочку. */
+label.picker-item,
 .modal-panel form label.picker-item {
   display: flex; flex-direction: row; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: 7px;
@@ -1356,6 +1363,67 @@ button.primary:hover { background: #2569c9; }
 .task-done-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); background: var(--accent-bg); }
 .task-done-btn[disabled] { opacity: .5; pointer-events: none; }
 .task-done-mark { color: var(--success); font-size: var(--fs-meta); white-space: nowrap; }
+
+/* Название задачи открывает карточку — показываем это подчёркиванием
+   при наведении, а не только курсором. */
+.tasks-table .task-title[data-open-task]:hover { text-decoration: underline; }
+
+/* Предупреждение о том, что аккаунт не связан с сотрудником Planfix.
+   Стоит над таблицей: без связи половина фильтров бессмысленна. */
+.task-banner {
+  margin: 0 0 12px; padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle); color: var(--text-secondary);
+  font-size: var(--fs-meta); line-height: 1.45;
+}
+/* Метка сообщает "нужно внимание" цветом слова, а не полосой сбоку:
+   полоска на скруглённом блоке выглядит наклейкой. */
+.task-banner::before {
+  content: "Нужна настройка. ";
+  color: var(--warning); font-weight: 600;
+}
+
+/* ===== Карточка задачи ===== */
+.task-card-title { margin: 4px 0 6px; font-size: var(--fs-lead); font-weight: 600; }
+.task-card-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  font-size: var(--fs-meta); color: var(--text-muted); margin-bottom: 10px;
+}
+.task-card-project { color: var(--accent-on-tint); }
+.task-card-project:hover { text-decoration: underline; }
+.task-card-desc {
+  margin: 0 0 12px; white-space: pre-wrap;
+  font-size: var(--fs-body); color: var(--text-secondary);
+}
+
+.task-card-facts {
+  display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px;
+  margin: 0 0 4px; font-size: var(--fs-body);
+}
+.task-card-facts dt { color: var(--text-muted); font-size: var(--fs-meta); }
+.task-card-facts dd { margin: 0; }
+
+.task-card-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.task-card-block h4 { margin: 0 0 10px; font-size: var(--fs-body); font-weight: 600; }
+.task-card-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
+.task-card-field input { max-width: 200px; }
+
+.task-comment { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.task-comment:last-child { border-bottom: 0; }
+.task-comment-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 2px; }
+.task-comment-author { font-weight: 500; font-size: var(--fs-meta); }
+.task-comment-date { color: var(--text-muted); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.task-comment-text { font-size: var(--fs-body); white-space: pre-wrap; }
+.task-comment-input {
+  width: 100%; margin-top: 10px; padding: 8px 10px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: inherit; font-size: var(--fs-body);
+}
+
+/* Таблица привязок аккаунтов к сотрудникам Planfix */
+.pf-bindings select { width: 100%; max-width: 280px; }
+.pf-bindings td { vertical-align: middle; }
 
 /* Диагностика и отчёт сверки с Planfix */
 .planfix-result { margin-top: 6px; max-height: 52vh; overflow-y: auto; }

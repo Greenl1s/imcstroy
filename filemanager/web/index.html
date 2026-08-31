@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-08-28.4">
+<meta name="build" content="2026-08-31.1">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -305,9 +305,14 @@
         <p class="page-sub" id="tasksSummary">Задачи по проектам из Planfix</p>
       </div>
       <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <button class="create-btn" type="button" id="tasksNewBtn" style="height:34px;">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Новая задача</span>
+        </button>
         <div class="seg" id="tasksScope">
           <button class="seg-btn active" type="button" data-scope="all">Все</button>
           <button class="seg-btn" type="button" data-scope="mine">Мои</button>
+          <button class="seg-btn" type="button" data-scope="assigned">Я поставил</button>
         </div>
         <div class="seg" id="tasksState">
           <button class="seg-btn active" type="button" data-state="open">Текущие</button>
@@ -315,10 +320,101 @@
         </div>
       </div>
     </div>
+    <div class="task-banner hidden" id="tasksBanner"></div>
     <div class="folder-toolbar">
       <input type="text" id="tasksSearch" placeholder="Поиск по задаче или проекту">
     </div>
     <div class="folder-body" id="tasksBody"></div>
+  </div>
+
+  <!-- Карточка задачи: подробности, комментарии, смена исполнителей и срока. -->
+  <div id="taskCardOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:720px;">
+      <div class="modal-header">
+        <span id="taskCardHead">Задача</span>
+        <button class="back-btn" id="taskCardClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <div id="taskCardBody" style="max-height:70vh; overflow-y:auto; padding-right:4px;"></div>
+    </div>
+  </div>
+
+  <!-- Новая задача: уходит в Planfix, постановщиком становится текущий пользователь. -->
+  <div id="taskNewOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:640px;">
+      <div class="modal-header">
+        <span>Новая задача</span>
+        <button class="back-btn" id="taskNewClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <form id="taskNewForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+        <div class="add-user-row">
+          <label style="flex:1 1 100%;">Проект
+            <select id="taskNewCase" required>
+              <option value="">Выберите проект…</option>
+            </select>
+          </label>
+        </div>
+        <div class="add-user-row">
+          <label style="flex:1 1 100%;">Что надо сделать
+            <input type="text" id="taskNewName" required maxlength="255" placeholder="Название задачи">
+          </label>
+        </div>
+        <div class="add-user-row">
+          <label style="flex:1 1 100%;">Описание
+            <textarea id="taskNewDescription" rows="3" placeholder="Необязательно" style="resize:vertical; font-family:inherit; font-size:inherit; padding:8px 10px; border:1px solid var(--border); border-radius:8px;"></textarea>
+          </label>
+        </div>
+        <div class="add-user-row">
+          <label>Срок
+            <input type="date" id="taskNewDeadline">
+          </label>
+        </div>
+
+        <div class="picker" id="taskNewAssigneesPicker">
+          <div class="picker-head">
+            <span class="row-subtitle">Исполнители</span>
+            <span class="picker-count" id="taskNewAssigneesCount">Никого не выбрано</span>
+          </div>
+          <div class="picker-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="taskNewAssigneesSearch" placeholder="Поиск сотрудника" autocomplete="off">
+          </div>
+          <div id="taskNewAssigneesList" class="picker-list"></div>
+        </div>
+
+        <p class="row-subtitle" id="taskNewHint" style="margin:0;"></p>
+        <div class="modal-actions">
+          <button class="primary" type="submit" id="taskNewSubmit">Поставить задачу</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Администрирование: кто из пользователей ИСУ кем является в Planfix. -->
+  <div id="pfPeopleOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:760px;">
+      <div class="modal-header">
+        <span>Сотрудники Planfix</span>
+        <button class="back-btn" id="pfPeopleClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <p class="row-subtitle">
+        Связь нужна, чтобы в Planfix было видно, кто именно поставил задачу или написал
+        комментарий, и чтобы у человека работал фильтр «Мои задачи».
+      </p>
+      <div style="display:flex; gap:8px; margin:12px 0 4px; align-items:center; flex-wrap:wrap;">
+        <button class="upload-btn" id="pfPeopleSyncBtn" type="button">Обновить список из Planfix</button>
+        <span class="row-subtitle" id="pfPeopleSynced"></span>
+      </div>
+      <div id="pfPeopleBody" style="max-height:60vh; overflow-y:auto;"></div>
+    </div>
   </div>
 
   <div class="folder-view section hidden" id="historySection" data-view="history">
@@ -710,6 +806,7 @@
 
     <div style="display:flex; gap:8px; margin:12px 0 4px; flex-wrap:wrap;">
       <button class="upload-btn" id="planfixProbeBtn" type="button">Проверить связь</button>
+      <button class="upload-btn" id="planfixPeopleBtn" type="button">Сотрудники и связь</button>
       <button class="create-btn" id="planfixRunBtn" type="button" style="height:34px;">
         <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
         <span>Перенести проекты и задачи</span>

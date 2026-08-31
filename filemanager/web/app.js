@@ -366,8 +366,11 @@ let pendingDeepLink = (() => {
   return { path, sel: pickerParams.get("sel") || "" };
 })();
 
-// ?section=recent|trash|history — открыть сразу нужный раздел панели.
-const SECTIONS = ["files", "recent", "trash", "history"];
+// ?section=recent|trash|history|tasks — открыть сразу нужный раздел.
+// "tasks" здесь обязателен: страница задач сама пишет ?section=tasks в
+// адрес, и без этого перезагрузка (или ссылка, отправленная коллеге)
+// возвращала бы на файлы.
+const SECTIONS = ["files", "recent", "trash", "history", "tasks"];
 let pendingSection = (() => {
   if (PICKER_MODE) return null;
   const name = pickerParams.get("section");
@@ -423,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-28.4";
+const APP_BUILD = "2026-08-31.1";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -2044,7 +2047,21 @@ function renderCaseBanner(project) {
 
 const tasksFilters = { scope: "all", state: "open", q: "" };
 let tasksCache = [];
-let tasksPeople = [];
+// Справочник сотрудников Planfix — из него выбирают исполнителей.
+// Держим один на всю страницу: он меняется редко.
+let planfixPeopleCache = null;
+
+async function loadPlanfixPeople(force = false) {
+  if (planfixPeopleCache && !force) return planfixPeopleCache;
+  const data = await apiFetch("/api/cases/planfix/people");
+  planfixPeopleCache = data.people || [];
+  return planfixPeopleCache;
+}
+
+function planfixPersonName(id) {
+  const hit = (planfixPeopleCache || []).find((p) => Number(p.id) === Number(id));
+  return hit ? hit.name : null;
+}
 
 function taskDateCell(value) {
   const text = value ? formatWhen(new Date(value).getTime()).split(" ")[0] : "";
@@ -2066,9 +2083,25 @@ function renderTasksPage(data) {
     badge.classList.toggle("hidden", !counts.open);
   }
 
+  // Без связи с сотрудником Planfix «Мои» и «Я поставил» показать нечего,
+  // и создать задачу от своего имени тоже нельзя. Говорим об этом прямо,
+  // а не отдаём пустой список без объяснений.
+  const banner = document.getElementById("tasksBanner");
+  if (banner) {
+    banner.classList.toggle("hidden", !data.needsBinding);
+    if (data.needsBinding) {
+      banner.textContent = "Ваш аккаунт не связан с сотрудником Planfix — не работают «Мои задачи» " +
+        "и постановка задач от вашего имени. Попросите администратора настроить связь: " +
+        "Дела → Planfix → «Сотрудники и связь».";
+    }
+  }
+
   if (!data.tasks.length) {
     body.innerHTML = `<div class="empty-hint" style="padding:24px;">${
       tasksFilters.q ? "Ничего не нашли" :
+      data.needsBinding && tasksFilters.scope !== "all" ? "Сначала нужна связь с сотрудником Planfix" :
+      tasksFilters.scope === "mine" ? "На вас сейчас ничего не назначено" :
+      tasksFilters.scope === "assigned" ? "Вы пока не ставили задач" :
       tasksFilters.state === "done" ? "Завершённых задач пока нет" :
       "Открытых задач нет — всё сделано"
     }</div>`;
@@ -2081,7 +2114,7 @@ function renderTasksPage(data) {
     return `
       <tr class="${t.is_done ? "is-done" : ""}${overdue ? " overdue" : ""}" data-task-id="${t.id}">
         <td class="task-num">${t.planfix_id}</td>
-        <td class="task-title">${escapeHtml(t.name)}</td>
+        <td class="task-title" data-open-task="${t.id}">${escapeHtml(t.name)}</td>
         <td>
           <span class="task-project-type">${typeLabel}</span>
           <span class="task-project-name" data-open-case="${escapeHtml(t.folder_path)}">${escapeHtml(t.case_name)}</span>
@@ -2111,6 +2144,10 @@ function renderTasksPage(data) {
   body.querySelectorAll("[data-complete]").forEach((btn) => {
     btn.addEventListener("click", () => completeTask(btn.dataset.complete, btn));
   });
+  body.querySelectorAll("[data-open-task]").forEach((cell) => {
+    cell.style.cursor = "pointer";
+    cell.addEventListener("click", () => openTaskCard(cell.dataset.openTask));
+  });
   body.querySelectorAll("[data-open-case]").forEach((cell) => {
     cell.style.cursor = "pointer";
     cell.addEventListener("click", () => {
@@ -2125,14 +2162,12 @@ async function loadTasksPage() {
   const body = document.getElementById("tasksBody");
   body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
   const params = new URLSearchParams();
-  if (tasksFilters.scope === "mine") params.set("mine", "1");
+  params.set("scope", tasksFilters.scope);
   params.set("done", tasksFilters.state === "done" ? "1" : "0");
   if (tasksFilters.q) params.set("q", tasksFilters.q);
   try {
     const data = await apiFetch(`/api/cases/tasks/all?${params.toString()}`);
     tasksCache = data.tasks;
-    if (data.people) tasksPeople = data.people;
-    if (currentUser && data.myPlanfixName !== undefined) currentUser.planfix_name = data.myPlanfixName;
     renderTasksPage(data);
   } catch (err) {
     body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить задачи: ${escapeHtml(err.message)}</div>`;
@@ -2155,36 +2190,8 @@ async function completeTask(id, btn) {
 
 bind(document.getElementById("casesTasksBtn"), "click", () => showSection("tasks", true));
 
-/**
- * "Мои задачи" опираются на имя человека в Planfix: логин в ИСУ
- * ("kirill") и исполнитель в задаче ("Кирилл Базаев") никогда не совпадут.
- * Поэтому при первом нажатии просим выбрать себя из тех, на кого задачи
- * заведены, и запоминаем выбор.
- */
-async function ensurePlanfixName() {
-  if (currentUser && currentUser.planfix_name) return true;
-  const people = (tasksPeople || []).filter(Boolean);
-  const list = people.map((n, i) => `${i + 1}. ${n}`).join("\n");
-  const answer = prompt(
-    "Как вас зовут в Planfix? Введите номер из списка или имя целиком.\n\n" + list);
-  if (answer === null) return false;
-  const byIndex = people[Number(answer.trim()) - 1];
-  const name = (byIndex || answer).trim();
-  if (!name) return false;
-  try {
-    await apiFetch("/api/auth/me/planfix-name", { method: "POST", body: JSON.stringify({ name }) });
-    if (currentUser) currentUser.planfix_name = name;
-    showToast(`Ваше имя в Planfix: ${name}`);
-    return true;
-  } catch (err) {
-    alert("Не удалось сохранить имя: " + err.message);
-    return false;
-  }
-}
-
 document.querySelectorAll("#tasksScope .seg-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    if (btn.dataset.scope === "mine" && !(await ensurePlanfixName())) return;
+  btn.addEventListener("click", () => {
     tasksFilters.scope = btn.dataset.scope;
     document.querySelectorAll("#tasksScope .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
     loadTasksPage();
@@ -2203,6 +2210,383 @@ bind(document.getElementById("tasksSearch"), "input", debounce((e) => {
   tasksFilters.q = e.target.value.trim();
   loadTasksPage();
 }, 300));
+
+/* ---------- Карточка задачи ----------
+   Подробности, комментарии из Planfix и правка исполнителей и срока.
+   Любое изменение сначала уходит в Planfix и только после его согласия
+   отражается у нас — как и завершение. */
+
+const taskCardOverlay = document.getElementById("taskCardOverlay");
+let taskCardId = null;
+
+function closeTaskCard() {
+  if (taskCardOverlay) taskCardOverlay.classList.add("hidden");
+  taskCardId = null;
+}
+bind(document.getElementById("taskCardClose"), "click", closeTaskCard);
+bind(taskCardOverlay, "click", (e) => { if (e.target === taskCardOverlay) closeTaskCard(); });
+
+function commentHtml(c) {
+  const when = c.at ? escapeHtml(String(c.at)) : "";
+  return `
+    <div class="task-comment">
+      <div class="task-comment-head">
+        <span class="task-comment-author">${escapeHtml(c.author || "—")}</span>
+        <span class="task-comment-date">${when}</span>
+      </div>
+      <div class="task-comment-text">${escapeHtml(c.text || "")}</div>
+    </div>`;
+}
+
+async function openTaskCard(id) {
+  if (!taskCardOverlay) return;
+  taskCardId = id;
+  taskCardOverlay.classList.remove("hidden");
+  const body = document.getElementById("taskCardBody");
+  body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+
+  let data;
+  try {
+    data = await apiFetch(`/api/cases/tasks/${id}`);
+    await loadPlanfixPeople();
+  } catch (err) {
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось открыть задачу: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  if (taskCardId !== id) return; // карточку успели закрыть или открыть другую
+
+  const t = data.task;
+  const head = document.getElementById("taskCardHead");
+  if (head) head.textContent = `Задача №${t.planfix_id}`;
+
+  const selected = new Set((t.assignee_ids || []).map(Number));
+  const peopleRows = (planfixPeopleCache || []).map((p) => `
+    <label class="picker-item">
+      <input type="checkbox" value="${p.id}" ${selected.has(Number(p.id)) ? "checked" : ""}>
+      <span>${escapeHtml(p.name)}</span>
+    </label>`).join("");
+
+  body.innerHTML = `
+    <h3 class="task-card-title">${escapeHtml(t.name)}</h3>
+    <div class="task-card-meta">
+      <span>${escapeHtml(t.case_type === "research" ? "Независимые исследования" : "Экспертизы")}</span>
+      <span class="task-card-project" data-open-case="${escapeHtml(t.folder_path)}">${escapeHtml(t.case_name)}</span>
+      <span>${escapeHtml(t.status_name || "")}</span>
+    </div>
+    ${t.description ? `<p class="task-card-desc">${escapeHtml(t.description)}</p>` : ""}
+    <dl class="task-card-facts">
+      <dt>Постановщик</dt><dd>${escapeHtml(t.assigner || "—")}</dd>
+      <dt>Исполнители</dt><dd>${escapeHtml(t.assignees || "—")}</dd>
+      <dt>Срок</dt><dd>${taskDateCell(t.end_date) || "—"}</dd>
+      ${t.completed_by_name ? `<dt>Завершил в ИСУ</dt><dd>${escapeHtml(t.completed_by_name)}</dd>` : ""}
+    </dl>
+
+    ${data.canWrite && !t.is_done ? `
+      <section class="task-card-block">
+        <h4>Изменить</h4>
+        <label class="task-card-field">Срок
+          <input type="date" id="taskCardDeadline" value="${t.end_date ? escapeHtml(String(t.end_date).slice(0, 10)) : ""}">
+        </label>
+        <div class="picker" style="margin-top:10px;">
+          <div class="picker-head">
+            <span class="row-subtitle">Исполнители</span>
+            <span class="picker-count" id="taskCardAssigneesCount"></span>
+          </div>
+          <div class="picker-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="taskCardAssigneesSearch" placeholder="Поиск сотрудника" autocomplete="off">
+          </div>
+          <div class="picker-list" id="taskCardAssignees">${peopleRows}</div>
+        </div>
+        <div class="modal-actions" style="margin-top:10px;">
+          <button class="primary" type="button" id="taskCardSave">Сохранить в Planfix</button>
+        </div>
+      </section>` : ""}
+
+    <section class="task-card-block">
+      <h4>Комментарии</h4>
+      <div id="taskCardComments">${
+        data.commentsError
+          ? `<p class="row-subtitle">Не удалось получить комментарии из Planfix: ${escapeHtml(data.commentsError)}</p>`
+          : (data.comments.length ? data.comments.map(commentHtml).join("") : '<p class="row-subtitle">Пока пусто</p>')
+      }</div>
+      <textarea id="taskCardCommentText" rows="2" placeholder="Написать комментарий" class="task-comment-input"></textarea>
+      <div class="modal-actions" style="margin-top:8px;">
+        <button class="primary" type="button" id="taskCardCommentSend">Отправить</button>
+      </div>
+    </section>`;
+
+  const countAssignees = () => {
+    const el = document.getElementById("taskCardAssigneesCount");
+    if (!el) return;
+    const n = body.querySelectorAll("#taskCardAssignees input:checked").length;
+    el.textContent = n ? `Выбрано: ${n}` : "Никого не выбрано";
+  };
+  countAssignees();
+  body.querySelectorAll("#taskCardAssignees input").forEach((cb) =>
+    cb.addEventListener("change", countAssignees));
+
+  bind(document.getElementById("taskCardAssigneesSearch"), "input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    body.querySelectorAll("#taskCardAssignees .picker-item").forEach((item) => {
+      item.classList.toggle("hidden", !!q && !item.textContent.toLowerCase().includes(q));
+    });
+  });
+
+  bind(document.getElementById("taskCardSave"), "click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const assigneeIds = [...body.querySelectorAll("#taskCardAssignees input:checked")].map((c) => Number(c.value));
+    const deadline = document.getElementById("taskCardDeadline").value || null;
+    try {
+      await apiFetch(`/api/cases/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assigneeIds, deadline }),
+      });
+      showToast("Изменения ушли в Planfix");
+      closeTaskCard();
+      loadTasksPage();
+    } catch (err) {
+      btn.disabled = false;
+      alert("Не удалось изменить задачу: " + err.message);
+    }
+  });
+
+  bind(document.getElementById("taskCardCommentSend"), "click", async (e) => {
+    const btn = e.currentTarget;
+    const field = document.getElementById("taskCardCommentText");
+    const text = field.value.trim();
+    if (!text) return;
+    btn.disabled = true;
+    try {
+      const res = await apiFetch(`/api/cases/tasks/${id}/comment`, {
+        method: "POST", body: JSON.stringify({ text }),
+      });
+      field.value = "";
+      showToast(res.authorApplied === false
+        ? "Комментарий отправлен, но Planfix не дал подписать его вами — имя ушло в тексте"
+        : "Комментарий отправлен");
+      openTaskCard(id);
+    } catch (err) {
+      btn.disabled = false;
+      alert("Не удалось отправить комментарий: " + err.message);
+    }
+  });
+
+  const projectLink = body.querySelector("[data-open-case]");
+  if (projectLink) {
+    projectLink.style.cursor = "pointer";
+    projectLink.addEventListener("click", () => {
+      const path = projectLink.dataset.openCase;
+      closeTaskCard();
+      showSection("files", true);
+      goToFolder(path, buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, path), true);
+    });
+  }
+}
+
+/* ---------- Новая задача ---------- */
+
+const taskNewOverlay = document.getElementById("taskNewOverlay");
+
+function closeTaskNew() {
+  if (taskNewOverlay) taskNewOverlay.classList.add("hidden");
+}
+bind(document.getElementById("taskNewClose"), "click", closeTaskNew);
+bind(taskNewOverlay, "click", (e) => { if (e.target === taskNewOverlay) closeTaskNew(); });
+
+async function openTaskNew() {
+  if (!taskNewOverlay) return;
+  taskNewOverlay.classList.remove("hidden");
+  const hint = document.getElementById("taskNewHint");
+  const submit = document.getElementById("taskNewSubmit");
+  hint.textContent = "";
+  submit.disabled = false;
+
+  document.getElementById("taskNewForm").reset();
+  document.getElementById("taskNewAssigneesCount").textContent = "Никого не выбрано";
+
+  // Проекты берём те же, что и в остальных формах: только живые.
+  try {
+    const [allCases, people] = await Promise.all([
+      apiFetch("/api/cases"),
+      loadPlanfixPeople(),
+    ]);
+    // Ставить задачу можно только в проект, у которого уже есть карточка
+    // в Planfix, и только в живой: в отменённый или завершённый — незачем.
+    const list = allCases.filter((c) => c.planfix_id && !c.is_cancelled && c.stage !== "done");
+    const select = document.getElementById("taskNewCase");
+    select.innerHTML = '<option value="">Выберите проект…</option>' +
+      list.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+    if (!list.length) {
+      hint.textContent = "Нет проектов, связанных с Planfix. Сначала выполните перенос из Planfix.";
+    }
+
+    document.getElementById("taskNewAssigneesList").innerHTML = people.map((p) => `
+      <label class="picker-item">
+        <input type="checkbox" value="${p.id}">
+        <span>${escapeHtml(p.name)}</span>
+      </label>`).join("") || '<p class="row-subtitle">Справочник сотрудников пуст — обновите его в окне Planfix.</p>';
+
+    document.querySelectorAll("#taskNewAssigneesList input").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        const n = document.querySelectorAll("#taskNewAssigneesList input:checked").length;
+        document.getElementById("taskNewAssigneesCount").textContent =
+          n ? `Выбрано: ${n}` : "Никого не выбрано";
+      }));
+  } catch (err) {
+    hint.textContent = "Не удалось загрузить списки: " + err.message;
+    submit.disabled = true;
+  }
+}
+
+bind(document.getElementById("tasksNewBtn"), "click", openTaskNew);
+
+bind(document.getElementById("taskNewAssigneesSearch"), "input", (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll("#taskNewAssigneesList .picker-item").forEach((item) => {
+    item.classList.toggle("hidden", !!q && !item.textContent.toLowerCase().includes(q));
+  });
+});
+
+bind(document.getElementById("taskNewForm"), "submit", async (e) => {
+  e.preventDefault();
+  const submit = document.getElementById("taskNewSubmit");
+  const hint = document.getElementById("taskNewHint");
+  submit.disabled = true;
+  hint.textContent = "Отправляю в Planfix…";
+  try {
+    const res = await apiFetch("/api/cases/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        caseId: Number(document.getElementById("taskNewCase").value),
+        name: document.getElementById("taskNewName").value.trim(),
+        description: document.getElementById("taskNewDescription").value.trim(),
+        deadline: document.getElementById("taskNewDeadline").value || null,
+        assigneeIds: [...document.querySelectorAll("#taskNewAssigneesList input:checked")]
+          .map((c) => Number(c.value)),
+      }),
+    });
+    closeTaskNew();
+    showToast(res.authorApplied === false
+      ? "Задача создана, но Planfix не дал назначить вас постановщиком — имя ушло в описании"
+      : "Задача поставлена");
+    loadTasksPage();
+  } catch (err) {
+    submit.disabled = false;
+    hint.textContent = "Не удалось: " + err.message;
+  }
+});
+
+/* ---------- Связь аккаунтов с сотрудниками Planfix (администрирование) ---------- */
+
+const pfPeopleOverlay = document.getElementById("pfPeopleOverlay");
+
+bind(document.getElementById("pfPeopleClose"), "click",
+  () => pfPeopleOverlay && pfPeopleOverlay.classList.add("hidden"));
+bind(pfPeopleOverlay, "click", (e) => {
+  if (e.target === pfPeopleOverlay) pfPeopleOverlay.classList.add("hidden");
+});
+
+function renderBindings(data) {
+  const body = document.getElementById("pfPeopleBody");
+  const synced = document.getElementById("pfPeopleSynced");
+  if (synced) {
+    synced.textContent = data.syncedAt
+      ? `Список обновлён ${formatWhen(new Date(data.syncedAt).getTime())}`
+      : "Список сотрудников ещё ни разу не загружали";
+  }
+
+  const options = (selectedId) => '<option value="">— не связан —</option>' +
+    (data.people || []).map((p) =>
+      `<option value="${p.id}" ${Number(p.id) === Number(selectedId) ? "selected" : ""}>${escapeHtml(p.name)}</option>`
+    ).join("");
+
+  body.innerHTML = `
+    <table class="tasks-table pf-bindings">
+      <thead><tr><th>Пользователь ИСУ</th><th>Сотрудник в Planfix</th><th>Когда связали</th></tr></thead>
+      <tbody>${(data.bindings || []).map((b) => `
+        <tr data-user="${b.id}">
+          <td>
+            <span class="task-title">${escapeHtml(b.username)}</span>
+            ${b.role === "admin" ? '<span class="task-project-type">администратор</span>' : ""}
+          </td>
+          <td>
+            <select data-bind-user="${b.id}">${options(b.planfix_user_id)}</select>
+            ${b.planfix_user_id && b.planfix_active === false
+              ? '<span class="task-project-type">этого сотрудника уже нет в Planfix</span>' : ""}
+            ${!b.planfix_user_id && b.legacy_name
+              ? `<span class="task-project-type">раньше выбирал себя как «${escapeHtml(b.legacy_name)}»</span>` : ""}
+          </td>
+          <td class="task-date">${b.planfix_bound_at
+            ? escapeHtml(formatWhen(new Date(b.planfix_bound_at).getTime()))
+            : "—"}${b.bound_by_name ? `<span class="task-project-type">${escapeHtml(b.bound_by_name)}</span>` : ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+  body.querySelectorAll("[data-bind-user]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      const previous = select.dataset.previous || "";
+      select.disabled = true;
+      try {
+        const res = await apiFetch(`/api/cases/planfix/bindings/${select.dataset.bindUser}`, {
+          method: "POST",
+          body: JSON.stringify({ planfixUserId: select.value || null }),
+        });
+        showToast(res.bound ? `Связано: ${res.planfixName}` : "Связь снята");
+        renderBindings({ ...data, bindings: res.bindings });
+      } catch (err) {
+        // Возвращаем прежнее значение: иначе на экране будет связь,
+        // которой на самом деле нет.
+        select.value = previous;
+        select.disabled = false;
+        alert(err.message);
+      }
+    });
+    select.dataset.previous = select.value;
+  });
+}
+
+async function openPlanfixPeople() {
+  if (!pfPeopleOverlay) return;
+  // Открываем вместо окна Planfix, а не поверх него: два окна друг на
+  // друге путают, а нижнее ещё и перехватывает нажатия.
+  if (planfixOverlay) planfixOverlay.classList.add("hidden");
+  pfPeopleOverlay.classList.remove("hidden");
+  const body = document.getElementById("pfPeopleBody");
+  body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+  try {
+    const data = await apiFetch("/api/cases/planfix/bindings");
+    planfixPeopleCache = data.people || [];
+    renderBindings(data);
+  } catch (err) {
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+bind(document.getElementById("planfixPeopleBtn"), "click", openPlanfixPeople);
+
+bind(document.getElementById("pfPeopleSyncBtn"), "click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  const wasText = btn.textContent;
+  btn.textContent = "Обновляю…";
+  try {
+    const res = await apiFetch("/api/cases/planfix/people/sync", { method: "POST" });
+    planfixPeopleCache = res.people || [];
+    showToast(res.adopted
+      ? `Сотрудников: ${res.total}. Связано по прежним именам: ${res.adopted}`
+      : `Сотрудников: ${res.total}`);
+    const data = await apiFetch("/api/cases/planfix/bindings");
+    renderBindings(data);
+  } catch (err) {
+    alert("Не удалось обновить список: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = wasText;
+  }
+});
 
 /* ---- Окно Planfix: диагностика и перенос ----
    Кнопка в шапке колонки открывает окно, а не запускает перенос сразу:
