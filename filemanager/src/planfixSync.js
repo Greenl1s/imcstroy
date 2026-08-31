@@ -35,7 +35,14 @@ async function planfixRequest(method, path, body) {
 
   if (!res.ok || (data && data.result === "fail")) {
     const message = data?.error || text.slice(0, 300) || `HTTP ${res.status}`;
-    throw new Error(message);
+    const err = new Error(message);
+    // Planfix ответил и внятно отказал — значит, он ничего не создал и не
+    // изменил. Это важно отличать от обрыва связи: после отказа запрос
+    // можно безопасно повторить, после обрыва — нельзя, задача могла
+    // создаться, и повтор сделает дубль.
+    err.planfixRefused = (data && data.result === "fail") || (res.status >= 400 && res.status < 500);
+    err.planfixCode = data?.code != null ? Number(data.code) : null;
+    throw err;
   }
   return data;
 }
@@ -271,10 +278,24 @@ async function syncProjectToPlanfix(kase) {
   return created.id;
 }
 
-/** Список сотрудников Planfix — для выбора исполнителя задачи. */
+/**
+ * Список сотрудников Planfix — для выбора исполнителя и для привязки
+ * аккаунтов. Идём постранично: в аккаунте больше сотни человек бывает,
+ * а раньше мы молча брали только первую сотню.
+ */
 async function listPlanfixEmployees() {
-  const data = await planfixRequest("POST", "/user/list", { offset: 0, pageSize: 100, fields: "id,name" });
-  return data.users || [];
+  const users = [];
+  for (let page = 0; page < 50; page++) {
+    const data = await planfixRequest("POST", "/user/list", {
+      offset: page * PAGE_SIZE,
+      pageSize: PAGE_SIZE,
+      fields: "id,name,email",
+    });
+    const chunk = data?.users || [];
+    users.push(...chunk);
+    if (chunk.length < PAGE_SIZE) break;
+  }
+  return users;
 }
 
 /** "2026-09-01" (как приходит из <input type="date">) -> "01-09-2026" (формат Planfix). */
@@ -284,27 +305,154 @@ function formatDateForPlanfix(isoDate) {
   return `${day}-${month}-${year}`;
 }
 
-/**
- * Создаёт одну задачу в Planfix, привязанную к проекту. Исполнитель и
- * срок — необязательны (можно поставить задачу без них, если по смыслу
- * не нужны прямо сейчас).
- */
-async function createPlanfixTask({ name, projectId, assigneeId, deadlineIso }) {
-  const body = {
-    name,
-    description: "",
-    project: { id: projectId },
-  };
-  if (assigneeId) {
-    body.assignees = { users: [{ id: `user:${assigneeId}` }] };
-  }
-  const deadline = deadlineIso ? formatDateForPlanfix(deadlineIso) : null;
-  if (deadline) {
-    body.endDateTime = { date: deadline, dateType: "otherDate" };
-  }
+/** Ссылка на сотрудника в теле запроса Planfix. */
+function userRef(id) {
+  return { id: `user:${Number(id)}` };
+}
 
-  const created = await planfixRequest("POST", "/task/", body);
-  return created.id;
+function usersRef(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean);
+  return list.length ? { users: list.map(userRef) } : null;
+}
+
+/**
+ * Отправляет запрос, в котором указан автор действия, и умеет обойтись
+ * без него.
+ *
+ * Токен у нас один, служебный, а автора мы передаём полем (assigner для
+ * задачи, owner для комментария). Заранее знать, разрешает ли конкретный
+ * аккаунт Planfix назначать автора по API, нельзя. Поэтому: сначала
+ * пробуем с автором; если Planfix ВНЯТНО отказал (то есть точно ничего
+ * не создал), повторяем без поля автора и дописываем подпись в текст —
+ * чтобы имя человека не потерялось совсем.
+ *
+ * Повторяем только после внятного отказа. После обрыва связи повтор
+ * запрещён: задача могла создаться, и второй запрос сделает дубль.
+ */
+async function requestAsAuthor({ send, withAuthor, withoutAuthor }) {
+  if (!withAuthor) return { data: await send(withoutAuthor()), authorApplied: false };
+  try {
+    return { data: await send(withAuthor()), authorApplied: true };
+  } catch (err) {
+    if (!err.planfixRefused) throw err;
+    const data = await send(withoutAuthor());
+    return { data, authorApplied: false, authorError: err.message };
+  }
+}
+
+/** Подпись, которой помечаем текст, если автора назначить не удалось. */
+function authorSignature(actor) {
+  return actor ? `\n\n— ${actor.name} (через ИСУ)` : "";
+}
+
+/**
+ * Создаёт задачу в Planfix, привязанную к проекту.
+ *
+ * actor — сотрудник Planfix, от чьего имени ставится задача (тот, кто
+ * нажал кнопку в ИСУ). Исполнители, срок и описание необязательны.
+ */
+async function createPlanfixTask({ name, projectId, assigneeIds, assigneeId, deadlineIso, description, actor }) {
+  const assignees = usersRef(assigneeIds != null ? assigneeIds : assigneeId);
+  const deadline = deadlineIso ? formatDateForPlanfix(deadlineIso) : null;
+
+  const base = () => {
+    const body = { name, description: description || "", project: { id: projectId } };
+    if (assignees) body.assignees = assignees;
+    if (deadline) body.endDateTime = { date: deadline, dateType: "otherDate" };
+    return body;
+  };
+
+  const result = await requestAsAuthor({
+    send: (body) => planfixRequest("POST", "/task/", body),
+    withAuthor: actor ? () => ({ ...base(), assigner: userRef(actor.id) }) : null,
+    withoutAuthor: () => {
+      const body = base();
+      body.description = (body.description || "") + authorSignature(actor);
+      return body;
+    },
+  });
+
+  return {
+    id: result.data?.id,
+    authorApplied: result.authorApplied,
+    authorError: result.authorError || null,
+  };
+}
+
+/**
+ * Меняет у задачи исполнителей и/или срок. Передаём только то, что
+ * действительно правим: пустое поле у Planfix означает "стереть", а нам
+ * нужно "не трогать".
+ */
+async function updatePlanfixTask(taskId, { assigneeIds, deadlineIso, name, description }) {
+  const body = {};
+  if (name !== undefined) body.name = name;
+  if (description !== undefined) body.description = description;
+  if (assigneeIds !== undefined) {
+    body.assignees = usersRef(assigneeIds) || { users: [] };
+  }
+  if (deadlineIso !== undefined) {
+    const deadline = deadlineIso ? formatDateForPlanfix(deadlineIso) : null;
+    body.endDateTime = deadline ? { date: deadline, dateType: "otherDate" } : null;
+  }
+  if (!Object.keys(body).length) return false;
+  await planfixRequest("POST", `/task/${Number(taskId)}`, body);
+  return true;
+}
+
+/**
+ * Комментарий к задаче от имени сотрудника. Если назначить автора не
+ * вышло, имя уходит подписью в самом тексте — комментарий без автора
+ * бесполезен, а терять его нельзя.
+ */
+async function addTaskComment(taskId, text, actor) {
+  const body = () => ({ description: String(text) });
+
+  const result = await requestAsAuthor({
+    send: (b) => planfixRequest("POST", `/task/${Number(taskId)}/comments/`, b),
+    withAuthor: actor ? () => ({ ...body(), owner: userRef(actor.id) }) : null,
+    withoutAuthor: () => ({ description: String(text) + authorSignature(actor) }),
+  });
+
+  return {
+    id: result.data?.id || null,
+    authorApplied: result.authorApplied,
+    authorError: result.authorError || null,
+  };
+}
+
+/**
+ * Комментарии задачи. Адрес списка в разных версиях Planfix отличается,
+ * поэтому пробуем известные варианты по очереди — так же, как со
+ * справочником полей.
+ */
+const COMMENT_LIST_ENDPOINTS = [
+  ["POST", (id) => `/task/${id}/comments/list`],
+  ["POST", (id) => `/task/${id}/comment/list`],
+  ["GET", (id) => `/task/${id}/comments`],
+];
+
+async function listTaskComments(taskId) {
+  const id = Number(taskId);
+  let lastError = null;
+  for (const [method, makePath] of COMMENT_LIST_ENDPOINTS) {
+    try {
+      const body = method === "POST"
+        ? { offset: 0, pageSize: 50, fields: "id,description,owner,dateTime" }
+        : undefined;
+      const data = await planfixRequest(method, makePath(id), body);
+      const items = data?.comments || data?.list || [];
+      return items.map((c) => ({
+        id: c.id,
+        text: String(c.description || "").trim(),
+        author: c.owner?.name || null,
+        at: c.dateTime?.datetime || c.dateTime?.date || null,
+      }));
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error("Не удалось получить комментарии задачи: " + (lastError?.message || "неизвестная ошибка"));
 }
 
 
@@ -419,8 +567,15 @@ async function listAllProjects() {
 }
 
 /** Все задачи аккаунта — с привязкой к проекту, статусом и сроками. */
+/** Одна задача по её номеру — нужна сразу после создания задачи из ИСУ. */
+async function fetchTask(taskId) {
+  const fields = "id,name,description,status,project,assigner,assignees,startDateTime,endDateTime";
+  const data = await planfixRequest("GET", `/task/${Number(taskId)}?fields=${encodeURIComponent(fields)}`);
+  return data?.task || data || null;
+}
+
 function listAllTasks() {
-  return listAll("/task/list", "id,name,status,project,assigner,assignees,startDateTime,endDateTime");
+  return listAll("/task/list", "id,name,description,status,project,assigner,assignees,startDateTime,endDateTime");
 }
 
 // Статусы задач в Planfix настраиваются в аккаунте, поэтому "завершённость"
@@ -457,6 +612,22 @@ function peopleToText(value) {
   return value?.name || null;
 }
 
+/**
+ * Те же люди, но числовыми id. Planfix пишет их и как 9, и как "user:9".
+ * Именно по id работает фильтр "Мои задачи": имена совпадают ненадёжно
+ * (однофамильцы, переименование сотрудника, лишний пробел).
+ */
+function peopleToIds(value) {
+  const users = value?.users || (Array.isArray(value) ? value : (value ? [value] : []));
+  const ids = users
+    .map((u) => {
+      const m = String(u?.id ?? "").match(/(\d+)/);
+      return m ? Number(m[1]) : null;
+    })
+    .filter(Boolean);
+  return [...new Set(ids)];
+}
+
 /** Приводит задачу Planfix к тому виду, в котором она хранится у нас. */
 function readTask(task) {
   const statusName = task?.status?.name || null;
@@ -466,8 +637,11 @@ function readTask(task) {
     statusName,
     statusId: task?.status?.id != null ? Number(task.status.id) : null,
     isDone: isDoneStatus(statusName),
+    description: String(task?.description || "").trim() || null,
     assignees: peopleToText(task?.assignees),
     assigner: peopleToText(task?.assigner),
+    assigneeIds: peopleToIds(task?.assignees),
+    assignerId: peopleToIds(task?.assigner)[0] || null,
     startDate: planfixDateToIso(task?.startDateTime),
     endDate: planfixDateToIso(task?.endDateTime),
   };
@@ -493,8 +667,9 @@ async function completeTask(taskId, statusId) {
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
+  updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
-  completeTask,
+  peopleToIds, completeTask, fetchTask,
   fetchFieldCatalogue, resolveFieldIds,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,

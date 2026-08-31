@@ -28,6 +28,7 @@ async function refreshJournalSafely() {
 }
 
 const planfixSync = require("./planfixSync");
+const planfixPeople = require("./planfixPeople");
 
 /**
  * Синхронизирует проект с Planfix и, если это создание новой карточки,
@@ -231,6 +232,68 @@ cases.get("/planfix/probe", auth.requireAdmin, async (req, res) => {
   }
 });
 
+/* ---------------- Связь аккаунтов ИСУ с сотрудниками Planfix ---------------- */
+
+/**
+ * Справочник сотрудников Planfix. Отдаём из своей копии — страница
+ * должна открываться мгновенно и работать, даже когда Planfix молчит.
+ * Нужен всем, у кого есть доступ к делам: из него выбирают исполнителей.
+ */
+cases.get("/planfix/people", async (req, res) => {
+  try {
+    res.json({
+      people: await planfixPeople.listPeople(),
+      syncedAt: await planfixPeople.peopleSyncedAt(),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить справочник сотрудников: " + err.message });
+  }
+});
+
+/** Обновить справочник сотрудников из Planfix. */
+cases.post("/planfix/people/sync", auth.requireAdmin, async (req, res) => {
+  try {
+    const result = await planfixPeople.syncPeople();
+    res.json({
+      ok: true, ...result,
+      people: await planfixPeople.listPeople(),
+      syncedAt: await planfixPeople.peopleSyncedAt(),
+    });
+  } catch (err) {
+    res.status(502).json({ message: "Planfix не отдал список сотрудников: " + err.message });
+  }
+});
+
+/** Таблица привязок: кто из пользователей ИСУ кем является в Planfix. */
+cases.get("/planfix/bindings", auth.requireAdmin, async (req, res) => {
+  try {
+    res.json({
+      bindings: await planfixPeople.listBindings(),
+      people: await planfixPeople.listPeople(),
+      syncedAt: await planfixPeople.peopleSyncedAt(),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить список привязок: " + err.message });
+  }
+});
+
+/** Привязать пользователя ИСУ к сотруднику Planfix (или снять привязку). */
+cases.post("/planfix/bindings/:userId", auth.requireAdmin, async (req, res) => {
+  try {
+    const result = await planfixPeople.setBinding(
+      Number(req.params.userId), req.body?.planfixUserId, req.user.id);
+    await planfixPeople.logAction({
+      user: req.user, actor: null, action: result.bound ? "bind" : "unbind",
+      payload: { userId: Number(req.params.userId), planfixUserId: result.planfixUserId || null }, ok: true,
+    });
+    res.json({ ok: true, ...result, bindings: await planfixPeople.listBindings() });
+  } catch (err) {
+    // Занятый сотрудник и неизвестный id — это ошибка ввода, а не сбой:
+    // отвечаем 400 с текстом, который можно показать как есть.
+    res.status(400).json({ message: err.message });
+  }
+});
+
 /* ---------------- Задачи всех проектов (отдельная страница) ---------------- */
 
 const folderAccessLib = require("./folderAccess");
@@ -247,36 +310,55 @@ async function visibleTasks(rows, user) {
 }
 
 const TASKS_QUERY = `
-  SELECT t.id, t.planfix_id, t.name, t.status_name, t.status_id, t.is_done,
-         t.assignees, t.assigner, t.start_date, t.end_date, t.completed_at,
+  SELECT t.id, t.planfix_id, t.name, t.description, t.status_name, t.status_id, t.is_done,
+         t.assignees, t.assigner, t.assignee_ids, t.assigner_id,
+         t.start_date, t.end_date, t.completed_at,
+         cb.username AS completed_by_name,
          c.id AS case_id, c.name AS case_name, c.type AS case_type,
-         c.stage AS case_stage, c.folder_path
+         c.stage AS case_stage, c.folder_path, c.planfix_id AS case_planfix_id
     FROM case_tasks t
     JOIN cases c ON c.id = t.case_id
+    LEFT JOIN users cb ON cb.id = t.completed_by
    WHERE c.deleted_at IS NULL
 `;
 
+/** Я исполнитель этой задачи? Сравниваем по id, а не по имени. */
+function isAssignee(task, planfixUserId) {
+  if (!planfixUserId) return false;
+  return Array.isArray(task.assignee_ids) && task.assignee_ids.includes(Number(planfixUserId));
+}
+
+/** Я поставил эту задачу? */
+function isAssigner(task, planfixUserId) {
+  if (!planfixUserId) return false;
+  return Number(task.assigner_id) === Number(planfixUserId);
+}
+
 /**
  * Все задачи разом — для отдельной страницы "Задачи".
- * mine=1 — только те, где я в исполнителях; done=1/0 — фильтр по
- * завершённости (по умолчанию показываем незавершённые).
+ *
+ * scope: all | mine (я исполнитель) | assigned (я поставил).
+ * done=1/0/all — по завершённости (по умолчанию показываем незавершённые).
+ *
+ * "Мои" опираются на привязку аккаунта ИСУ к сотруднику Planfix
+ * (users.planfix_user_id, её проставляет администратор). Без привязки
+ * сказать, какие задачи мои, нельзя — тогда честно отвечаем пустым
+ * списком и говорим об этом в поле needsBinding, а не молча.
  */
 cases.get("/tasks/all", async (req, res) => {
   try {
     const { rows } = await db.query(`${TASKS_QUERY} ORDER BY t.is_done, t.end_date NULLS LAST, t.planfix_id DESC`);
-    let list = await visibleTasks(rows, req.user);
+    const all = await visibleTasks(rows, req.user);
+    let list = all;
+
+    const me = req.user.planfix_user_id || null;
+    // scope=mine раньше назывался mine=1 — старый адрес продолжает работать.
+    const scope = String(req.query.scope || (req.query.mine === "1" ? "mine" : "all"));
+    if (scope === "mine") list = list.filter((t) => isAssignee(t, me));
+    else if (scope === "assigned") list = list.filter((t) => isAssigner(t, me));
 
     if (req.query.done === "1") list = list.filter((t) => t.is_done);
     else if (req.query.done !== "all") list = list.filter((t) => !t.is_done);
-
-    if (req.query.mine === "1") {
-      // Сравниваем с именем, под которым человек значится в Planfix:
-      // логин ИСУ ("kirill") и исполнитель ("Кирилл Базаев") — разные вещи.
-      const me = String(req.user.planfix_name || "").trim().toLowerCase();
-      list = me
-        ? list.filter((t) => String(t.assignees || "").toLowerCase().includes(me))
-        : [];
-    }
 
     const q = String(req.query.q || "").trim().toLowerCase();
     if (q) {
@@ -286,19 +368,20 @@ cases.get("/tasks/all", async (req, res) => {
 
     // Счётчики считаем по всему, что человеку видно, а не по текущему
     // фильтру — иначе цифра прыгает вслед за фильтром и ничего не значит.
-    const all = await visibleTasks(rows, req.user);
+    const overdue = (t) => !t.is_done && t.end_date && new Date(t.end_date) < new Date();
     res.json({
-      tasks: list.slice(0, 500),
+      tasks: list.map((t) => ({ ...t, mine: isAssignee(t, me), byMe: isAssigner(t, me) })).slice(0, 500),
       total: list.length,
-      // Кем задачи вообще бывают заняты — из этого списка человек
-      // выбирает себя, чтобы заработал фильтр "Мои".
-      people: [...new Set(all.flatMap((t) => String(t.assignees || "").split(",").map((x) => x.trim())))]
-        .filter(Boolean).sort((a, b) => a.localeCompare(b, "ru")),
-      myPlanfixName: req.user.planfix_name || null,
+      me: me ? { planfixUserId: me, name: req.user.planfix_name } : null,
+      // Без привязки фильтр "Мои" работать не может — интерфейс покажет
+      // подсказку вместо пустого списка без объяснений.
+      needsBinding: !me,
       counts: {
         open: all.filter((t) => !t.is_done).length,
         done: all.filter((t) => t.is_done).length,
-        overdue: all.filter((t) => !t.is_done && t.end_date && new Date(t.end_date) < new Date()).length,
+        overdue: all.filter(overdue).length,
+        mine: me ? all.filter((t) => !t.is_done && isAssignee(t, me)).length : 0,
+        assigned: me ? all.filter((t) => !t.is_done && isAssigner(t, me)).length : 0,
       },
     });
   } catch (err) {
@@ -337,7 +420,21 @@ cases.post("/tasks/:id/complete", async (req, res) => {
     if (task.is_done) return res.json({ ok: true, alreadyDone: true });
 
     const statusId = await doneStatusId();
-    await planfixSync.completeTask(task.planfix_id, statusId);
+    const actor = planfixPeople.actorOf(req.user);
+    try {
+      await planfixSync.completeTask(task.planfix_id, statusId);
+    } catch (err) {
+      await planfixPeople.logAction({
+        user: req.user, actor, action: "complete", taskId: task.id,
+        planfixTaskId: task.planfix_id, caseId: task.case_id, ok: false, error: err.message,
+      });
+      throw err;
+    }
+    await planfixPeople.logAction({
+      user: req.user, actor, action: "complete", taskId: task.id,
+      planfixTaskId: task.planfix_id, caseId: task.case_id,
+      payload: { statusId }, ok: true,
+    });
 
     await db.query(
       `UPDATE case_tasks
@@ -354,6 +451,247 @@ cases.post("/tasks/:id/complete", async (req, res) => {
   } catch (err) {
     console.error("Не удалось завершить задачу:", err);
     res.status(502).json({ message: "Planfix не принял завершение задачи: " + err.message });
+  }
+});
+
+/**
+ * Одна задача, доступная текущему пользователю. Общий кусок для карточки,
+ * правки и комментариев: права на задачу — это права на папку её проекта.
+ */
+async function loadVisibleTask(req, res) {
+  const { rows } = await db.query(`${TASKS_QUERY} AND t.id = $1`, [req.params.id]);
+  if (!rows.length) {
+    res.status(404).json({ message: "Задача не найдена" });
+    return null;
+  }
+  const [task] = await visibleTasks(rows, req.user);
+  if (!task) {
+    res.status(403).json({ message: "Нет доступа к этой задаче" });
+    return null;
+  }
+  return task;
+}
+
+/** Кто может менять задачу — тот же, кто может писать в папку проекта. */
+async function canWriteTask(user, task) {
+  if (user.role === "admin") return true;
+  if (!user.can_cases) return false;
+  const rules = await folderAccess.getUserRules(user.id);
+  return folderAccess.resolveAccess(rules, task.folder_path) === "write";
+}
+
+/**
+ * Карточка задачи: то, что лежит у нас, плюс комментарии прямо из
+ * Planfix. Комментарии не кэшируем — они меняются чаще, чем идёт
+ * синхронизация, и показать вчерашние хуже, чем не показать никаких.
+ * Если Planfix недоступен, карточка всё равно открывается.
+ */
+cases.get("/tasks/:id", async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, res);
+    if (!task) return;
+    let comments = [];
+    let commentsError = null;
+    try {
+      comments = await planfixSync.listTaskComments(task.planfix_id);
+    } catch (err) {
+      commentsError = err.message;
+    }
+    res.json({
+      task: {
+        ...task,
+        mine: isAssignee(task, req.user.planfix_user_id),
+        byMe: isAssigner(task, req.user.planfix_user_id),
+      },
+      comments,
+      commentsError,
+      canWrite: await canWriteTask(req.user, task),
+    });
+  } catch (err) {
+    console.error("Не удалось открыть задачу:", err);
+    res.status(500).json({ message: "Не удалось открыть задачу: " + err.message });
+  }
+});
+
+/**
+ * Новая задача в Planfix из ИСУ. Постановщиком становится тот, кто
+ * нажал кнопку — по привязке его аккаунта.
+ *
+ * Задачу заводим только в Planfix: он — источник правды. У себя она
+ * появится ближайшей синхронизацией, поэтому её же сразу и запускаем
+ * для этого проекта, чтобы человек увидел результат, а не пустоту.
+ */
+cases.post("/tasks", async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const caseId = Number(req.body?.caseId || 0);
+  if (!name) return res.status(400).json({ message: "Не указано название задачи" });
+  if (!caseId) return res.status(400).json({ message: "Не выбран проект" });
+
+  try {
+    const { rows } = await db.query(
+      "SELECT id, name, planfix_id, folder_path FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
+    const kase = rows[0];
+    if (!kase) return res.status(404).json({ message: "Проект не найден" });
+    if (!(await canWriteTask(req.user, kase))) {
+      return res.status(403).json({ message: "Нет прав на изменение этого проекта" });
+    }
+    if (!kase.planfix_id) {
+      return res.status(400).json({
+        message: "У проекта ещё нет карточки в Planfix — дождитесь синхронизации и попробуйте снова",
+      });
+    }
+
+    const actor = planfixPeople.actorOf(req.user);
+    if (!actor) {
+      return res.status(409).json({
+        message: "Ваш аккаунт не связан с сотрудником Planfix, поэтому задачу нельзя поставить от вашего имени. " +
+                 "Попросите администратора настроить связь в разделе «Сотрудники Planfix».",
+        needsBinding: true,
+      });
+    }
+
+    let created;
+    try {
+      created = await planfixSync.createPlanfixTask({
+        name,
+        description: String(req.body?.description || ""),
+        projectId: kase.planfix_id,
+        assigneeIds: req.body?.assigneeIds || [],
+        deadlineIso: req.body?.deadline || null,
+        actor,
+      });
+    } catch (err) {
+      await planfixPeople.logAction({
+        user: req.user, actor, action: "create", caseId: kase.id,
+        payload: { name }, ok: false, error: err.message,
+      });
+      throw err;
+    }
+
+    await planfixPeople.logAction({
+      user: req.user, actor, action: "create", caseId: kase.id,
+      planfixTaskId: created.id, payload: { name, authorApplied: created.authorApplied }, ok: true,
+    });
+    events.log(req.user, "task_created", {
+      path: kase.folder_path, name, details: { case: kase.name },
+    });
+
+    // Подтягиваем к себе только что созданную задачу, чтобы она сразу
+    // появилась в списке. Если не вышло — не беда: она приедет ближайшей
+    // синхронизацией, и в Planfix она уже есть.
+    let synced = false;
+    try {
+      synced = await planfixImport.importOneTask(created.id, kase.id);
+    } catch (err) {
+      console.error("Задача создана, но не подтянулась сразу:", err.message);
+    }
+
+    res.json({
+      ok: true,
+      planfixTaskId: created.id,
+      synced,
+      // Если Planfix не дал назначить постановщика, интерфейс скажет об
+      // этом честно: имя ушло подписью в описании, а не потерялось.
+      authorApplied: created.authorApplied,
+      authorError: created.authorError,
+    });
+  } catch (err) {
+    console.error("Не удалось создать задачу:", err);
+    res.status(502).json({ message: "Planfix не принял новую задачу: " + err.message });
+  }
+});
+
+/**
+ * Правка задачи: исполнители и срок. Как и с завершением, сначала
+ * меняем в Planfix и только после его согласия — у себя.
+ */
+cases.patch("/tasks/:id", async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, res);
+    if (!task) return;
+    if (!(await canWriteTask(req.user, task))) {
+      return res.status(403).json({ message: "Нет прав на изменение этой задачи" });
+    }
+
+    const patch = {};
+    if (req.body?.assigneeIds !== undefined) {
+      patch.assigneeIds = (req.body.assigneeIds || []).map(Number).filter(Boolean);
+    }
+    if (req.body?.deadline !== undefined) patch.deadlineIso = req.body.deadline || null;
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ message: "Нечего менять" });
+    }
+
+    const actor = planfixPeople.actorOf(req.user);
+    try {
+      await planfixSync.updatePlanfixTask(task.planfix_id, patch);
+    } catch (err) {
+      await planfixPeople.logAction({
+        user: req.user, actor, action: "update", taskId: task.id,
+        planfixTaskId: task.planfix_id, caseId: task.case_id, payload: patch, ok: false, error: err.message,
+      });
+      throw err;
+    }
+    await planfixPeople.logAction({
+      user: req.user, actor, action: "update", taskId: task.id,
+      planfixTaskId: task.planfix_id, caseId: task.case_id, payload: patch, ok: true,
+    });
+
+    // Имена исполнителей берём из своего справочника, чтобы список
+    // обновился сразу, не дожидаясь синхронизации.
+    if (patch.assigneeIds) {
+      const { rows: named } = await db.query(
+        "SELECT name FROM planfix_people WHERE id = ANY($1::int[]) ORDER BY name", [patch.assigneeIds]);
+      await db.query(
+        "UPDATE case_tasks SET assignee_ids = $2, assignees = $3, updated_at = now() WHERE id = $1",
+        [task.id, patch.assigneeIds.length ? patch.assigneeIds : null,
+         named.map((r) => r.name).join(", ") || null]
+      );
+    }
+    if (patch.deadlineIso !== undefined) {
+      await db.query("UPDATE case_tasks SET end_date = $2, updated_at = now() WHERE id = $1",
+        [task.id, patch.deadlineIso]);
+    }
+
+    events.log(req.user, "task_changed", {
+      path: task.folder_path, name: task.name, details: { case: task.case_name },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось изменить задачу:", err);
+    res.status(502).json({ message: "Planfix не принял изменение задачи: " + err.message });
+  }
+});
+
+/** Комментарий к задаче от имени текущего пользователя. */
+cases.post("/tasks/:id/comment", async (req, res) => {
+  const text = String(req.body?.text || "").trim();
+  if (!text) return res.status(400).json({ message: "Комментарий пустой" });
+
+  try {
+    const task = await loadVisibleTask(req, res);
+    if (!task) return;
+
+    const actor = planfixPeople.actorOf(req.user);
+    let added;
+    try {
+      added = await planfixSync.addTaskComment(task.planfix_id, text, actor);
+    } catch (err) {
+      await planfixPeople.logAction({
+        user: req.user, actor, action: "comment", taskId: task.id,
+        planfixTaskId: task.planfix_id, caseId: task.case_id, ok: false, error: err.message,
+      });
+      throw err;
+    }
+    await planfixPeople.logAction({
+      user: req.user, actor, action: "comment", taskId: task.id,
+      planfixTaskId: task.planfix_id, caseId: task.case_id,
+      payload: { authorApplied: added.authorApplied }, ok: true,
+    });
+    res.json({ ok: true, authorApplied: added.authorApplied, authorError: added.authorError });
+  } catch (err) {
+    console.error("Не удалось добавить комментарий:", err);
+    res.status(502).json({ message: "Planfix не принял комментарий: " + err.message });
   }
 });
 
@@ -396,13 +734,18 @@ cases.post("/:id/planfix-tasks", loadCase, requireWriteOnCaseFolder, async (req,
     const name = String(t?.name || "").trim();
     if (!name) continue;
     try {
-      const taskId = await planfixSync.createPlanfixTask({
+      const created = await planfixSync.createPlanfixTask({
         name,
         projectId: kase.planfix_id,
         assigneeId: t.assigneeId || null,
         deadlineIso: t.deadline || null,
+        actor: planfixPeople.actorOf(req.user),
       });
-      results.push({ name, ok: true, taskId });
+      await planfixPeople.logAction({
+        user: req.user, actor: planfixPeople.actorOf(req.user), action: "create",
+        planfixTaskId: created.id, caseId: kase.id, payload: { name }, ok: true,
+      });
+      results.push({ name, ok: true, taskId: created.id, authorApplied: created.authorApplied });
     } catch (err) {
       results.push({ name, ok: false, error: err.message });
     }

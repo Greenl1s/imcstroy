@@ -81,10 +81,12 @@ async function requireAuth(req, res, next) {
   try {
     const userId = Number(identity.sub);
     const perms = await getPermissions(userId);
-    // Имя в Planfix нужно фильтру "Мои задачи": логин и имя исполнителя
-    // в Planfix — разные вещи.
+    // Кто этот человек в Planfix. Логин ИСУ ("kirill") и сотрудник Planfix
+    // ("Кирилл Базаев", id 9) — разные вещи, связь проставляет админ.
+    // Именно от этого id зависят фильтр "Мои задачи" и авторство всего,
+    // что ИСУ пишет в Planfix.
     const { rows: nameRows } = await db.query(
-      "SELECT planfix_name FROM users WHERE id = $1", [userId]);
+      "SELECT planfix_name, planfix_user_id FROM users WHERE id = $1", [userId]);
     req.user = {
       id: userId,
       username: identity.username,
@@ -93,6 +95,7 @@ async function requireAuth(req, res, next) {
       can_db: perms.can_db,
       can_cases: perms.can_cases,
       planfix_name: nameRows.length ? nameRows[0].planfix_name : null,
+      planfix_user_id: nameRows.length ? nameRows[0].planfix_user_id : null,
     };
     next();
   } catch (err) {

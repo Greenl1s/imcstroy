@@ -321,27 +321,7 @@ async function importTasks(report) {
     const kase = byPlanfixId.get(projectId);
     if (!kase) continue;
     try {
-      const parsed = planfix.readTask(task);
-      const { rowCount } = await db.query(
-        `INSERT INTO case_tasks
-           (case_id, planfix_id, name, status_name, status_id, is_done, assignees, assigner, start_date, end_date, seen_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())
-         ON CONFLICT (planfix_id) DO UPDATE SET
-           case_id = EXCLUDED.case_id,
-           name = EXCLUDED.name,
-           status_name = EXCLUDED.status_name,
-           status_id = EXCLUDED.status_id,
-           is_done = EXCLUDED.is_done,
-           assignees = EXCLUDED.assignees,
-           assigner = EXCLUDED.assigner,
-           start_date = EXCLUDED.start_date,
-           end_date = EXCLUDED.end_date,
-           seen_at = now(),
-           updated_at = now()`,
-        [kase.id, parsed.planfixId, parsed.name, parsed.statusName, parsed.statusId, parsed.isDone,
-         parsed.assignees, parsed.assigner, parsed.startDate, parsed.endDate]
-      );
-      report.tasksSynced += rowCount;
+      report.tasksSynced += await upsertTask(kase.id, planfix.readTask(task));
     } catch (err) {
       report.errors.push({ name: `задача #${task?.id}`, error: err.message });
     }
@@ -350,6 +330,48 @@ async function importTasks(report) {
   await db.query(
     "UPDATE cases SET planfix_tasks_synced_at = now() WHERE planfix_id IS NOT NULL AND deleted_at IS NULL"
   );
+}
+
+/** Кладёт одну разобранную задачу Planfix в нашу таблицу. */
+async function upsertTask(caseId, parsed) {
+  const { rowCount } = await db.query(
+        `INSERT INTO case_tasks
+           (case_id, planfix_id, name, description, status_name, status_id, is_done,
+            assignees, assigner, assignee_ids, assigner_id, start_date, end_date, seen_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), now())
+         ON CONFLICT (planfix_id) DO UPDATE SET
+           case_id = EXCLUDED.case_id,
+           name = EXCLUDED.name,
+           description = EXCLUDED.description,
+           status_name = EXCLUDED.status_name,
+           status_id = EXCLUDED.status_id,
+           is_done = EXCLUDED.is_done,
+           assignees = EXCLUDED.assignees,
+           assigner = EXCLUDED.assigner,
+           assignee_ids = EXCLUDED.assignee_ids,
+           assigner_id = EXCLUDED.assigner_id,
+           start_date = EXCLUDED.start_date,
+           end_date = EXCLUDED.end_date,
+           seen_at = now(),
+           updated_at = now()`,
+    [caseId, parsed.planfixId, parsed.name, parsed.description, parsed.statusName, parsed.statusId,
+     parsed.isDone, parsed.assignees, parsed.assigner,
+     parsed.assigneeIds && parsed.assigneeIds.length ? parsed.assigneeIds : null,
+     parsed.assignerId, parsed.startDate, parsed.endDate]
+  );
+  return rowCount;
+}
+
+/**
+ * Подтягивает ОДНУ задачу — сразу после того, как её создали из ИСУ.
+ * Гонять полную синхронизацию ради одной новой задачи незачем: у неё
+ * свой номер, и Planfix отдаёт её по нему.
+ */
+async function importOneTask(planfixTaskId, caseId) {
+  const task = await planfix.fetchTask(planfixTaskId);
+  if (!task) return false;
+  await upsertTask(caseId, planfix.readTask(task));
+  return true;
 }
 
 function emptyReport() {
@@ -408,6 +430,8 @@ module.exports = {
   runSync,
   importProjects,
   importTasks,
+  importOneTask,
+  upsertTask,
   readProject,
   ensureCaseStructure,
   findExistingFolder,
