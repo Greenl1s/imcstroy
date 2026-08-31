@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-08-31.5">
+<meta name="build" content="2026-08-31.6">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -194,6 +194,12 @@
       <div id="caseTasksBox" class="case-chat-box hidden">
         <div class="case-chat-header" id="caseTasksToggle">
           <span id="caseTasksTitle">Задачи проекта</span>
+          <!-- Кнопка стоит там же, где живут задачи проекта: ставить
+               задачу логичнее всего рядом со списком уже поставленных. -->
+          <button class="upload-btn" id="caseNewTaskBtn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            Новая задача
+          </button>
           <span id="caseTasksArrow">▾</span>
         </div>
         <div id="caseTasksBody" class="case-tasks-body"></div>
@@ -210,20 +216,6 @@
             <input type="text" id="caseChatInput" placeholder="Например: составь отказное письмо" autocomplete="off">
             <button type="submit" class="primary" id="caseChatSendBtn">Отправить</button>
           </form>
-        </div>
-      </div>
-      <!-- Задачи проекта прямо в его папке. Окно постановки — то же
-           самое, что на странице «Задачи»: один список задач, одна
-           форма, разница только в том, что проект здесь уже выбран. -->
-      <div id="planfixTasksBox" class="case-chat-box hidden">
-        <div class="case-chat-header" id="planfixTasksToggle">
-          <span>📋 Задачи Planfix для текущей стадии</span>
-          <span id="planfixTasksArrow">▾</span>
-        </div>
-        <div id="planfixTasksBody" class="hidden" style="padding:12px 14px;">
-          <div id="planfixTasksList" style="display:flex; flex-direction:column; gap:8px;"></div>
-          <p id="planfixTasksError" class="error-text" style="margin-top:8px;"></p>
-          <button type="button" class="primary" id="planfixTasksCreateBtn" style="margin-top:10px;">Поставить задачу</button>
         </div>
       </div>
       <div class="folder-actions" id="folderActions">

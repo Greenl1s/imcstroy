@@ -426,7 +426,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.5";
+const APP_BUILD = "2026-08-31.6";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -1974,11 +1974,11 @@ function stageBadgeHtml(project) {
 async function updateCaseBanner(path) {
   const banner = document.getElementById("caseBanner");
   const chatBox = document.getElementById("caseChatBox");
-  const tasksBox = document.getElementById("planfixTasksBox");
   if (!path.startsWith(CASES_PATH)) {
     banner.classList.add("hidden");
     chatBox.classList.add("hidden");
-    tasksBox.classList.add("hidden");
+    document.getElementById("caseTasksBox").classList.add("hidden");
+    openPlanfixTasksFor(null);
     return;
   }
   try {
@@ -1990,8 +1990,8 @@ async function updateCaseBanner(path) {
   } catch {
     banner.classList.add("hidden");
     chatBox.classList.add("hidden");
-    tasksBox.classList.add("hidden");
     document.getElementById("caseTasksBox").classList.add("hidden");
+    openPlanfixTasksFor(null);
   }
 }
 
@@ -2734,7 +2734,9 @@ bind(document.getElementById("taskNewForm"), "submit", async (e) => {
         !document.getElementById("tasksSection").classList.contains("hidden")) {
       loadTasksPage();
     }
-    if (taskNewLockedCase) loadPlanfixTasksList();
+    // Список задач проекта в его папке пересобираем, чтобы новая
+    // задача появилась там сразу, а не после перезагрузки.
+    if (taskNewLockedCase) loadCaseTasks(taskNewLockedCase);
   } catch (err) {
     submit.disabled = false;
     hint.textContent = "Не удалось: " + err.message;
@@ -3174,67 +3176,23 @@ document.getElementById("caseChatForm").addEventListener("submit", async (event)
   }
 });
 
-/* ---- Задачи Planfix прямо в папке проекта ----
-   Здесь показываем список типовых задач текущей стадии — тот же самый
-   справочник, что и в окне постановки. Само окно тоже то же самое:
-   кнопка открывает его с уже подставленным проектом. Раньше здесь была
-   своя отдельная форма, и два места жили каждое своей жизнью. */
+/* ---- Новая задача из папки проекта ----
+   Отдельной панели со списком типовых задач здесь больше нет: список
+   всё равно живёт в самом окне постановки, и показывать его дважды
+   значило показывать одно и то же в двух местах. Осталась кнопка —
+   она открывает то же окно, что и на странице «Задачи», с уже
+   подставленным проектом. */
 
 let planfixTasksCurrentProject = null;
 
 function openPlanfixTasksFor(project) {
-  const box = document.getElementById("planfixTasksBox");
-  if (!box) return;
-  box.classList.remove("hidden");
-  if (planfixTasksCurrentProject && planfixTasksCurrentProject.id === project.id) return;
   planfixTasksCurrentProject = project;
-  const list = document.getElementById("planfixTasksList");
-  if (list) list.innerHTML = "";
-  const err = document.getElementById("planfixTasksError");
-  if (err) err.textContent = "";
-  document.getElementById("planfixTasksBody").classList.add("hidden");
-  document.getElementById("planfixTasksArrow").textContent = "▾";
 }
 
-bind(document.getElementById("planfixTasksToggle"), "click", async () => {
-  const body = document.getElementById("planfixTasksBody");
-  const arrow = document.getElementById("planfixTasksArrow");
-  const opening = body.classList.contains("hidden");
-  body.classList.toggle("hidden");
-  arrow.textContent = opening ? "▴" : "▾";
-  if (opening && planfixTasksCurrentProject) await loadPlanfixTasksList();
-});
-
-/** Список типовых задач стадии проекта — только показать, что есть. */
-async function loadPlanfixTasksList() {
-  const list = document.getElementById("planfixTasksList");
-  const errorEl = document.getElementById("planfixTasksError");
-  if (!list || !planfixTasksCurrentProject) return;
-  errorEl.textContent = "";
-  list.innerHTML = '<div class="row-subtitle">Загрузка…</div>';
-
-  try {
-    const data = await apiFetch(
-      `/api/cases/planfix/stage-tasks/${planfixTasksCurrentProject.stage}`);
-    const stageName = STAGE_LABEL[planfixTasksCurrentProject.stage] || planfixTasksCurrentProject.stage;
-    if (!data.supported) {
-      list.innerHTML = `<div class="row-subtitle">Для стадии «${escapeHtml(stageName)}» типовых задач не предусмотрено</div>`;
-      return;
-    }
-    list.innerHTML = `<div class="row-subtitle">Задачи стадии «${escapeHtml(stageName)}»:</div>` +
-      (data.tasks.length
-        ? `<ul class="stage-task-list">${data.tasks
-            .map((t) => `<li>${escapeHtml(t.name)}</li>`).join("")}</ul>`
-        : '<div class="row-subtitle">Список пока пуст — впишите свою задачу в окне постановки, она сюда добавится</div>');
-  } catch (err) {
-    list.innerHTML = "";
-    errorEl.textContent = "Не удалось загрузить: " + err.message;
-  }
-}
-
-// Кнопка открывает то же окно, что и на странице «Задачи», но проект в
-// нём уже выбран и не меняется.
-bind(document.getElementById("planfixTasksCreateBtn"), "click", () => {
+bind(document.getElementById("caseNewTaskBtn"), "click", (e) => {
+  // Кнопка лежит внутри заголовка, а тот сворачивает блок по нажатию —
+  // без этого окно открывалось бы и блок тут же схлопывался.
+  e.stopPropagation();
   if (!planfixTasksCurrentProject) return;
   openTaskNew(planfixTasksCurrentProject);
 });
