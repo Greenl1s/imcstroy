@@ -1692,3 +1692,173 @@ label.picker-item,
   .columns-view { width: 100%; flex-wrap: wrap; }
   .col[data-col="tools"] { flex: 1 1 100%; }
 }
+
+/* ---------- Что установил суд ----------
+   Предложение программы читается как ответ на вопрос «и что теперь»,
+   поэтому шаги идут списком с числами, а предупреждения стоят выше
+   шагов: если чего-то не хватает, это надо увидеть раньше, чем кнопку. */
+
+.field-hint {
+  margin: -6px 0 0;
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.court-plan {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  padding: 14px 16px;
+}
+.court-plan h4 {
+  margin: 0 0 10px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.court-plan ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.court-plan li { font-size: var(--fs-body); line-height: 1.5; }
+.court-plan .court-clause {
+  margin: 10px 0 0;
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+}
+
+/* Предупреждение — это не ошибка: работать можно, но человек должен
+   знать, чего программе не хватило. Отсюда «внимание», а не «опасность». */
+.court-warn {
+  margin: 0 0 12px;
+  padding: 10px 12px 10px 34px;
+  position: relative;
+  border-radius: var(--radius-sm);
+  border: 1px solid #e6d6a8;
+  background: #fdf6e7;
+  color: var(--warning);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+/* Знак внимания вместо цветной полосы сбоку: он и читается быстрее,
+   и не спорит с рамкой блока. */
+.court-warn::before {
+  content: "!";
+  position: absolute;
+  left: 11px;
+  top: 11px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--warning);
+  color: #fdf6e7;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.court-warn + .court-warn { margin-top: -6px; }
+
+.court-apply-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* История отделена от действий: иначе «Применить» и заголовок истории
+   читаются как одна группа, и кнопка выглядит относящейся к списку. */
+.court-history-block {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.court-history-block h3 {
+  margin: 0 0 10px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.court-event {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+.court-event + .court-event { margin-top: 8px; }
+.court-event-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.court-event-name { font-weight: 600; font-size: var(--fs-body); }
+.court-event-meta { font-size: var(--fs-meta); color: var(--text-muted); }
+.court-event-note { font-size: var(--fs-meta); color: var(--text-secondary); }
+.court-event .court-tag {
+  font-size: var(--fs-meta);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+.court-event .court-tag.applied { background: var(--success-bg); color: var(--success); }
+
+/* ---------- Порядок работы ----------
+   Четыре стадии подряд: сначала где мы, потом что делать. Подсветка
+   текущей стадии — единственный цветной элемент на странице, поэтому
+   она и читается сразу. */
+
+.order-stage {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.order-stage.here {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.order-stage-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.order-stage-head h2 { margin: 0; font-size: var(--fs-lead); font-weight: 600; }
+.order-here {
+  font-size: var(--fs-meta);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+.order-stage-sub {
+  margin: 4px 0 12px;
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+}
+.order-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.order-steps li { font-size: var(--fs-body); }
+.order-step-title { font-weight: 500; }
+.order-step-detail { margin-top: 2px; color: var(--text-secondary); line-height: 1.5; }
+.order-step-clause { margin-top: 3px; font-size: var(--fs-meta); color: var(--text-muted); }
+
+/* Дни производственного календаря: дата, вид, пояснение и «убрать». */
+.cal-day {
+  display: grid;
+  grid-template-columns: 92px 108px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body);
+}
+.cal-day:nth-child(odd) { background: var(--bg-subtle); }
+.cal-day-kind { font-size: var(--fs-meta); color: var(--text-muted); }
+.cal-day-note {
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-day .back-btn { padding: 2px 10px; font-size: var(--fs-meta); }

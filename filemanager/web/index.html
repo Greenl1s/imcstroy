@@ -67,6 +67,10 @@
       <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
       <span>История</span>
     </button>
+    <button class="side-item" data-section="order" type="button">
+      <svg viewBox="0 0 24 24"><path d="M9 5h9M9 12h9M9 19h9"/><circle cx="4.5" cy="5" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="19" r="1.5"/></svg>
+      <span>Порядок работы</span>
+    </button>
 
     <div class="side-bottom">
       <div class="side-disk" id="diskUsageWidget" title="Загрузка…">
@@ -455,6 +459,28 @@
     <div class="folder-body" id="historyList"></div>
   </div>
 
+  <!-- Порядок работы: рабочая инструкция, разложенная на шаги по стадиям.
+       Здесь же видно, где сейчас стоят проекты, — чтобы инструкция была не
+       отдельным документом, а частью работы. -->
+  <div class="folder-view section hidden" id="orderSection" data-view="order">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Порядок работы</h1>
+        <p class="page-sub">Как идёт администрирование экспертизы по рабочей инструкции</p>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <select class="col-sort-select" id="orderProject" style="max-width:260px;">
+          <option value="">Просто инструкция, без проекта</option>
+        </select>
+        <!-- Сроки в инструкции считаются в рабочих днях, поэтому праздники
+             приходится заводить руками: постановление о переносах выходит
+             осенью на следующий год. -->
+        <button class="upload-btn hidden" id="calendarBtn" type="button">Праздники и переносы</button>
+      </div>
+    </div>
+    <div class="folder-body" id="orderBody"></div>
+  </div>
+
 </div>
 
 <div id="usersOverlay" class="modal-overlay hidden">
@@ -485,6 +511,7 @@
         <label><input type="checkbox" id="newPermTools" checked> Инструменты</label>
         <label><input type="checkbox" id="newPermDb" checked> База данных</label>
         <label><input type="checkbox" id="newPermCases" checked> Дела</label>
+        <label title="Подтверждает отмену начатой экспертизы и решает спорные случаи оплаты"><input type="checkbox" id="newPermManage"> Руководитель</label>
       </div>
       <button class="primary" id="createUserBtn" type="button">Создать пользователя</button>
     </div>
@@ -879,6 +906,107 @@
         <button class="primary" type="submit" id="caseEditSubmit">Сохранить</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Что установил суд: вписываем исход и смотрим, что из него следует по
+     рабочей инструкции. Программа считает предложение, но ничего не делает,
+     пока человек не нажмёт «Применить» — перевод стадии двигает папку. -->
+<div id="courtOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:640px;">
+    <div class="modal-header">
+      <span id="courtHead">Что установил суд</span>
+      <button class="back-btn" id="courtCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+
+    <div style="max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <form id="courtForm" style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <label>Что установил суд
+          <select id="courtOutcome" required></select>
+        </label>
+        <p id="courtOutcomeHint" class="field-hint"></p>
+
+        <div class="add-user-row">
+          <label>Дата определения
+            <input type="date" id="courtEventDate" required>
+          </label>
+          <label>Дата заседания
+            <input type="date" id="courtHearingDate">
+          </label>
+        </div>
+        <label>Срок экспертизы из определения
+          <input type="date" id="courtExpertiseDue">
+        </label>
+        <p class="field-hint">Даты заседания и срока нужны не всегда: от них зависят
+          сроки задач. Если их не знать, программа не выдумает дату, а скажет,
+          что срок надо поставить руками.</p>
+
+        <label>Заметка
+          <input type="text" id="courtNote" placeholder="Например: определение получено по почте">
+        </label>
+
+        <p id="courtError" class="error-text"></p>
+        <div class="modal-actions">
+          <button class="primary" type="submit" id="courtCalcBtn">Что будет дальше</button>
+        </div>
+      </form>
+
+      <div id="courtPlan" class="hidden" style="margin-top:16px;"></div>
+
+      <div class="court-history-block">
+        <h3>Что суд решал по этому проекту</h3>
+        <div id="courtHistory"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Производственный календарь. Ведётся руками: выходные дни ИСУ знает
+     сама, а праздники и переносы каждый год свои. Если год не заведён,
+     расчёт сроков честно помечается ненадёжным, а не врёт. -->
+<div id="calendarOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:520px;">
+    <div class="modal-header">
+      <span>Праздники и переносы</span>
+      <button class="back-btn" id="calendarCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+
+    <p class="field-hint" style="margin:10px 0 0;">Субботы и воскресенья программа
+      знает сама. Сюда вносятся только праздники и рабочие субботы по переносу.</p>
+
+    <div class="add-user-row" style="margin-top:12px;">
+      <label>Год
+        <select id="calendarYear"></select>
+      </label>
+    </div>
+    <p id="calendarYears" class="field-hint" style="margin-top:8px;"></p>
+
+    <div id="calendarList" style="max-height:260px; overflow-y:auto; margin-top:12px;"></div>
+
+    <form id="calendarAddForm" class="add-user-row" style="margin-top:14px;">
+      <label>Дата
+        <input type="date" id="calendarDay" required>
+      </label>
+      <label>Какой это день
+        <select id="calendarKind">
+          <option value="holiday">Праздник (нерабочий)</option>
+          <option value="workday">Рабочая суббота по переносу</option>
+        </select>
+      </label>
+      <label>Пояснение
+        <input type="text" id="calendarNote" placeholder="Например: День России">
+      </label>
+    </form>
+    <p id="calendarError" class="error-text"></p>
+    <div class="modal-actions">
+      <button class="primary" type="button" id="calendarAddBtn">Добавить день</button>
+    </div>
   </div>
 </div>
 
