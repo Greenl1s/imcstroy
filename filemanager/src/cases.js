@@ -16,6 +16,7 @@ const journalExcel = require("./journalExcel");
 const courtCase = require("./courtCase");
 const courtOutcomes = require("./courtOutcomes");
 const workCalendar = require("./workCalendar");
+const taskDates = require("./taskDates");
 
 /**
  * Пересобирает журнал и никогда не мешает основной операции — если
@@ -390,6 +391,14 @@ function isAssigner(task, planfixUserId) {
  *
  * scope: all | mine (я исполнитель) | assigned (я поставил).
  * done=1/0/all — по завершённости (по умолчанию показываем незавершённые).
+ * due=any|overdue|today|week|none — по сроку.
+ * type=any|expertise|research|none — что за проект.
+ * stage=any|plan|active|control|done — на какой он стадии.
+ * assignee=<id сотрудника Planfix> — на ком задача.
+ *
+ * Все фильтры считаются ЗДЕСЬ, до обрезки списка в 500 строк. Если
+ * фильтровать в браузере, фильтр будет искать внутри первых пятисот и
+ * врать, что больше ничего нет.
  *
  * "Мои" опираются на привязку аккаунта ИСУ к сотруднику Planfix
  * (users.planfix_user_id, её проставляет администратор). Без привязки
@@ -417,15 +426,68 @@ cases.get("/tasks/all", async (req, res) => {
         t.name.toLowerCase().includes(q) || String(t.case_name || "").toLowerCase().includes(q));
     }
 
+    // Сегодня считаем один раз на весь запрос: иначе задачи, разобранные
+    // по разные стороны полуночи, попали бы в разные состояния.
+    const today = taskDates.todayIso();
+
+    const due = String(req.query.due || "any");
+    if (taskDates.DUE_FILTERS.includes(due) && due !== "any") {
+      list = list.filter((t) => taskDates.matchesDueFilter(t, due, today));
+    }
+
+    // Тип проекта. "none" — это проекты, приехавшие из Planfix без
+    // распознанного типа: у них type пустой, и без отдельного пункта они
+    // выпали бы из всех вариантов фильтра сразу.
+    const type = String(req.query.type || "any");
+    if (type === "none") list = list.filter((t) => !t.case_type);
+    else if (type === "expertise" || type === "research") {
+      list = list.filter((t) => t.case_type === type);
+    }
+
+    const stage = String(req.query.stage || "any");
+    if (["plan", "active", "control", "done"].includes(stage)) {
+      list = list.filter((t) => t.case_stage === stage);
+    }
+
+    const assignee = Number(req.query.assignee || 0);
+    if (assignee) list = list.filter((t) => isAssignee(t, assignee));
+
     // Счётчики считаем по всему, что человеку видно, а не по текущему
     // фильтру — иначе цифра прыгает вслед за фильтром и ничего не значит.
-    const overdue = (t) => !t.is_done && t.end_date && new Date(t.end_date) < new Date();
+    // Сколько нашлось сейчас, видно отдельно, в поле total.
+    const overdue = (t) => taskDates.dueState(t, today).state === "overdue";
+
+    // Справочники для выпадающих списков собираем из того, что реально
+    // есть у этого человека: незачем предлагать фильтр по сотруднику,
+    // задач которого он всё равно не увидит.
+    const people = new Map();
+    for (const t of all) {
+      const names = String(t.assignees || "").split(",").map((s) => s.trim());
+      (t.assignee_ids || []).forEach((id, i) => {
+        if (id && !people.has(id)) people.set(id, names[i] || `Сотрудник ${id}`);
+      });
+    }
+
     res.json({
       // can_write считаем здесь, а не спрашиваем потом по одной задаче:
       // без него интерфейс показывал бы кнопки, которые сервер всё равно
       // отклонит, а это хуже, чем их отсутствие.
-      tasks: await withWriteFlag(list.slice(0, 500), req.user, (t) => t.folder_path),
+      // due_state приходит отсюда же: считать срок ещё и в браузере
+      // означало бы два разных ответа на один вопрос.
+      tasks: (await withWriteFlag(list.slice(0, 500), req.user, (t) => t.folder_path))
+        .map((t) => {
+          const d = taskDates.dueState(t, today);
+          return { ...t, due_state: d.state, due_iso: d.due, days_left: d.daysLeft };
+        }),
       total: list.length,
+      today,
+      // Что вообще можно выбрать в фильтрах — считает сервер, чтобы
+      // список сотрудников не пришлось запрашивать отдельно.
+      facets: {
+        assignees: [...people.entries()]
+          .map(([id, name]) => ({ id, name }))
+          .sort((a, b) => a.name.localeCompare(b.name, "ru")),
+      },
       me: me ? { planfixUserId: me, name: req.user.planfix_name } : null,
       // Без привязки фильтр "Мои" работать не может — интерфейс покажет
       // подсказку вместо пустого списка без объяснений.
@@ -1550,6 +1612,102 @@ cases.delete("/work-calendar/:day", requireManager, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+});
+
+/* ---------------- Карточка проекта ----------------
+   Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи,
+   решения суда, история. Нужна, чтобы посмотреть, что с проектом, и
+   быстро поправить статус или задачу, не уходя в файлы.
+
+   Одним запросом, а не четырьмя: карточка иначе собиралась бы на глазах
+   кусками, и было бы непонятно, она уже загрузилась или ещё нет. */
+
+cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
+  try {
+    const kase = req.case;
+
+    // Видеть карточку можно только тому, кому видна папка проекта.
+    // Проверяем это здесь отдельно: карточка показывает и стороны, и
+    // судью, и историю — то есть больше, чем список файлов.
+    if (req.user.role !== "admin") {
+      const rules = await folderAccess.getUserRules(req.user.id);
+      if (!folderAccess.resolveAccess(rules, kase.folder_path)) {
+        return res.status(403).json({ message: "Нет доступа к этому проекту" });
+      }
+    }
+    const canWrite = await canWriteTask(req.user, kase);
+    const today = taskDates.todayIso();
+
+    const [tasks, courtEvents, history, manager] = await Promise.all([
+      db.query(
+        `SELECT id, planfix_id, name, description, status_name, is_done,
+                assignees, assigner, assignee_ids, assigner_id,
+                start_date, end_date, completed_at
+           FROM case_tasks WHERE case_id = $1
+          ORDER BY is_done ASC, end_date NULLS LAST, id`,
+        [kase.id]
+      ),
+      db.query(
+        `SELECT e.id, e.outcome_name, e.event_date, e.hearing_date, e.note,
+                e.applied, e.applied_at,
+                c.username AS created_by_name, a.username AS applied_by_name
+           FROM case_court_events e
+           LEFT JOIN users c ON c.id = e.created_by
+           LEFT JOIN users a ON a.id = e.applied_by
+          WHERE e.case_id = $1
+          ORDER BY e.event_date DESC, e.id DESC
+          LIMIT 20`,
+        [kase.id]
+      ),
+      db.query(
+        `SELECT h.id, h.action, h.note, h.created_at, u.username AS actor_name
+           FROM case_history h
+           LEFT JOIN users u ON u.id = h.actor_id
+          WHERE h.case_id = $1
+          ORDER BY h.created_at DESC
+          LIMIT 20`,
+        [kase.id]
+      ),
+      db.query("SELECT username FROM users WHERE id = $1", [kase.manager_id || 0]),
+    ]);
+
+    const me = req.user.planfix_user_id || null;
+    const withDue = tasks.rows.map((t) => {
+      const d = taskDates.dueState(t, today);
+      return {
+        ...t,
+        due_state: d.state, due_iso: d.due, days_left: d.daysLeft,
+        mine: isAssignee(t, me), byMe: isAssigner(t, me),
+        can_write: canWrite,
+      };
+    });
+
+    res.json({
+      project: {
+        ...courtCase.decorateCase(kase),
+        manager_name: manager.rows.length ? manager.rows[0].username : null,
+      },
+      canWrite,
+      today,
+      tasks: withDue,
+      // Считаем здесь, чтобы заголовок «Задачи · 2 открытых, 1 просрочена»
+      // не пересчитывался в браузере по другим правилам.
+      taskCounts: {
+        open: withDue.filter((t) => !t.is_done).length,
+        done: withDue.filter((t) => t.is_done).length,
+        overdue: withDue.filter((t) => t.due_state === "overdue").length,
+      },
+      courtEvents: courtEvents.rows,
+      history: history.rows,
+      // Задач не будет вовсе, если проект ещё не заведён в Planfix.
+      // Пусть интерфейс скажет почему, а не покажет пустое место.
+      hasPlanfix: !!kase.planfix_id,
+      tasksSyncedAt: kase.planfix_tasks_synced_at || null,
+    });
+  } catch (err) {
+    console.error("Не удалось собрать карточку проекта:", err);
+    res.status(500).json({ message: "Не удалось открыть карточку проекта: " + err.message });
   }
 });
 
