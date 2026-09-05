@@ -329,7 +329,36 @@
     <div class="task-banner hidden" id="tasksBanner"></div>
     <div class="folder-toolbar">
       <input type="text" id="tasksSearch" placeholder="Поиск по задаче или проекту">
+      <!-- Фильтры считает сервер: список обрезается на 500 задачах, и
+           отбор в браузере искал бы внутри первых пятисот. -->
+      <select class="task-filter" id="tasksDue" title="Срок задачи">
+        <option value="any">Срок: любой</option>
+        <option value="overdue">Просрочено</option>
+        <option value="today">Срок сегодня</option>
+        <option value="week">Ближайшие 7 дней</option>
+        <option value="none">Без срока</option>
+      </select>
+      <select class="task-filter" id="tasksType" title="Что за проект">
+        <option value="any">Тип: любой</option>
+        <option value="expertise">Экспертизы</option>
+        <option value="research">Независимые исследования</option>
+        <option value="none">Без типа</option>
+      </select>
+      <select class="task-filter" id="tasksStage" title="Стадия проекта">
+        <option value="any">Стадия: любая</option>
+        <option value="plan">План</option>
+        <option value="active">Активный</option>
+        <option value="control">Контроль</option>
+        <option value="done">Завершённый</option>
+      </select>
+      <select class="task-filter" id="tasksAssignee" title="На ком задача">
+        <option value="">Исполнитель: любой</option>
+      </select>
+      <span class="task-found" id="tasksFound"></span>
     </div>
+    <!-- Что сейчас отобрано — крупно и с крестиками, чтобы короткий
+         список не выглядел как «задач больше нет». -->
+    <div class="task-chips hidden" id="tasksChips"></div>
     <div class="folder-body" id="tasksBody"></div>
   </div>
 
@@ -457,6 +486,26 @@
       </div>
     </div>
     <div class="folder-body" id="historyList"></div>
+  </div>
+
+  <!-- Карточка проекта: всё о проекте на одном экране и без папок.
+       Открывается щелчком по названию проекта в списке задач. Нужна,
+       чтобы посмотреть состояние и быстро поправить статус или задачу,
+       не уходя в файловый браузер. -->
+  <div class="folder-view section hidden" id="caseCardSection" data-view="case">
+    <div class="page-head">
+      <div class="folder-title-row">
+        <button class="folder-up-btn" id="caseCardBackBtn" type="button" title="Назад" aria-label="Назад">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h1 class="folder-title" id="caseCardName">Проект</h1>
+          <div class="case-card-badges" id="caseCardBadges"></div>
+        </div>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;" id="caseCardActions"></div>
+    </div>
+    <div class="folder-body" id="caseCardBody"></div>
   </div>
 
   <!-- Порядок работы: рабочая инструкция, разложенная на шаги по стадиям.

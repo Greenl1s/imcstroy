@@ -370,12 +370,15 @@ let pendingDeepLink = (() => {
 // "tasks" здесь обязателен: страница задач сама пишет ?section=tasks в
 // адрес, и без этого перезагрузка (или ссылка, отправленная коллеге)
 // возвращала бы на файлы.
-const SECTIONS = ["files", "recent", "trash", "history", "tasks", "order"];
+const SECTIONS = ["files", "recent", "trash", "history", "tasks", "order", "case"];
 let pendingSection = (() => {
   if (PICKER_MODE) return null;
   const name = pickerParams.get("section");
   return SECTIONS.includes(name) ? name : null;
 })();
+// Карточка проекта живёт по адресу ?section=case&id=11 — чтобы ссылку
+// можно было отправить коллеге и чтобы F5 не выкидывал на файлы.
+let pendingCaseId = PICKER_MODE ? null : (pickerParams.get("id") || null);
 
 // Имя строки, которую надо подсветить после отрисовки папки.
 let pendingFlashName = "";
@@ -511,6 +514,16 @@ function enterAppForUser() {
     pendingSection = null;
     showColumnsUI();
     loadColumns();
+    // Фильтры задач и открытая карточка восстанавливаются из адреса:
+    // иначе перезагрузка молча сбрасывала бы отбор, и человек решил бы,
+    // что задачи пропали.
+    if (section === "tasks") tasksFiltersFromUrl(pickerParams);
+    if (section === "case" && pendingCaseId) {
+      const id = pendingCaseId;
+      pendingCaseId = null;
+      openCaseCard(id, false);
+      return;
+    }
     showSection(section, false);
     return;
   }
@@ -895,6 +908,8 @@ function showSection(name, pushHistory) {
   if (name === "history") loadHistory();
   if (name === "tasks") loadTasksPage();
   if (name === "order") loadOrderPage();
+  // Карточку не грузим здесь: её открывает openCaseCard, потому что ей
+  // нужен ещё и номер проекта, а showSection знает только имя раздела.
 
   if (!pushHistory || PICKER_MODE) return;
   // В "Файлах" адрес показывает открытую папку (как и раньше),
@@ -1971,6 +1986,41 @@ function escapeHtml(str) {
 
 const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
 
+/**
+ * Ссылка на карточку дела в картотеке арбитражных дел.
+ *
+ * Показываем её только когда номер действительно похож на судебное дело:
+ * у половины проектов в этом поле номер договора, и ссылка на суд вела бы
+ * в никуда. Решает это сервер (courtCase.kadUrl), здесь только рисуем.
+ *
+ * Один код на баннер в папке и на карточку проекта: если писать дважды,
+ * через месяц они разойдутся.
+ */
+function kadLinkHtml(project) {
+  if (!project || !project.kad_url) return "";
+  return `<a class="kad-link" href="${escapeHtml(project.kad_url)}" target="_blank" rel="noopener noreferrer"
+             title="Открыть карточку дела в картотеке арбитражных дел">
+            <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
+            ${escapeHtml(project.court_case_number)}
+          </a>`;
+}
+
+/**
+ * Как называется тип проекта.
+ *
+ * Пустой тип — это не ошибка: так приезжают проекты из Planfix, у которых
+ * по названию тип не распознан. Их нельзя молча записывать в экспертизы,
+ * поэтому у пустого типа своя подпись.
+ *
+ * plural = true для списка («Экспертизы»), false для одного проекта
+ * («Экспертиза»).
+ */
+function caseTypeLabel(type, plural) {
+  if (type === "research") return plural ? "Независимые исследования" : "Независимое исследование";
+  if (type === "expertise") return plural ? "Экспертизы" : "Экспертиза";
+  return "Без типа";
+}
+
 function stageBadgeHtml(project) {
   if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
   const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[project.stage];
@@ -2031,19 +2081,8 @@ function renderCaseBanner(project) {
     actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
   }
 
-  // Ссылку в картотеку показываем только когда номер действительно
-  // похож на судебное дело: у половины проектов там номер договора,
-  // и ссылка на суд в этом случае вела бы в никуда.
-  const kad = project.kad_url
-    ? `<a class="kad-link" href="${escapeHtml(project.kad_url)}" target="_blank" rel="noopener noreferrer"
-          title="Открыть карточку дела в картотеке арбитражных дел">
-         <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
-         ${escapeHtml(project.court_case_number)}
-       </a>`
-    : "";
-
   banner.innerHTML = `
-    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong>${kad}</div>
+    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong>${kadLinkHtml(project)}</div>
     <div class="case-banner-actions">${actions.join("")}</div>
   `;
   banner.classList.remove("hidden");
@@ -2104,7 +2143,73 @@ function renderCaseBanner(project) {
    задачу, не уходя в Planfix. Завершение идёт через Planfix — он остаётся
    источником правды, у себя помечаем только после его подтверждения. */
 
-const tasksFilters = { scope: "all", state: "open", q: "" };
+const tasksFilters = {
+  scope: "all", state: "open", q: "",
+  due: "any", type: "any", stage: "any", assignee: "",
+};
+
+// Подписи для «фишек» под панелью. Держим здесь, а не берём текст из
+// самого выпадающего списка: там «Срок: любой», а в фишке нужно короткое.
+const DUE_LABEL = {
+  overdue: "просрочено", today: "срок сегодня",
+  week: "ближайшие 7 дней", none: "без срока",
+};
+const TYPE_LABEL = {
+  expertise: "экспертизы", research: "независимые исследования", none: "без типа",
+};
+const CASE_STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершённый" };
+
+/** Все фильтры в адресе, чтобы они пережили F5 и возврат из карточки. */
+function tasksFiltersToUrl() {
+  const p = new URLSearchParams({ section: "tasks" });
+  if (tasksFilters.scope !== "all") p.set("scope", tasksFilters.scope);
+  if (tasksFilters.state !== "open") p.set("state", tasksFilters.state);
+  if (tasksFilters.q) p.set("q", tasksFilters.q);
+  if (tasksFilters.due !== "any") p.set("due", tasksFilters.due);
+  if (tasksFilters.type !== "any") p.set("type", tasksFilters.type);
+  if (tasksFilters.stage !== "any") p.set("stage", tasksFilters.stage);
+  if (tasksFilters.assignee) p.set("assignee", tasksFilters.assignee);
+  return `/?${p.toString()}`;
+}
+
+function tasksFiltersFromUrl(params) {
+  const take = (key, allowed, def) => {
+    const v = params.get(key);
+    return v && allowed.includes(v) ? v : def;
+  };
+  tasksFilters.scope = take("scope", ["all", "mine", "assigned"], "all");
+  tasksFilters.state = take("state", ["open", "done"], "open");
+  tasksFilters.q = params.get("q") || "";
+  tasksFilters.due = take("due", ["any", "overdue", "today", "week", "none"], "any");
+  tasksFilters.type = take("type", ["any", "expertise", "research", "none"], "any");
+  tasksFilters.stage = take("stage", ["any", "plan", "active", "control", "done"], "any");
+  tasksFilters.assignee = params.get("assignee") || "";
+  syncTasksFilterControls();
+}
+
+/** Раскладывает состояние фильтров обратно по элементам панели. */
+function syncTasksFilterControls() {
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = value;
+    // Выбранный фильтр подсвечиваем: иначе не видно, почему список короткий.
+    el.classList.toggle("on", value !== "any" && value !== "");
+  };
+  set("tasksDue", tasksFilters.due);
+  set("tasksType", tasksFilters.type);
+  set("tasksStage", tasksFilters.stage);
+  set("tasksAssignee", tasksFilters.assignee);
+
+  const search = document.getElementById("tasksSearch");
+  if (search && search.value !== tasksFilters.q) search.value = tasksFilters.q;
+
+  document.querySelectorAll("#tasksScope .seg-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.scope === tasksFilters.scope));
+  document.querySelectorAll("#tasksState .seg-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.state === tasksFilters.state));
+}
+
 let tasksCache = [];
 // Справочник сотрудников Planfix — из него выбирают исполнителей.
 // Держим один на всю страницу: он меняется редко.
@@ -2125,6 +2230,91 @@ function planfixPersonName(id) {
 function taskDateCell(value) {
   const text = value ? formatWhen(new Date(value).getTime()).split(" ")[0] : "";
   return escapeHtml(text);
+}
+
+/** Сужен ли список хоть одним из новых фильтров. */
+function hasNarrowingFilters() {
+  return tasksFilters.due !== "any" || tasksFilters.type !== "any"
+    || tasksFilters.stage !== "any" || !!tasksFilters.assignee;
+}
+
+/**
+ * Показывает, что именно сейчас отобрано.
+ *
+ * Без этого короткий список читается как «задач больше нет» — а на самом
+ * деле их просто отфильтровали неделю назад и забыли.
+ */
+function renderTasksFilterState(data) {
+  // Список сотрудников приходит с сервера — только те, чьи задачи этому
+  // человеку вообще видны.
+  const select = document.getElementById("tasksAssignee");
+  if (select && data.facets && Array.isArray(data.facets.assignees)) {
+    const chosen = tasksFilters.assignee;
+    select.innerHTML = '<option value="">Исполнитель: любой</option>' +
+      data.facets.assignees.map((p) =>
+        `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+    // Если выбранного сотрудника в новом списке нет (сменили фильтры) —
+    // выбор не молча теряем, а оставляем пунктом, чтобы было видно.
+    if (chosen && !data.facets.assignees.some((p) => String(p.id) === String(chosen))) {
+      const opt = document.createElement("option");
+      opt.value = chosen;
+      opt.textContent = "Выбранный сотрудник (задач нет)";
+      select.appendChild(opt);
+    }
+    select.value = chosen;
+    select.classList.toggle("on", !!chosen);
+  }
+
+  const found = document.getElementById("tasksFound");
+  if (found) {
+    const shown = data.tasks.length;
+    const total = data.total || 0;
+    found.textContent = total > shown
+      ? `Показано ${shown} из ${total}`
+      : (hasNarrowingFilters() || tasksFilters.q ? `Найдено ${total}` : "");
+  }
+
+  const chips = document.getElementById("tasksChips");
+  if (!chips) return;
+  const items = [];
+  if (tasksFilters.due !== "any") items.push(["due", "Срок", DUE_LABEL[tasksFilters.due]]);
+  if (tasksFilters.type !== "any") items.push(["type", "Тип", TYPE_LABEL[tasksFilters.type]]);
+  if (tasksFilters.stage !== "any") items.push(["stage", "Стадия", CASE_STAGE_LABEL[tasksFilters.stage]]);
+  if (tasksFilters.assignee) {
+    const person = (data.facets && data.facets.assignees || [])
+      .find((p) => String(p.id) === String(tasksFilters.assignee));
+    items.push(["assignee", "Исполнитель", person ? person.name : "выбранный сотрудник"]);
+  }
+
+  chips.classList.toggle("hidden", !items.length);
+  if (!items.length) { chips.innerHTML = ""; return; }
+
+  chips.innerHTML = items.map(([key, label, value]) => `
+    <span class="task-chip"><b>${label}:</b> ${escapeHtml(String(value))}
+      <button type="button" data-chip-off="${key}" title="Убрать фильтр" aria-label="Убрать фильтр">✕</button>
+    </span>`).join("") +
+    '<button type="button" class="task-chip-reset" id="tasksChipsReset">сбросить всё</button>';
+
+  chips.querySelectorAll("[data-chip-off]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tasksFilters[btn.dataset.chipOff] = btn.dataset.chipOff === "assignee" ? "" : "any";
+      applyTasksFilters();
+    });
+  });
+  bind(document.getElementById("tasksChipsReset"), "click", () => {
+    tasksFilters.due = "any";
+    tasksFilters.type = "any";
+    tasksFilters.stage = "any";
+    tasksFilters.assignee = "";
+    applyTasksFilters();
+  });
+}
+
+/** Одна точка на все изменения фильтров: обновить панель, адрес и список. */
+function applyTasksFilters() {
+  syncTasksFilterControls();
+  if (!PICKER_MODE) history.replaceState({ view: "section", section: "tasks" }, "", tasksFiltersToUrl());
+  loadTasksPage();
 }
 
 function renderTasksPage(data) {
@@ -2155,8 +2345,11 @@ function renderTasksPage(data) {
     }
   }
 
+  renderTasksFilterState(data);
+
   if (!data.tasks.length) {
     body.innerHTML = `<div class="empty-hint" style="padding:24px;">${
+      hasNarrowingFilters() ? "Под эти фильтры ничего не подходит" :
       tasksFilters.q ? "Ничего не нашли" :
       data.needsBinding && tasksFilters.scope !== "all" ? "Сначала нужна связь с сотрудником Planfix" :
       tasksFilters.scope === "mine" ? "На вас сейчас ничего не назначено" :
@@ -2168,17 +2361,22 @@ function renderTasksPage(data) {
   }
 
   const rows = data.tasks.map((t) => {
-    const overdue = !t.is_done && t.end_date && new Date(t.end_date) < new Date();
-    const typeLabel = t.case_type === "research" ? "Независимые исследования" : "Экспертизы";
+    // Состояние срока считает сервер: по московской дате и один раз на
+    // всех. Раньше это считалось ещё и здесь — и задача со сроком
+    // «сегодня» краснела с полуночи, хотя весь день был впереди.
+    const overdue = t.due_state === "overdue";
+    const typeLabel = caseTypeLabel(t.case_type, true);
     return `
       <tr class="${t.is_done ? "is-done" : ""}${overdue ? " overdue" : ""}" data-task-id="${t.id}">
         <td class="task-num">${t.planfix_id}</td>
         <td class="task-title" data-open-task="${t.id}">${escapeHtml(t.name)}</td>
         <td>
           <span class="task-project-type">${typeLabel}</span>
-          <span class="task-project-name" data-open-case="${escapeHtml(t.folder_path)}">${escapeHtml(t.case_name)}</span>
+          <span class="task-project-name" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
         </td>
-        <td class="task-date">${taskDateCell(t.end_date)}</td>
+        <!-- Метка стоит рядом с самим сроком, а не с названием: «просрочено
+             на 3 дня» — это про дату, и читать их вместе проще. -->
+        <td class="task-date">${taskDateCell(t.end_date)}${dueBadgeHtml(t)}</td>
         <td class="task-people">${escapeHtml(t.assigner || "")}</td>
         <td class="task-people">${escapeHtml(t.assignees || "")}</td>
         <td class="task-actions">${
@@ -2217,14 +2415,38 @@ function renderTasksPage(data) {
   body.querySelectorAll("[data-delete-task]").forEach((btn) => {
     btn.addEventListener("click", () => deleteTask(btn.dataset.deleteTask, btn));
   });
-  body.querySelectorAll("[data-open-case]").forEach((cell) => {
+  // Щелчок по названию проекта открывает его карточку, а не папку:
+  // чаще нужно посмотреть, что с проектом, чем лезть в файлы. В саму
+  // папку из карточки уводит отдельная кнопка.
+  body.querySelectorAll("[data-open-case-id]").forEach((cell) => {
     cell.style.cursor = "pointer";
-    cell.addEventListener("click", () => {
-      const path = cell.dataset.openCase;
-      showSection("files", true);
-      goToFolder(path, buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, path), true);
-    });
+    cell.addEventListener("click", () => openCaseCard(cell.dataset.openCaseId, true));
   });
+}
+
+/** Метка срока рядом с названием: «просрочено 3 дня», «завтра», «сегодня». */
+function dueBadgeHtml(task) {
+  const d = task.days_left;
+  switch (task.due_state) {
+    case "overdue":
+      return ` <span class="due-badge due-over">просрочено ${plural(Math.abs(d), "день", "дня", "дней")}</span>`;
+    case "today":
+      return ' <span class="due-badge due-soon">сегодня</span>';
+    case "soon":
+      return ` <span class="due-badge due-soon">${d === 1 ? "завтра" : `через ${plural(d, "день", "дня", "дней")}`}</span>`;
+    default:
+      return "";
+  }
+}
+
+/** 1 день / 2 дня / 5 дней — иначе «просрочено 3 день». */
+function plural(n, one, few, many) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return `${n} ${many}`;
+  if (last > 1 && last < 5) return `${n} ${few}`;
+  if (last === 1) return `${n} ${one}`;
+  return `${n} ${many}`;
 }
 
 async function loadTasksPage() {
@@ -2234,6 +2456,10 @@ async function loadTasksPage() {
   params.set("scope", tasksFilters.scope);
   params.set("done", tasksFilters.state === "done" ? "1" : "0");
   if (tasksFilters.q) params.set("q", tasksFilters.q);
+  if (tasksFilters.due !== "any") params.set("due", tasksFilters.due);
+  if (tasksFilters.type !== "any") params.set("type", tasksFilters.type);
+  if (tasksFilters.stage !== "any") params.set("stage", tasksFilters.stage);
+  if (tasksFilters.assignee) params.set("assignee", tasksFilters.assignee);
   try {
     const data = await apiFetch(`/api/cases/tasks/all?${params.toString()}`);
     tasksCache = data.tasks;
@@ -2243,14 +2469,20 @@ async function loadTasksPage() {
   }
 }
 
-async function completeTask(id, btn) {
-  const task = tasksCache.find((t) => String(t.id) === String(id));
+/**
+ * Завершение задачи. onDone — что перерисовать после: список задач или
+ * карточку проекта, смотря откуда завершали. Имя ищем и в списке задач,
+ * и в открытой карточке: из карточки страница задач не загружена.
+ */
+async function completeTask(id, btn, onDone) {
+  const task = tasksCache.find((t) => String(t.id) === String(id))
+    || (caseCardData && caseCardData.tasks.find((t) => String(t.id) === String(id)));
   if (task && !confirm(`Завершить задачу «${task.name}»?\nОна будет закрыта и в Planfix.`)) return;
   btn.disabled = true;
   try {
     await apiFetch(`/api/cases/tasks/${id}/complete`, { method: "POST" });
     showToast("Задача завершена");
-    loadTasksPage();
+    if (onDone) onDone(); else loadTasksPage();
   } catch (err) {
     btn.disabled = false;
     alert("Не удалось завершить задачу: " + err.message);
@@ -2285,23 +2517,29 @@ bind(document.getElementById("casesTasksBtn"), "click", () => showSection("tasks
 document.querySelectorAll("#tasksScope .seg-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     tasksFilters.scope = btn.dataset.scope;
-    document.querySelectorAll("#tasksScope .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
-    loadTasksPage();
+    applyTasksFilters();
   });
 });
 
 document.querySelectorAll("#tasksState .seg-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     tasksFilters.state = btn.dataset.state;
-    document.querySelectorAll("#tasksState .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
-    loadTasksPage();
+    applyTasksFilters();
   });
 });
 
 bind(document.getElementById("tasksSearch"), "input", debounce((e) => {
   tasksFilters.q = e.target.value.trim();
-  loadTasksPage();
+  applyTasksFilters();
 }, 300));
+
+for (const [id, key] of [["tasksDue", "due"], ["tasksType", "type"],
+                         ["tasksStage", "stage"], ["tasksAssignee", "assignee"]]) {
+  bind(document.getElementById(id), "change", (e) => {
+    tasksFilters[key] = e.target.value;
+    applyTasksFilters();
+  });
+}
 
 /* ---------- Карточка задачи ----------
    Подробности, комментарии из Planfix и правка исполнителей и срока.
@@ -2361,8 +2599,8 @@ async function openTaskCard(id) {
   body.innerHTML = `
     <h3 class="task-card-title">${escapeHtml(t.name)}</h3>
     <div class="task-card-meta">
-      <span>${escapeHtml(t.case_type === "research" ? "Независимые исследования" : "Экспертизы")}</span>
-      <span class="task-card-project" data-open-case="${escapeHtml(t.folder_path)}">${escapeHtml(t.case_name)}</span>
+      <span>${escapeHtml(caseTypeLabel(t.case_type, true))}</span>
+      <span class="task-card-project" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
       <span>${escapeHtml(t.status_name || "")}</span>
     </div>
     ${t.description ? `<p class="task-card-desc">${escapeHtml(t.description)}</p>` : ""}
@@ -2478,14 +2716,15 @@ async function openTaskCard(id) {
     }
   });
 
-  const projectLink = body.querySelector("[data-open-case]");
+  // Как и в списке: щелчок по проекту ведёт в его карточку. Поведение
+  // должно быть одинаковым, куда бы человек ни ткнул.
+  const projectLink = body.querySelector("[data-open-case-id]");
   if (projectLink) {
     projectLink.style.cursor = "pointer";
     projectLink.addEventListener("click", () => {
-      const path = projectLink.dataset.openCase;
+      const id = projectLink.dataset.openCaseId;
       closeTaskCard();
-      showSection("files", true);
-      goToFolder(path, buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, path), true);
+      openCaseCard(id, true);
     });
   }
 }
@@ -3678,6 +3917,271 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
   }
 });
 
+/* ---------- Карточка проекта ----------
+   Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи,
+   решения суда, история. Открывается щелчком по названию проекта в
+   списке задач, живёт по своему адресу (?section=case&id=11) — ссылку
+   можно отправить коллеге, и F5 не выкидывает на файлы.
+
+   Стадию отсюда не двигаем намеренно: перевод стадии переносит папку на
+   диске и меняет Planfix. Для этого есть «Что установил суд» — и тогда
+   в истории видно, почему проект переехал. Статус же меняется сразу:
+   он ничего не двигает. */
+
+let caseCardId = null;
+let caseCardData = null;
+
+// Подписи статусов проекта. Раньше они были только в разметке карточки
+// правки, и показать статус текстом было нечем.
+const STATUS_LABEL = { waiting: "Ожидание", in_progress: "В работе", problem: "Проблема" };
+
+async function openCaseCard(id, pushHistory) {
+  caseCardId = String(id);
+  showSection("case", false);
+  if (pushHistory && !PICKER_MODE) {
+    history.pushState({ view: "section", section: "case", caseId: caseCardId },
+      "", `/?section=case&id=${encodeURIComponent(caseCardId)}`);
+  }
+  await loadCaseCard();
+}
+
+async function loadCaseCard() {
+  const body = document.getElementById("caseCardBody");
+  const badges = document.getElementById("caseCardBadges");
+  const actions = document.getElementById("caseCardActions");
+  if (!body || !caseCardId) return;
+
+  body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+  badges.innerHTML = "";
+  actions.innerHTML = "";
+
+  try {
+    caseCardData = await apiFetch(`/api/cases/${encodeURIComponent(caseCardId)}/card`);
+  } catch (err) {
+    document.getElementById("caseCardName").textContent = "Проект";
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось открыть карточку: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  renderCaseCard(caseCardData);
+}
+
+function renderCaseCard(data) {
+  const p = data.project;
+  const canWrite = !!data.canWrite;
+  document.getElementById("caseCardName").textContent = p.name;
+
+  /* --- шапка: стадия, статус, тип, ссылка в картотеку --- */
+  const typeLabel = caseTypeLabel(p.type, false);
+  document.getElementById("caseCardBadges").innerHTML = `
+    ${stageBadgeHtml(p)}
+    <span class="case-chip">${escapeHtml(STATUS_LABEL[p.status] || p.status || "")}</span>
+    <span class="case-chip muted">${escapeHtml(typeLabel)}</span>
+    ${kadLinkHtml(p)}`;
+
+  /* --- кнопки --- */
+  const actions = [`<button class="upload-btn" id="ccFolderBtn" type="button">Открыть папку</button>`];
+  if (canWrite && !p.is_cancelled) {
+    actions.push(`<button class="upload-btn" id="ccCourtBtn" type="button">Что установил суд</button>`);
+    actions.push(`<button class="upload-btn" id="ccEditBtn" type="button">Редактировать</button>`);
+    actions.push(`<button class="create-btn" id="ccTaskBtn" type="button" style="height:34px;">Новая задача</button>`);
+  }
+  document.getElementById("caseCardActions").innerHTML = actions.join("");
+
+  /* --- тело --- */
+  const statusBlock = canWrite && !p.is_cancelled ? `
+    <div class="case-status-row">
+      <span class="case-status-label">Статус проекта</span>
+      <select id="ccStatus">
+        <option value="waiting"${p.status === "waiting" ? " selected" : ""}>Ожидание</option>
+        <option value="in_progress"${p.status === "in_progress" ? " selected" : ""}>В работе</option>
+        <option value="problem"${p.status === "problem" ? " selected" : ""}>Проблема</option>
+      </select>
+      <span class="case-status-hint">меняется сразу; стадию двигает «Что установил суд» — она переносит папку</span>
+    </div>` : "";
+
+  const cancelled = p.is_cancelled ? `
+    <p class="case-cancelled">Проект отменён${p.cancel_reason ? `: ${escapeHtml(p.cancel_reason)}` : "."}</p>` : "";
+
+  const readonly = !canWrite ? `
+    <p class="case-readonly">Только просмотр: права на изменение этого проекта не выданы.</p>` : "";
+
+  document.getElementById("caseCardBody").innerHTML = `
+    ${cancelled}${readonly}${statusBlock}
+    <div class="case-grid">
+      <div>
+        ${caseCardTasksHtml(data)}
+        ${caseCardCourtHtml(data)}
+      </div>
+      <div>
+        ${caseCardFactsHtml(p, canWrite)}
+        ${caseCardHistoryHtml(data)}
+      </div>
+    </div>`;
+
+  wireCaseCard(data);
+}
+
+function caseCardTasksHtml(data) {
+  const c = data.taskCounts;
+  const parts = [`${plural(c.open, "открытая", "открытых", "открытых")}`];
+  if (c.overdue) parts.push(`${plural(c.overdue, "просрочена", "просрочено", "просрочено")}`);
+  if (c.done) parts.push(`${plural(c.done, "завершена", "завершены", "завершено")}`);
+
+  if (!data.hasPlanfix) {
+    return `<h3 class="case-sec">Задачи</h3>
+      <p class="empty-hint">Задач нет: проект ещё не заведён в Planfix, а задачи живут там.</p>`;
+  }
+  if (!data.tasks.length) {
+    return `<h3 class="case-sec">Задачи</h3>
+      <p class="empty-hint">По этому проекту задач пока не ставили.</p>`;
+  }
+
+  const rows = data.tasks.map((t) => `
+    <div class="case-task${t.is_done ? " is-done" : ""}" data-cc-task="${t.id}">
+      ${t.is_done
+        ? `<span class="case-tick on" title="Завершена">${svgCheck}</span>`
+        : t.can_write
+          ? `<button class="case-tick" type="button" data-cc-complete="${t.id}" title="Завершить задачу" aria-label="Завершить задачу"></button>`
+          : ""}
+      <span class="case-task-name" data-cc-open="${t.id}">${escapeHtml(t.name)}</span>
+      ${dueBadgeHtml(t)}
+      <span class="case-task-meta">${
+        t.is_done
+          ? `завершена${t.completed_at ? " " + fmtDate(t.completed_at) : ""}`
+          : `${t.due_iso ? fmtDate(t.due_iso) : "без срока"}${t.assignees ? " · " + escapeHtml(t.assignees) : ""}`
+      }</span>
+    </div>`).join("");
+
+  return `<h3 class="case-sec">Задачи · ${parts.join(", ")}</h3><div class="case-tasks">${rows}</div>`;
+}
+
+function caseCardCourtHtml(data) {
+  if (!data.courtEvents.length) return "";
+  const rows = data.courtEvents.map((e) => `
+    <div class="case-ev">
+      <div class="case-ev-name">${escapeHtml(e.outcome_name)}</div>
+      <div class="case-ev-meta">Определение от ${fmtDate(e.event_date)}${
+        e.applied ? ", применено" : ", не применено"}${
+        e.created_by_name ? `, вписал ${escapeHtml(e.created_by_name)}` : ""}</div>
+      ${e.note ? `<div class="case-ev-meta">${escapeHtml(e.note)}</div>` : ""}
+    </div>`).join("");
+  return `<div class="case-subpanel"><h3 class="case-sec">Что решал суд</h3>${rows}</div>`;
+}
+
+function caseCardFactsHtml(p, canWrite) {
+  const rows = [
+    ["Вид экспертизы", p.expertise_type],
+    ["Суд / заказчик", p.court_or_customer],
+    ["Номер дела / договора", p.case_number],
+    ["Судья", p.judge_name],
+    ["Сторона 1", p.party1],
+    ["Сторона 2", p.party2],
+    ["Эксперты", p.experts],
+    ["Руководитель", p.manager_name],
+    ["Организация", p.organization],
+    ["Год", p.year],
+    ["Описание", p.description],
+  ];
+  // Заполненные показываем строками, а незаполненные — одной строкой
+  // списком. Одиннадцать подряд «не заполнено» ничего не сообщают, кроме
+  // того, что карточку не вели: перечисление короче и читается сразу.
+  const filled = rows.filter(([, v]) => v !== null && v !== undefined && v !== "");
+  const missing = rows.filter(([, v]) => v === null || v === undefined || v === "").map(([l]) => l);
+
+  const html = filled.map(([label, value]) => `
+    <dt>${label}</dt><dd>${escapeHtml(String(value))}</dd>`).join("");
+
+  return `<h3 class="case-sec">Реквизиты</h3>
+    <dl class="case-facts">${html}
+      <dt>Папка</dt><dd class="case-path">${escapeHtml(p.folder_path)}</dd>
+    </dl>
+    ${missing.length ? `<p class="case-missing">Не заполнено: ${escapeHtml(missing.join(", ").toLowerCase())}.${
+      // Про «Редактировать» говорим только тому, у кого эта кнопка есть.
+      canWrite ? " Поправить можно в «Редактировать»." : ""}</p>` : ""}`;
+}
+
+function caseCardHistoryHtml(data) {
+  if (!data.history.length) return "";
+  const rows = data.history.map((h) => {
+    const label = (CASE_ACTIONS[h.action] || h.action);
+    return `<div class="case-ev">
+      <div class="case-ev-name">${escapeHtml(label)}</div>
+      <div class="case-ev-meta">${fmtDate(h.created_at)}${
+        h.actor_name ? " · " + escapeHtml(h.actor_name) : ""}${
+        h.note ? " · " + escapeHtml(h.note) : ""}</div>
+    </div>`;
+  }).join("");
+  return `<h3 class="case-sec" style="margin-top:22px;">История проекта</h3>${rows}`;
+}
+
+/** Понятные названия для записей case_history. */
+const CASE_ACTIONS = {
+  created: "Проект создан",
+  updated: "Карточка проекта изменена",
+  stage: "Смена стадии",
+  cancel: "Проект отменён",
+  court_event: "Применено решение суда",
+  restore: "Проект восстановлен",
+};
+
+function wireCaseCard(data) {
+  const p = data.project;
+
+  bind(document.getElementById("ccFolderBtn"), "click", () => {
+    // Раздел переключаем без записи в историю: запись делает goToFolder.
+    // Иначе на переход в папку уходило две записи, и «назад» возвращало
+    // не в карточку, а в промежуточное состояние.
+    showSection("files", false);
+    goToFolder(p.folder_path,
+      buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, p.folder_path), true);
+  });
+
+  const courtBtn = document.getElementById("ccCourtBtn");
+  if (courtBtn) courtBtn.addEventListener("click", () => openCourt(p));
+
+  const editBtn = document.getElementById("ccEditBtn");
+  if (editBtn) editBtn.addEventListener("click", () => openCaseEdit(p));
+
+  const taskBtn = document.getElementById("ccTaskBtn");
+  // Проект уже известен — окно открываем с закреплённым проектом, как из
+  // его папки: менять его в этом окне незачем.
+  if (taskBtn) taskBtn.addEventListener("click", () => openTaskNew(p));
+
+  // Статус меняем сразу, без кнопки «Сохранить»: это одно поле, и лишний
+  // шаг тут только мешает. При отказе возвращаем прежнее значение.
+  const status = document.getElementById("ccStatus");
+  if (status) {
+    status.addEventListener("change", async () => {
+      const chosen = status.value;
+      const before = p.status;
+      status.disabled = true;
+      try {
+        await apiFetch(`/api/cases/${p.id}`, {
+          method: "PATCH", body: JSON.stringify({ status: chosen }),
+        });
+        p.status = chosen;
+        showToast("Статус проекта изменён");
+        loadCaseCard();
+      } catch (err) {
+        status.value = before;
+        alert("Не удалось изменить статус: " + err.message);
+      } finally {
+        status.disabled = false;
+      }
+    });
+  }
+
+  const body = document.getElementById("caseCardBody");
+  body.querySelectorAll("[data-cc-open]").forEach((el) => {
+    el.addEventListener("click", () => openTaskCard(el.dataset.ccOpen));
+  });
+  body.querySelectorAll("[data-cc-complete]").forEach((btn) => {
+    btn.addEventListener("click", () => completeTask(btn.dataset.ccComplete, btn, () => loadCaseCard()));
+  });
+}
+
+bind(document.getElementById("caseCardBackBtn"), "click", () => history.back());
+
 /* ---------- Порядок работы ----------
    Рабочая инструкция, разложенная на шаги по стадиям. Сама инструкция —
    это документ на много страниц, и держать её здесь целиком незачем:
@@ -4208,6 +4712,14 @@ function goToFolder(path, trail, pushHistory) {
 window.addEventListener("popstate", (e) => {
   const state = e.state;
   if (state && state.view === "section") {
+    // Карточке нужен ещё и номер проекта — иначе «назад» из папки
+    // возвращало бы на пустой экран карточки.
+    if (state.section === "case" && state.caseId) {
+      caseCardId = String(state.caseId);
+      showSection("case", false);
+      loadCaseCard();
+      return;
+    }
     showSection(state.section, false);
     return;
   }
