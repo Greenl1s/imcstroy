@@ -166,6 +166,7 @@ app.post("/api/auth/login", async (req, res) => {
         can_tools: perms.can_tools,
         can_db: perms.can_db,
         can_cases: perms.can_cases,
+        can_manage: perms.can_manage,
       },
     });
   } catch (err) {
@@ -187,6 +188,7 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
       can_tools: req.user.can_tools,
       can_db: req.user.can_db,
       can_cases: req.user.can_cases,
+      can_manage: req.user.can_manage,
       planfix_name: req.user.planfix_name,
       planfix_user_id: req.user.planfix_user_id,
     },
@@ -306,11 +308,13 @@ app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
 
 app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    const { username, password, role, can_tools, can_db, can_cases } = req.body || {};
+    const { username, password, role, can_tools, can_db, can_cases, can_manage } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ message: "Укажите логин и пароль" });
     }
-    const user = await users.createUser({ username, password, role, can_tools, can_db, can_cases });
+    const user = await users.createUser({
+      username, password, role, can_tools, can_db, can_cases, can_manage,
+    });
     res.json({ user });
   } catch (err) {
     if (err.code === "23505") {

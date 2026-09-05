@@ -54,16 +54,19 @@ function clearAuthCookie(res) {
 
 async function getPermissions(userId) {
   const res = await db.query(
-    "SELECT can_tools, can_db, can_cases FROM fm_permissions WHERE user_id = $1",
+    "SELECT can_tools, can_db, can_cases, can_manage FROM fm_permissions WHERE user_id = $1",
     [userId]
   );
-  return res.rows[0] || { can_tools: false, can_db: false, can_cases: false };
+  return res.rows[0] || { can_tools: false, can_db: false, can_cases: false, can_manage: false };
 }
 
 /**
  * Личность (id/username/role) — из общей cookie, подписанной либо этим
  * сайтом, либо "Учётом оборудования" (у обоих один и тот же JWT_SECRET).
- * Права на разделы ИСУ (can_tools/can_db/can_cases) — из fm_permissions.
+ * Права на разделы ИСУ (can_tools/can_db/can_cases) и признак руководителя
+ * центра (can_manage) — из fm_permissions. Руководителя держим здесь, а не
+ * в users.role: таблица users общая с "Учётом оборудования", и новая роль
+ * там сломала бы соседний сайт.
  */
 async function requireAuth(req, res, next) {
   const token = req.cookies[COOKIE_NAME];
@@ -94,6 +97,7 @@ async function requireAuth(req, res, next) {
       can_tools: perms.can_tools,
       can_db: perms.can_db,
       can_cases: perms.can_cases,
+      can_manage: perms.can_manage,
       planfix_name: nameRows.length ? nameRows[0].planfix_name : null,
       planfix_user_id: nameRows.length ? nameRows[0].planfix_user_id : null,
     };

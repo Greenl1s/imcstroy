@@ -12,7 +12,8 @@ const SELECT_JOINED = `
   SELECT u.id, u.username, u.role,
          COALESCE(p.can_tools, false) AS can_tools,
          COALESCE(p.can_db, false) AS can_db,
-         COALESCE(p.can_cases, false) AS can_cases
+         COALESCE(p.can_cases, false) AS can_cases,
+         COALESCE(p.can_manage, false) AS can_manage
   FROM users u
   LEFT JOIN fm_permissions p ON p.user_id = u.id
 `;
@@ -32,7 +33,7 @@ async function countAdmins() {
   return res.rows[0].c;
 }
 
-async function createUser({ username, password, role, can_tools, can_db, can_cases }) {
+async function createUser({ username, password, role, can_tools, can_db, can_cases, can_manage }) {
   const hash = await bcrypt.hash(password, 12);
   const client = await db.connect();
   try {
@@ -45,12 +46,16 @@ async function createUser({ username, password, role, can_tools, can_db, can_cas
     );
     const user = rows[0];
     await client.query(
-      `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases)
-       VALUES ($1, $2, $3, $4)`,
-      [user.id, !!can_tools, !!can_db, !!can_cases]
+      `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases, can_manage)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.id, !!can_tools, !!can_db, !!can_cases, !!can_manage]
     );
     await client.query("COMMIT");
-    return { ...user, can_tools: !!can_tools, can_db: !!can_db, can_cases: !!can_cases };
+    return {
+      ...user,
+      can_tools: !!can_tools, can_db: !!can_db,
+      can_cases: !!can_cases, can_manage: !!can_manage,
+    };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -81,11 +86,12 @@ async function updateUser(id, fields) {
     await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
   }
 
-  if (fields.can_tools !== undefined || fields.can_db !== undefined || fields.can_cases !== undefined) {
+  if (fields.can_tools !== undefined || fields.can_db !== undefined
+      || fields.can_cases !== undefined || fields.can_manage !== undefined) {
     // На случай, если у пользователя ещё вообще не было своей строки прав ИСУ.
     await db.query(
-      `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases)
-       VALUES ($1, false, false, false)
+      `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases, can_manage)
+       VALUES ($1, false, false, false, false)
        ON CONFLICT (user_id) DO NOTHING`,
       [id]
     );
@@ -95,6 +101,7 @@ async function updateUser(id, fields) {
     if (fields.can_tools !== undefined) { permSets.push(`can_tools = $${j++}`); permValues.push(!!fields.can_tools); }
     if (fields.can_db !== undefined) { permSets.push(`can_db = $${j++}`); permValues.push(!!fields.can_db); }
     if (fields.can_cases !== undefined) { permSets.push(`can_cases = $${j++}`); permValues.push(!!fields.can_cases); }
+    if (fields.can_manage !== undefined) { permSets.push(`can_manage = $${j++}`); permValues.push(!!fields.can_manage); }
     permValues.push(id);
     await db.query(`UPDATE fm_permissions SET ${permSets.join(", ")} WHERE user_id = $${j}`, permValues);
   }

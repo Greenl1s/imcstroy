@@ -14,6 +14,8 @@ const caseChat = require("./caseChat");
 const auth = require("./auth");
 const journalExcel = require("./journalExcel");
 const courtCase = require("./courtCase");
+const courtOutcomes = require("./courtOutcomes");
+const workCalendar = require("./workCalendar");
 
 /**
  * Пересобирает журнал и никогда не мешает основной операции — если
@@ -65,6 +67,20 @@ function requireCasesAccess(req, res, next) {
   res.status(403).json({ message: "Нет доступа к разделу «Дела»" });
 }
 cases.use(requireCasesAccess);
+
+/**
+ * Руководитель центра. По инструкции именно он принимает решение об отмене
+ * уже начатой экспертизы (п. 29.3) и о нестандартных случаях оплаты
+ * (п. 27.3), поэтому применение таких исходов закрыто для остальных.
+ *
+ * Признак живёт в fm_permissions.can_manage, а не в users.role: таблица
+ * users общая с "Учётом оборудования", и новое значение роли сломало бы
+ * соседний сайт. Администратор считается руководителем — иначе некому
+ * будет разблокировать процесс, если руководитель в отпуске.
+ */
+function isManager(user) {
+  return user.role === "admin" || !!user.can_manage;
+}
 
 /**
  * Для действий, которые меняют папку конкретного проекта (смена стадии,
@@ -852,7 +868,10 @@ cases.post("/:id/planfix-tasks", loadCase, requireWriteOnCaseFolder, async (req,
   res.json({ results });
 });
 
-cases.get("/:id", loadCase, async (req, res) => {
+// Только цифры: иначе этот маршрут перехватывал бы справочники, которые
+// объявлены ниже ("/court-outcomes", "/instruction-steps",
+// "/work-calendar"), и они отвечали бы «проект не найден».
+cases.get("/:id(\\d+)", loadCase, async (req, res) => {
   const { rows } = await db.query(`${CASE_LIST_QUERY} AND c.id = $1`, [req.params.id]);
   res.json(rows[0]);
 });
@@ -1127,49 +1146,64 @@ const NEXT_STAGE = { plan: "active", active: "control", control: "done" };
 const STAGE_LABEL = { plan: "План", active: "Активный", control: "Контроль", done: "Завершённый" };
 
 /** Перевести проект на следующую стадию — папка переезжает, журнал обновляется. */
+/**
+ * Перевод проекта на другую стадию: папка переезжает, права едут за ней,
+ * пишется история и ключевое событие.
+ *
+ * Вынесено из роута отдельной функцией, потому что то же самое делает
+ * применение решения суда (п. 17.2 инструкции: «изменить этап и
+ * переместить папку»). Дублировать этот код в двух местах нельзя — они
+ * бы разошлись.
+ *
+ * status: чем заменить статус. По умолчанию «Ожидание», как было раньше;
+ * инструкция для перехода в «Активный» требует «В работе» (п. 17.2).
+ */
+async function moveCaseToStage(kase, targetStage, user, { status = "waiting", note } = {}) {
+  if (kase.is_cancelled) throw Object.assign(new Error("Проект отменён"), { status: 409 });
+  if (!targetStage || !STAGE_LABEL[targetStage]) {
+    throw Object.assign(new Error("Некорректная стадия"), { status: 400 });
+  }
+  if (targetStage === kase.stage) {
+    throw Object.assign(new Error("Проект уже на этой стадии"), { status: 409 });
+  }
+
+  const newParent = caseFolders.stageRootPath(targetStage);
+  const newPath = await files.moveEntry(kase.folder_path, newParent);
+  await folderPermissions.renamePath(kase.folder_path, newPath);
+
+  const { rows: updated } = await db.query(
+    `UPDATE cases
+        SET stage = $2, folder_path = $3, status = $4, updated_at = now(),
+            archived_at = CASE WHEN $2 = 'done' THEN now() ELSE archived_at END
+      WHERE id = $1 RETURNING *`,
+    [kase.id, targetStage, newPath, status]
+  );
+
+  await db.query(
+    `INSERT INTO case_history (case_id, action, from_stage, to_stage, actor_id, note)
+     VALUES ($1, 'stage_changed', $2, $3, $4, $5)`,
+    [kase.id, kase.stage, targetStage, user.id,
+     note || `Переведён на стадию «${STAGE_LABEL[targetStage]}»`]
+  );
+
+  events.log(user, "case_stage", {
+    path: newPath,
+    name: kase.name,
+    isDir: true,
+    details: { from: kase.stage, to: targetStage, label: STAGE_LABEL[targetStage] },
+  });
+
+  refreshJournalSafely();
+  syncPlanfixSafely(kase.id);
+  return updated[0];
+}
+
 cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) => {
   try {
-    const kase = req.case;
-    if (kase.is_cancelled) return res.status(409).json({ message: "Проект отменён" });
-
     // Стадию можно указать явно (выбор из списка на карточке) — если не
     // указана, используем прежнее поведение "на следующую по порядку".
-    const targetStage = req.body?.stage || NEXT_STAGE[kase.stage];
-    if (!targetStage || !STAGE_LABEL[targetStage]) {
-      return res.status(400).json({ message: "Некорректная стадия" });
-    }
-    if (targetStage === kase.stage) {
-      return res.status(409).json({ message: "Проект уже на этой стадии" });
-    }
-
-    const newParent = caseFolders.stageRootPath(targetStage);
-    const newPath = await files.moveEntry(kase.folder_path, newParent);
-    await folderPermissions.renamePath(kase.folder_path, newPath);
-
-    const { rows: updated } = await db.query(
-      `UPDATE cases
-          SET stage = $2, folder_path = $3, status = 'waiting', updated_at = now(),
-              archived_at = CASE WHEN $2 = 'done' THEN now() ELSE archived_at END
-        WHERE id = $1 RETURNING *`,
-      [kase.id, targetStage, newPath]
-    );
-
-    await db.query(
-      `INSERT INTO case_history (case_id, action, from_stage, to_stage, actor_id, note)
-       VALUES ($1, 'stage_changed', $2, $3, $4, $5)`,
-      [kase.id, kase.stage, targetStage, req.user.id, `Переведён на стадию «${STAGE_LABEL[targetStage]}»`]
-    );
-
-    events.log(req.user, "case_stage", {
-      path: newPath,
-      name: kase.name,
-      isDir: true,
-      details: { from: kase.stage, to: targetStage, label: STAGE_LABEL[targetStage] },
-    });
-
-    res.json(updated[0]);
-    refreshJournalSafely();
-    syncPlanfixSafely(kase.id);
+    const targetStage = req.body?.stage || NEXT_STAGE[req.case.stage];
+    res.json(await moveCaseToStage(req.case, targetStage, req.user));
   } catch (err) {
     console.error("Не удалось изменить стадию:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось изменить стадию" });
@@ -1177,45 +1211,345 @@ cases.post("/:id/advance", loadCase, requireWriteOnCaseFolder, async (req, res) 
 });
 
 /** Отменить проект — с любой стадии. Папка переезжает в архив «Отменённые». */
+/**
+ * Отмена проекта: папка в «04. Архив / Отмененные», причина в историю
+ * (раздел 29 инструкции). Тоже отдельной функцией — её вызывает и роут,
+ * и применение решения суда.
+ */
+async function cancelCase(kase, user, reason) {
+  if (kase.is_cancelled) throw Object.assign(new Error("Проект уже отменён"), { status: 409 });
+  const clean = String(reason || "").trim();
+  if (!clean) throw Object.assign(new Error("Укажите причину отмены"), { status: 400 });
+
+  const newParent = caseFolders.cancelledRootPath();
+  const newPath = await files.moveEntry(kase.folder_path, newParent);
+  await folderPermissions.renamePath(kase.folder_path, newPath);
+
+  const { rows: updated } = await db.query(
+    `UPDATE cases
+        SET is_cancelled = true, cancel_reason = $2, folder_path = $3,
+            updated_at = now(), archived_at = now()
+      WHERE id = $1 RETURNING *`,
+    [kase.id, clean, newPath]
+  );
+
+  await db.query(
+    `INSERT INTO case_history (case_id, action, from_stage, actor_id, note)
+     VALUES ($1, 'cancelled', $2, $3, $4)`,
+    [kase.id, kase.stage, user.id, clean]
+  );
+
+  events.log(user, "case_cancel", {
+    path: kase.folder_path, name: kase.name, isDir: true, details: { reason: clean },
+  });
+
+  refreshJournalSafely();
+  syncPlanfixSafely(kase.id);
+  return updated[0];
+}
+
 cases.post("/:id/cancel", loadCase, requireWriteOnCaseFolder, async (req, res) => {
   try {
-    const kase = req.case;
-    if (kase.is_cancelled) return res.status(409).json({ message: "Проект уже отменён" });
-
-    const reason = String(req.body?.reason || "").trim();
-    if (!reason) return res.status(400).json({ message: "Укажите причину отмены" });
-
-    const newParent = caseFolders.cancelledRootPath();
-    const newPath = await files.moveEntry(kase.folder_path, newParent);
-    await folderPermissions.renamePath(kase.folder_path, newPath);
-
-    const { rows: updated } = await db.query(
-      `UPDATE cases
-          SET is_cancelled = true, cancel_reason = $2, folder_path = $3,
-              updated_at = now(), archived_at = now()
-        WHERE id = $1 RETURNING *`,
-      [kase.id, reason, newPath]
-    );
-
-    await db.query(
-      `INSERT INTO case_history (case_id, action, from_stage, actor_id, note)
-       VALUES ($1, 'cancelled', $2, $3, $4)`,
-      [kase.id, kase.stage, req.user.id, reason]
-    );
-
-    events.log(req.user, "case_cancel", {
-      path: kase.folder_path,
-      name: kase.name,
-      isDir: true,
-      details: { reason },
-    });
-
-    res.json(updated[0]);
-    refreshJournalSafely();
-    syncPlanfixSafely(kase.id);
+    res.json(await cancelCase(req.case, req.user, req.body?.reason));
   } catch (err) {
     console.error("Не удалось отменить проект:", err);
     res.status(err.status || 500).json({ message: err.message || "Не удалось отменить проект" });
+  }
+});
+
+/* ---------------- Что установил суд ----------------
+   Раздел 16.3, 24.3 и 29 рабочей инструкции. Программа НЕ применяет
+   решение сама: она считает предложение и ждёт подтверждения, потому
+   что перевод стадии двигает папку и меняет Planfix. */
+
+/** Справочник исходов — для выбора в окне и для правки правил. */
+cases.get("/court-outcomes", async (req, res) => {
+  try {
+    res.json({
+      outcomes: await courtOutcomes.listOutcomes(req.query.stage || null),
+      rules: courtOutcomes.RULE_KINDS,
+      applies: courtOutcomes.APPLIES,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить справочник исходов: " + err.message });
+  }
+});
+
+/**
+ * Правка правил. Доступна всем с доступом к «Делам» — так решил
+ * заказчик. Чтобы регламент не разъезжался с документом незаметно,
+ * каждое изменение пишется в историю системы с автором и датой.
+ */
+cases.post("/court-outcomes", async (req, res) => {
+  try {
+    const saved = await courtOutcomes.saveOutcome(req.body?.id || null, req.body, req.user.id);
+    events.log(req.user, "outcome_rule", {
+      name: saved.name, details: { action: req.body?.id ? "изменено" : "добавлено" },
+    });
+    res.json(saved);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+cases.delete("/court-outcomes/:id", async (req, res) => {
+  try {
+    const outcome = await courtOutcomes.getOutcome(req.params.id);
+    if (!outcome) return res.status(404).json({ message: "Исход не найден" });
+    await courtOutcomes.removeOutcome(req.params.id);
+    events.log(req.user, "outcome_rule", { name: outcome.name, details: { action: "убрано" } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+/** Порядок работы по стадиям — шаги из инструкции. */
+cases.get("/instruction-steps", async (req, res) => {
+  try {
+    res.json({ steps: await courtOutcomes.listSteps() });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить порядок работы: " + err.message });
+  }
+});
+
+/** История решений суда по проекту. */
+cases.get("/:id/court-events", loadCase, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT e.*, c.username AS created_by_name, a.username AS applied_by_name
+       FROM case_court_events e
+       LEFT JOIN users c ON c.id = e.created_by
+       LEFT JOIN users a ON a.id = e.applied_by
+      WHERE e.case_id = $1
+      ORDER BY e.event_date DESC, e.id DESC`,
+    [req.params.id]
+  );
+  res.json({ events: rows });
+});
+
+/**
+ * Записать решение суда и получить предложение.
+ *
+ * Запись ложится в историю сразу — даже если предложение потом не
+ * применят: движение дела важно само по себе, и его же будет заполнять
+ * автоматика, когда подключим картотеку.
+ */
+cases.post("/:id/court-events", loadCase, requireWriteOnCaseFolder, async (req, res) => {
+  try {
+    const outcome = await courtOutcomes.getOutcome(req.body?.outcomeId);
+    if (!outcome) return res.status(400).json({ message: "Выберите, что установил суд" });
+
+    const eventDate = workCalendar.toIso(workCalendar.parseIso(req.body?.eventDate));
+    if (!eventDate) return res.status(400).json({ message: "Укажите дату определения" });
+
+    const input = {
+      eventDate,
+      hearingDate: workCalendar.toIso(workCalendar.parseIso(req.body?.hearingDate)),
+      expertiseDue: workCalendar.toIso(workCalendar.parseIso(req.body?.expertiseDue)),
+    };
+    const plan = await courtOutcomes.buildPlan(req.case, outcome, input);
+
+    const { rows } = await db.query(
+      `INSERT INTO case_court_events
+         (case_id, outcome_id, outcome_name, event_date, hearing_date, expertise_due,
+          note, source, plan, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',$8::jsonb,$9) RETURNING *`,
+      [req.case.id, outcome.id, outcome.name, eventDate, input.hearingDate, input.expertiseDue,
+       String(req.body?.note || "").trim() || null, JSON.stringify(plan), req.user.id]
+    );
+
+    events.log(req.user, "court_event", {
+      path: req.case.folder_path, name: req.case.name, isDir: true,
+      details: { outcome: outcome.name, date: eventDate },
+    });
+
+    res.status(201).json({ event: rows[0], plan });
+  } catch (err) {
+    console.error("Не удалось записать решение суда:", err);
+    res.status(500).json({ message: "Не удалось записать решение суда: " + err.message });
+  }
+});
+
+/** Удалить ошибочно вписанное решение — пока оно не применено. */
+cases.delete("/court-events/:id", async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT e.*, c.folder_path FROM case_court_events e
+       JOIN cases c ON c.id = e.case_id WHERE e.id = $1`, [req.params.id]);
+  const event = rows[0];
+  if (!event) return res.status(404).json({ message: "Запись не найдена" });
+  if (event.applied) {
+    return res.status(409).json({
+      message: "Это решение уже применено — запись удалить нельзя. Она нужна, чтобы было видно, почему проект переехал.",
+    });
+  }
+  if (!(await canWriteTask(req.user, { folder_path: event.folder_path }))) {
+    return res.status(403).json({ message: "Нет прав на изменение этого проекта" });
+  }
+  await db.query("DELETE FROM case_court_events WHERE id = $1", [req.params.id]);
+  res.json({ ok: true });
+});
+
+/**
+ * Применить предложение: перевести стадию, поменять статус, поставить
+ * задачи. Всё, что здесь происходит, человек уже увидел на экране.
+ */
+cases.post("/court-events/:id/apply", async (req, res) => {
+  try {
+    const { rows } = await db.query("SELECT * FROM case_court_events WHERE id = $1", [req.params.id]);
+    const event = rows[0];
+    if (!event) return res.status(404).json({ message: "Запись не найдена" });
+    if (event.applied) return res.status(409).json({ message: "Это решение уже применено" });
+
+    const { rows: kases } = await db.query(
+      "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [event.case_id]);
+    const kase = kases[0];
+    if (!kase) return res.status(404).json({ message: "Проект не найден" });
+    if (!(await canWriteTask(req.user, kase))) {
+      return res.status(403).json({ message: "Нет прав на изменение этого проекта" });
+    }
+
+    const outcome = await courtOutcomes.getOutcome(event.outcome_id);
+    if (!outcome) return res.status(400).json({ message: "Исход убран из справочника — применить нечего" });
+
+    // Инструкция прямо требует решения руководителя для отмены активной
+    // экспертизы (п. 29.3) и нестандартных случаев оплаты (п. 27.3).
+    if (outcome.requires_manager && !isManager(req.user)) {
+      return res.status(403).json({
+        message: "По инструкции это решение принимает руководитель центра. Попросите его подтвердить.",
+      });
+    }
+
+    // Пересчитываем предложение заново, а не берём сохранённое: правила
+    // и календарь могли поправить между записью и применением.
+    const plan = await courtOutcomes.buildPlan(kase, outcome, {
+      eventDate: workCalendar.toIso(event.event_date),
+      hearingDate: workCalendar.toIso(event.hearing_date),
+      expertiseDue: workCalendar.toIso(event.expertise_due),
+    });
+
+    if (plan.needsDecision) {
+      return res.status(409).json({
+        message: "Для этого случая инструкция не задаёт, что делать дальше — переведите проект вручную.",
+      });
+    }
+
+    const done = [];
+    const reason = `${outcome.name} (определение от ${workCalendar.toIso(event.event_date)})`;
+
+    if (plan.cancel) {
+      await cancelCase(kase, req.user, reason);
+      done.push("Проект отменён, папка перенесена в «04. Архив / Отмененные».");
+    } else if (plan.targetStage) {
+      await moveCaseToStage(kase, plan.targetStage, req.user,
+        { status: plan.targetStatus || "waiting", note: reason });
+      done.push(`Проект переведён на стадию «${courtOutcomes.STAGE_LABEL[plan.targetStage]}», папка перенесена.`);
+    } else if (plan.targetStatus) {
+      await db.query("UPDATE cases SET status = $2, updated_at = now() WHERE id = $1",
+        [kase.id, plan.targetStatus]);
+      done.push(`Статус изменён на «${courtOutcomes.STATUS_LABEL[plan.targetStatus]}».`);
+      syncPlanfixSafely(kase.id);
+    }
+
+    // Задачи ставим последними: если Planfix недоступен, проект уже
+    // переведён правильно, а задачи можно поставить руками.
+    const taskResults = [];
+    if (plan.tasks.length && kase.planfix_id) {
+      const actor = planfixPeople.actorOf(req.user);
+      for (const t of plan.tasks) {
+        try {
+          const created = await planfixSync.createPlanfixTask({
+            name: t.name,
+            description: t.hint || "",
+            projectId: kase.planfix_id,
+            deadlineIso: t.due || null,
+            actor,
+          });
+          try { await planfixImport.importOneTask(created.id, kase.id); } catch { /* приедет сверкой */ }
+          taskResults.push({ name: t.name, ok: true });
+        } catch (err) {
+          taskResults.push({ name: t.name, ok: false, error: err.message });
+        }
+      }
+      const failed = taskResults.filter((t) => !t.ok);
+      done.push(failed.length
+        ? `Поставлено задач: ${taskResults.length - failed.length} из ${taskResults.length}.`
+        : `Поставлено задач: ${taskResults.length}.`);
+    } else if (plan.tasks.length) {
+      done.push("Задачи не поставлены: у проекта ещё нет карточки в Planfix.");
+    }
+
+    await db.query(
+      `UPDATE case_court_events
+          SET applied = true, applied_at = now(), applied_by = $2, plan = $3::jsonb
+        WHERE id = $1`,
+      [event.id, req.user.id, JSON.stringify(plan)]
+    );
+
+    await db.query(
+      `INSERT INTO case_history (case_id, action, actor_id, note)
+       VALUES ($1, 'court_event', $2, $3)`,
+      [kase.id, req.user.id, `${reason}. ${done.join(" ")}`]
+    );
+
+    res.json({ ok: true, done, tasks: taskResults, plan });
+  } catch (err) {
+    console.error("Не удалось применить решение суда:", err);
+    res.status(err.status || 500).json({ message: err.message || "Не удалось применить решение суда" });
+  }
+});
+
+/* ---------------- Производственный календарь ----------------
+   Инструкция считает сроки в рабочих днях, поэтому праздники и переносы
+   надо заводить руками: они каждый год свои и постановление о переносах
+   выходит только осенью на следующий год. Пока год не заведён, расчёт
+   честно помечается ненадёжным, а не подсовывает неверную дату. */
+
+cases.get("/work-calendar", async (req, res) => {
+  try {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    res.json({
+      year,
+      days: await workCalendar.listCalendar(year),
+      years: await workCalendar.knownYears(),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Не удалось получить календарь: " + err.message });
+  }
+});
+
+/** Правка календаря — только админ или руководитель: от этих дат зависят
+ *  сроки по всем проектам сразу, и случайная правка тихо сдвинет их все. */
+function requireManager(req, res, next) {
+  if (isManager(req.user)) return next();
+  res.status(403).json({
+    message: "Производственный календарь ведёт администратор или руководитель центра.",
+  });
+}
+
+cases.post("/work-calendar", requireManager, async (req, res) => {
+  try {
+    const day = await workCalendar.setDay(
+      req.body?.day, req.body?.kind, req.body?.note, req.user.id);
+    events.log(req.user, "work_calendar", {
+      name: day.day,
+      details: { action: day.kind === "holiday" ? "выходной" : "рабочий день" },
+    });
+    res.json(day);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+cases.delete("/work-calendar/:day", requireManager, async (req, res) => {
+  try {
+    const removed = await workCalendar.removeDay(req.params.day);
+    if (!removed) return res.status(404).json({ message: "Такой отметки в календаре нет" });
+    events.log(req.user, "work_calendar", {
+      name: req.params.day, details: { action: "отметка убрана" },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
   }
 });
 
