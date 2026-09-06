@@ -2024,3 +2024,6 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 .case-status-sep {
   width: 1px; height: 22px; background: var(--border-strong); margin: 0 4px;
 }
+/* Кнопка «Открыть в Planfix» — это ссылка (чтобы работало открытие в новой
+   вкладке средним щелчком), но выглядеть должна как соседние кнопки. */
+a.upload-btn { text-decoration: none; }

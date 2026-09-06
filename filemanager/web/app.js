@@ -4285,6 +4285,17 @@ function renderCaseCard(data) {
 
   /* --- кнопки --- */
   const actions = [`<button class="upload-btn" id="ccFolderBtn" type="button">Открыть папку</button>`];
+  // Ссылка, а не кнопка: тогда работает «открыть в новой вкладке» средним
+  // щелчком, и видно, куда ведёт. Адрес приходит с сервера — у дела, ещё
+  // не заведённого в Planfix, ссылки просто нет.
+  if (p.planfix_url) {
+    actions.push(`<a class="upload-btn" id="ccPlanfixBtn" href="${escapeHtml(p.planfix_url)}"
+                     target="_blank" rel="noopener noreferrer"
+                     title="Открыть карточку этого проекта в Planfix">
+        <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
+        Открыть в Planfix
+      </a>`);
+  }
   if (canWrite && !p.is_cancelled) {
     actions.push(`<button class="upload-btn" id="ccEditBtn" type="button">Редактировать</button>`);
     actions.push(`<button class="create-btn" id="ccTaskBtn" type="button" style="height:34px;">Новая задача</button>`);
