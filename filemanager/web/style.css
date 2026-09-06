@@ -1952,3 +1952,70 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 }
 
 .task-line .task-del-btn { flex: 0 0 auto; }
+
+/* ---------- Список дел ----------
+   Все дела центра по стадиям. Отдельной базы здесь нет — это та же
+   таблица, из которой живут папки, задачи и карточка, поэтому перенос
+   стадии отсюда виден везде сразу. */
+
+.reg-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1100px) { .reg-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .reg-tiles { grid-template-columns: 1fr; } }
+
+.reg-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0;
+  padding: 16px 18px 15px; text-align: left; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-card); box-shadow: var(--shadow-card);
+  font-family: inherit; color: var(--text-primary);
+  transition: border-color .12s ease, transform .12s ease;
+}
+.reg-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
+.reg-tile-num { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin-top: 12px; }
+.reg-tile-sub { font-size: var(--fs-meta); color: var(--text-muted); margin-top: 2px; }
+.reg-tile-note { font-size: var(--fs-meta); color: var(--text-muted); margin-top: 10px; }
+.reg-hot { color: var(--danger); font-weight: 500; }
+
+.reg-group + .reg-group { margin-top: 20px; }
+.reg-group-head { display: flex; align-items: center; gap: 9px; padding: 0 10px 6px; }
+.reg-group-name {
+  font-size: var(--fs-meta); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--text-muted);
+}
+.reg-group-count {
+  font-size: var(--fs-meta); padding: 1px 9px; border-radius: 999px;
+  background: var(--bg-subtle); color: var(--text-muted);
+}
+
+.reg-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px; border-bottom: 1px solid var(--border); font-size: var(--fs-body);
+}
+.reg-row:last-child { border-bottom: none; }
+.reg-row:hover { background: var(--bg-subtle); border-radius: var(--radius-sm); }
+.reg-name { font-weight: 500; cursor: pointer; min-width: 200px; }
+.reg-name:hover { color: var(--accent-on-tint); }
+
+.reg-chip {
+  font-size: var(--fs-meta); padding: 2px 10px; border-radius: 999px;
+  background: var(--bg-subtle); color: var(--text-muted); white-space: nowrap;
+}
+.reg-chip.hot { background: var(--danger-bg); color: var(--danger); font-weight: 500; }
+.reg-chip.none { background: transparent; border: 1px dashed var(--border-strong); }
+.reg-chip.done { background: var(--success-bg); color: var(--success); }
+.reg-chip.cancelled { background: var(--danger-bg); color: var(--danger); }
+
+.reg-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.reg-actions select {
+  height: 30px; padding: 0 8px; font-family: inherit; font-size: var(--fs-meta);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-primary);
+}
+.reg-btn {
+  height: 30px; padding: 0 11px; font-family: inherit; font-size: var(--fs-meta); font-weight: 500;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.reg-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); }
+.reg-btn.accent { border-color: var(--accent); color: var(--accent-on-tint); font-weight: 600; }
+.reg-btn.accent:hover { background: var(--accent); color: #fff; }

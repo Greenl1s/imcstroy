@@ -370,7 +370,7 @@ let pendingDeepLink = (() => {
 // "tasks" здесь обязателен: страница задач сама пишет ?section=tasks в
 // адрес, и без этого перезагрузка (или ссылка, отправленная коллеге)
 // возвращала бы на файлы.
-const SECTIONS = ["files", "recent", "trash", "history", "tasks", "case"];
+const SECTIONS = ["files", "recent", "trash", "history", "tasks", "case", "registry"];
 let pendingSection = (() => {
   if (PICKER_MODE) return null;
   const name = pickerParams.get("section");
@@ -379,6 +379,8 @@ let pendingSection = (() => {
 // Карточка проекта живёт по адресу ?section=case&id=11 — чтобы ссылку
 // можно было отправить коллеге и чтобы F5 не выкидывал на файлы.
 let pendingCaseId = PICKER_MODE ? null : (pickerParams.get("id") || null);
+// «Список дел» помнит открытую стадию: ?section=registry&stage=plan.
+let pendingRegistryStage = PICKER_MODE ? null : (pickerParams.get("stage") || null);
 
 // Имя строки, которую надо подсветить после отрисовки папки.
 let pendingFlashName = "";
@@ -514,6 +516,11 @@ function enterAppForUser() {
     // иначе перезагрузка молча сбрасывала бы отбор, и человек решил бы,
     // что задачи пропали.
     if (section === "tasks") tasksFiltersFromUrl(pickerParams);
+    if (section === "registry" && pendingRegistryStage) {
+      registryStage = REGISTRY_STAGES.some((x) => x.key === pendingRegistryStage)
+        ? pendingRegistryStage : null;
+      pendingRegistryStage = null;
+    }
     if (section === "case" && pendingCaseId) {
       const id = pendingCaseId;
       pendingCaseId = null;
@@ -903,6 +910,7 @@ function showSection(name, pushHistory) {
   if (name === "recent") loadRecent();
   if (name === "history") loadHistory();
   if (name === "tasks") loadTasksPage();
+  if (name === "registry") loadRegistry();
   // Карточку не грузим здесь: её открывает openCaseCard, потому что ей
   // нужен ещё и номер проекта, а showSection знает только имя раздела.
 
@@ -3969,6 +3977,255 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
   }
 });
 
+
+/* ---------- Список дел ----------
+   Все дела центра, разложенные по стадиям: посмотреть, что с делом,
+   поставить задачу или перевести на другую стадию, не разыскивая папку.
+
+   Отдельной базы здесь нет: это та же таблица дел, из которой живут и
+   колонка «Дела», и страница задач, и карточка. Поэтому перенос стадии
+   отсюда виден везде сразу — запись одна.
+
+   Плитки стадий и списки под ними считаются из ОДНОГО ответа сервера,
+   поэтому цифра на плитке не может разойтись со списком, который она
+   открывает. */
+
+const REGISTRY_STAGES = [
+  { key: "plan", label: "План", cls: "stage-plan" },
+  { key: "active", label: "Активные", cls: "stage-active" },
+  { key: "control", label: "Контроль", cls: "stage-control" },
+  // Архив — одна полка: и завершённые, и отменённые. Чем кончилось
+  // конкретное дело, видно в его строке.
+  { key: "archive", label: "Архив", cls: "stage-done" },
+];
+
+let registryCases = null;
+let registryStage = null;
+let registryQuery = "";
+let registryType = "any";
+
+/** К какой плитке относится дело. */
+function registryBucket(c) {
+  return c.is_cancelled || c.stage === "done" ? "archive" : c.stage;
+}
+
+async function loadRegistry(force = false) {
+  const body = document.getElementById("registryBody");
+  if (!registryCases || force) {
+    body.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+    try {
+      const data = await apiFetch("/api/cases/registry");
+      registryCases = data.cases;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить список дел: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+  renderRegistry();
+}
+
+function renderRegistry() {
+  const back = document.getElementById("registryBackBtn");
+  const typeSel = document.getElementById("registryType");
+  back.classList.toggle("hidden", !registryStage);
+  typeSel.classList.toggle("hidden", !registryStage);
+  if (registryStage) renderRegistryList(); else renderRegistryStages();
+}
+
+/** Первый экран: четыре стадии. */
+function renderRegistryStages() {
+  const list = registryCases || [];
+  document.getElementById("registryTitle").textContent = "Список дел";
+
+  const inWork = list.filter((c) => registryBucket(c) !== "archive").length;
+  const archived = list.length - inWork;
+  document.getElementById("registrySub").textContent =
+    `${plural(inWork, "дело", "дела", "дел")} в работе, ${archived} в архиве`;
+
+  const tiles = REGISTRY_STAGES.map((st) => {
+    const mine = list.filter((c) => registryBucket(c) === st.key);
+    const overdue = mine.reduce((n, c) => n + (c.overdue_tasks > 0 ? 1 : 0), 0);
+    const note = st.key === "archive"
+      ? `${mine.filter((c) => !c.is_cancelled).length} завершено · ${mine.filter((c) => c.is_cancelled).length} отменено`
+      : overdue
+        ? `<span class="reg-hot">${plural(overdue, "дело горит", "дела горят", "дел горят")}</span>`
+        : "всё в срок";
+    return `
+      <button class="reg-tile" type="button" data-stage="${st.key}">
+        <span class="stage-badge ${st.cls}">${st.label}</span>
+        <span class="reg-tile-num">${mine.length}</span>
+        <span class="reg-tile-sub">${st.key === "archive" ? "завершённых и отменённых" : plural(mine.length, "дело", "дела", "дел")}</span>
+        <span class="reg-tile-note">${note}</span>
+      </button>`;
+  }).join("");
+
+  document.getElementById("registryBody").innerHTML = `<div class="reg-tiles">${tiles}</div>`;
+  document.getElementById("registryBody").querySelectorAll("[data-stage]").forEach((btn) => {
+    btn.addEventListener("click", () => openRegistryStage(btn.dataset.stage));
+  });
+}
+
+function openRegistryStage(stage) {
+  registryStage = stage;
+  registryQuery = "";
+  registryType = "any";
+  document.getElementById("registrySearch").value = "";
+  document.getElementById("registryType").value = "any";
+  if (!PICKER_MODE) {
+    history.pushState({ view: "section", section: "registry", stage },
+      "", `/?section=registry&stage=${encodeURIComponent(stage)}`);
+  }
+  renderRegistry();
+}
+
+/** Второй экран: дела выбранной стадии, группами по типу. */
+function renderRegistryList() {
+  const st = REGISTRY_STAGES.find((x) => x.key === registryStage) || REGISTRY_STAGES[0];
+  document.getElementById("registryTitle").textContent = st.label;
+
+  let list = (registryCases || []).filter((c) => registryBucket(c) === registryStage);
+  const total = list.length;
+  const hot = list.filter((c) => c.overdue_tasks > 0).length;
+
+  if (registryType === "none") list = list.filter((c) => !c.type);
+  else if (registryType !== "any") list = list.filter((c) => c.type === registryType);
+
+  const q = registryQuery.trim().toLowerCase();
+  if (q) {
+    list = list.filter((c) =>
+      c.name.toLowerCase().includes(q) || String(c.case_number || "").toLowerCase().includes(q));
+  }
+
+  document.getElementById("registrySub").textContent = hot
+    ? `${plural(total, "дело", "дела", "дел")}, из них ${hot} с просроченными задачами`
+    : `${plural(total, "дело", "дела", "дел")}`;
+
+  const body = document.getElementById("registryBody");
+  if (!list.length) {
+    body.innerHTML = `<div class="empty-hint" style="padding:24px;">${
+      q || registryType !== "any" ? "Под эти условия ничего не подходит" : "На этой стадии дел нет"
+    }</div>`;
+    return;
+  }
+
+  // Группы по типу — в том же порядке, что и в папках стадий.
+  const groups = [
+    ["Экспертизы", list.filter((c) => c.type === "expertise")],
+    ["Независимые исследования", list.filter((c) => c.type === "research")],
+    ["Без типа", list.filter((c) => !c.type)],
+  ].filter(([, items]) => items.length);
+
+  body.innerHTML = groups.map(([label, items]) => `
+    <div class="reg-group">
+      <div class="reg-group-head">
+        <span class="reg-group-name">${label}</span>
+        <span class="reg-group-count">${items.length}</span>
+      </div>
+      ${items.map(registryRowHtml).join("")}
+    </div>`).join("");
+
+  wireRegistryRows(body);
+}
+
+function registryRowHtml(c) {
+  const tasks = c.overdue_tasks
+    ? `<span class="reg-chip hot">${plural(c.overdue_tasks, "просрочена", "просрочено", "просрочено")}</span>`
+    : c.open_tasks
+      ? `<span class="reg-chip">${plural(c.open_tasks, "задача", "задачи", "задач")}</span>`
+      : `<span class="reg-chip none">задач нет</span>`;
+
+  // В архиве вместо переноса стадии — чем кончилось дело. И менять
+  // что-либо предлагаем только тому, кто может: кнопка, которая упрётся
+  // в отказ, хуже, чем её отсутствие.
+  const archived = registryBucket(c) === "archive";
+  const stages = ["plan", "active", "control", "done"].filter((s) => s !== c.stage);
+  const move = archived || !stages.length || !c.can_write ? "" : `
+    <select data-reg-stage="${c.id}" aria-label="Куда перевести дело">
+      ${stages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
+    </select>
+    <button type="button" class="reg-btn" data-reg-move="${c.id}">Переместить</button>`;
+
+  return `
+    <div class="reg-row" data-case-id="${c.id}">
+      <span class="reg-name" data-reg-card="${c.id}">${escapeHtml(c.name)}</span>
+      ${kadLinkHtml(c)}
+      ${archived
+        ? `<span class="reg-chip ${c.is_cancelled ? "cancelled" : "done"}">${c.is_cancelled ? "отменено" : "завершено"}</span>`
+        : tasks}
+      <span class="reg-actions">
+        ${move}
+        ${archived || !c.can_write ? "" : `<button type="button" class="reg-btn" data-reg-task="${c.id}">+ Задача</button>`}
+        <button type="button" class="reg-btn accent" data-reg-card="${c.id}">Карточка →</button>
+      </span>
+    </div>`;
+}
+
+function wireRegistryRows(body) {
+  body.querySelectorAll("[data-reg-card]").forEach((el) => {
+    el.addEventListener("click", () => openCaseCard(el.dataset.regCard, true));
+  });
+  body.querySelectorAll("[data-reg-task]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kase = (registryCases || []).find((c) => String(c.id) === btn.dataset.regTask);
+      if (kase) openTaskNew(kase);
+    });
+  });
+  body.querySelectorAll("[data-reg-move]").forEach((btn) => {
+    btn.addEventListener("click", () => moveCaseFromRegistry(btn));
+  });
+}
+
+/**
+ * Перенос стадии прямо из списка.
+ *
+ * Спрашиваем подтверждение с названием дела: в списке из сорока строк
+ * промахнуться мышкой легче, чем в папке проекта, а перенос двигает
+ * папку на диске и карточку в Planfix.
+ */
+async function moveCaseFromRegistry(btn) {
+  const id = btn.dataset.regMove;
+  const kase = (registryCases || []).find((c) => String(c.id) === String(id));
+  const select = document.querySelector(`[data-reg-stage="${id}"]`);
+  if (!kase || !select) return;
+  const target = select.value;
+
+  if (!confirm(`Перевести «${kase.name}» на стадию «${STAGE_LABEL[target]}»?\n\n` +
+               "Папка дела переедет, и это же изменение уйдёт в Planfix.")) return;
+
+  btn.disabled = true;
+  try {
+    await apiFetch(`/api/cases/${id}/advance`, {
+      method: "POST", body: JSON.stringify({ stage: target }),
+    });
+    showToast(`«${kase.name}» переведено на «${STAGE_LABEL[target]}»`);
+    // Перечитываем целиком: изменились и плитки, и обе стадии.
+    await loadRegistry(true);
+    loadColumnList("cases");
+  } catch (err) {
+    alert("Не удалось перевести дело: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+bind(document.getElementById("registryBackBtn"), "click", () => {
+  registryStage = null;
+  if (!PICKER_MODE) {
+    history.pushState({ view: "section", section: "registry" }, "", "/?section=registry");
+  }
+  renderRegistry();
+});
+
+bind(document.getElementById("registrySearch"), "input", debounce((e) => {
+  registryQuery = e.target.value;
+  if (registryStage) renderRegistryList();
+}, 250));
+
+bind(document.getElementById("registryType"), "change", (e) => {
+  registryType = e.target.value;
+  renderRegistryList();
+});
+
 /* ---------- Карточка проекта ----------
    Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи и
    история. Открывается щелчком по названию проекта в списке задач, живёт
@@ -4384,6 +4641,12 @@ window.addEventListener("popstate", (e) => {
   if (state && state.view === "section") {
     // Карточке нужен ещё и номер проекта — иначе «назад» из папки
     // возвращало бы на пустой экран карточки.
+    if (state.section === "registry") {
+      registryStage = state.stage || null;
+      showSection("registry", false);
+      renderRegistry();
+      return;
+    }
     if (state.section === "case" && state.caseId) {
       caseCardId = String(state.caseId);
       showSection("case", false);

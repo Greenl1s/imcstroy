@@ -63,6 +63,10 @@
       <span>Корзина</span>
       <span class="side-badge hidden" id="trashCount"></span>
     </button>
+    <button class="side-item" data-section="registry" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 12h8M8 16h5"/></svg>
+      <span>Список дел</span>
+    </button>
     <button class="side-item" data-section="history" type="button">
       <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
       <span>История</span>
@@ -455,6 +459,33 @@
       </div>
     </div>
     <div class="folder-body" id="historyList"></div>
+  </div>
+
+  <!-- Список дел: все дела центра, разложенные по стадиям. Нужен, чтобы
+       посмотреть, что с делом, поставить задачу или перевести на другую
+       стадию, не разыскивая его папку. -->
+  <div class="folder-view section hidden" id="registrySection" data-view="registry">
+    <div class="page-head">
+      <div class="folder-title-row">
+        <button class="folder-up-btn hidden" id="registryBackBtn" type="button" title="Ко всем стадиям" aria-label="Ко всем стадиям">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h1 class="folder-title" id="registryTitle">Список дел</h1>
+          <p class="page-sub" id="registrySub"></p>
+        </div>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <input type="text" id="registrySearch" placeholder="Поиск по делу" style="width:240px;">
+        <select class="col-sort-select hidden" id="registryType" style="max-width:200px;">
+          <option value="any">Все типы</option>
+          <option value="expertise">Экспертизы</option>
+          <option value="research">Независимые исследования</option>
+          <option value="none">Без типа</option>
+        </select>
+      </div>
+    </div>
+    <div class="folder-body" id="registryBody"></div>
   </div>
 
   <!-- Карточка проекта: всё о проекте на одном экране и без папок.
