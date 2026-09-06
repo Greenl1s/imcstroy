@@ -2024,6 +2024,40 @@ function caseTypeLabel(type, plural) {
   return "Без типа";
 }
 
+/**
+ * Перевод дела на другую стадию.
+ *
+ * Один код на все три места, откуда это делают: папка проекта, карточка
+ * проекта и список дел. Три копии одного действия неизбежно разъедутся —
+ * где-то забудут подтверждение, где-то текст будет другой.
+ *
+ * Подтверждение спрашиваем всегда: перенос двигает папку на диске и
+ * карточку в Planfix, и промахнуться мышкой легко.
+ *
+ * Возвращает true, если перенос состоялся, — вызывающий сам решает, что
+ * обновить: в папке путь исчез и надо уходить наверх, а карточку и
+ * список достаточно перечитать на месте.
+ */
+async function advanceCaseStage(kase, targetStage, btn) {
+  const label = STAGE_LABEL[targetStage] || targetStage;
+  if (!confirm(`Перевести «${kase.name}» на стадию «${label}»?\n\n` +
+               "Папка дела переедет, и это же изменение уйдёт в Planfix.")) return false;
+
+  if (btn) btn.disabled = true;
+  try {
+    await apiFetch(`/api/cases/${kase.id}/advance`, {
+      method: "POST", body: JSON.stringify({ stage: targetStage }),
+    });
+    showToast(`«${kase.name}» переведено на «${label}»`);
+    return true;
+  } catch (err) {
+    alert("Не удалось перевести дело: " + err.message);
+    return false;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function stageBadgeHtml(project) {
   if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
   const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[project.stage];
@@ -2121,23 +2155,13 @@ function renderCaseBanner(project) {
   const advanceBtn = document.getElementById("caseAdvanceBtn");
   if (advanceBtn) {
     advanceBtn.addEventListener("click", async () => {
-      const targetStage = document.getElementById("caseStageSelect").value;
-      advanceBtn.disabled = true;
-      try {
-        await apiFetch(`/api/cases/${project.id}/advance`, {
-          method: "POST",
-          body: JSON.stringify({ stage: targetStage }),
-        });
-        // Баннер виден только когда стоишь ровно в папке проекта — значит
-        // этот самый путь только что переехал и больше не существует.
-        // Поднимаемся к колонкам и обновляем список "Дела".
-        goToColumns(true);
-        loadColumnList("cases");
-      } catch (err) {
-        alert("Не удалось перевести на выбранную стадию: " + err.message);
-      } finally {
-        advanceBtn.disabled = false;
-      }
+      const target = document.getElementById("caseStageSelect").value;
+      if (!(await advanceCaseStage(project, target, advanceBtn))) return;
+      // Баннер виден, только когда стоишь ровно в папке проекта, — значит
+      // этот самый путь только что переехал и больше не существует.
+      // Поднимаемся к колонкам и обновляем список «Дела».
+      goToColumns(true);
+      loadColumnList("cases");
     });
   }
 
@@ -4154,7 +4178,6 @@ function registryRowHtml(c) {
         : tasks}
       <span class="reg-actions">
         ${move}
-        ${archived || !c.can_write ? "" : `<button type="button" class="reg-btn" data-reg-task="${c.id}">+ Задача</button>`}
         <button type="button" class="reg-btn accent" data-reg-card="${c.id}">Карточка →</button>
       </span>
     </div>`;
@@ -4164,48 +4187,22 @@ function wireRegistryRows(body) {
   body.querySelectorAll("[data-reg-card]").forEach((el) => {
     el.addEventListener("click", () => openCaseCard(el.dataset.regCard, true));
   });
-  body.querySelectorAll("[data-reg-task]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const kase = (registryCases || []).find((c) => String(c.id) === btn.dataset.regTask);
-      if (kase) openTaskNew(kase);
-    });
-  });
   body.querySelectorAll("[data-reg-move]").forEach((btn) => {
     btn.addEventListener("click", () => moveCaseFromRegistry(btn));
   });
 }
 
-/**
- * Перенос стадии прямо из списка.
- *
- * Спрашиваем подтверждение с названием дела: в списке из сорока строк
- * промахнуться мышкой легче, чем в папке проекта, а перенос двигает
- * папку на диске и карточку в Planfix.
- */
+/** Перенос стадии из списка: общий код плюс перечитывание страницы. */
 async function moveCaseFromRegistry(btn) {
   const id = btn.dataset.regMove;
   const kase = (registryCases || []).find((c) => String(c.id) === String(id));
   const select = document.querySelector(`[data-reg-stage="${id}"]`);
   if (!kase || !select) return;
-  const target = select.value;
 
-  if (!confirm(`Перевести «${kase.name}» на стадию «${STAGE_LABEL[target]}»?\n\n` +
-               "Папка дела переедет, и это же изменение уйдёт в Planfix.")) return;
-
-  btn.disabled = true;
-  try {
-    await apiFetch(`/api/cases/${id}/advance`, {
-      method: "POST", body: JSON.stringify({ stage: target }),
-    });
-    showToast(`«${kase.name}» переведено на «${STAGE_LABEL[target]}»`);
-    // Перечитываем целиком: изменились и плитки, и обе стадии.
-    await loadRegistry(true);
-    loadColumnList("cases");
-  } catch (err) {
-    alert("Не удалось перевести дело: " + err.message);
-  } finally {
-    btn.disabled = false;
-  }
+  if (!(await advanceCaseStage(kase, select.value, btn))) return;
+  // Перечитываем целиком: изменились и плитки, и обе стадии.
+  await loadRegistry(true);
+  loadColumnList("cases");
 }
 
 bind(document.getElementById("registryBackBtn"), "click", () => {
@@ -4295,15 +4292,28 @@ function renderCaseCard(data) {
   document.getElementById("caseCardActions").innerHTML = actions.join("");
 
   /* --- тело --- */
+  // Стадию двигаем прямо здесь: карточка после переноса перечитывается на
+  // месте, поэтому из неё не выкидывает — в отличие от папки, путь которой
+  // после переезда перестаёт существовать.
+  const otherStages = ["plan", "active", "control", "done"].filter((x) => x !== p.stage);
   const statusBlock = canWrite && !p.is_cancelled ? `
     <div class="case-status-row">
-      <span class="case-status-label">Статус проекта</span>
+      <span class="case-status-label">Статус</span>
       <select id="ccStatus">
         <option value="waiting"${p.status === "waiting" ? " selected" : ""}>Ожидание</option>
         <option value="in_progress"${p.status === "in_progress" ? " selected" : ""}>В работе</option>
         <option value="problem"${p.status === "problem" ? " selected" : ""}>Проблема</option>
       </select>
-      <span class="case-status-hint">меняется сразу; стадию двигает «Что установил суд» — она переносит папку</span>
+      <span class="case-status-hint">меняется сразу</span>
+
+      <span class="case-status-sep"></span>
+
+      <span class="case-status-label">Стадия</span>
+      <select id="ccStage">
+        ${otherStages.map((x) => `<option value="${x}">${STAGE_LABEL[x]}</option>`).join("")}
+      </select>
+      <button type="button" class="reg-btn" id="ccStageBtn">Переместить</button>
+      <span class="case-status-hint">переносит папку дела и меняет карточку в Planfix</span>
     </div>` : "";
 
   const cancelled = p.is_cancelled ? `
@@ -4447,6 +4457,21 @@ function wireCaseCard(data) {
 
   // Статус меняем сразу, без кнопки «Сохранить»: это одно поле, и лишний
   // шаг тут только мешает. При отказе возвращаем прежнее значение.
+  // Перенос стадии — тем же общим кодом, что и в папке и в списке дел.
+  // После переноса перечитываем карточку на месте: человек остался там же,
+  // где был, и сразу видит новую стадию и новый путь папки.
+  const stageBtn = document.getElementById("ccStageBtn");
+  if (stageBtn) {
+    stageBtn.addEventListener("click", async () => {
+      const target = document.getElementById("ccStage").value;
+      if (!(await advanceCaseStage(p, target, stageBtn))) return;
+      await loadCaseCard();
+      loadColumnList("cases");
+      // Список дел мог остаться открытым в памяти — пусть перечитается.
+      registryCases = null;
+    });
+  }
+
   const status = document.getElementById("ccStatus");
   if (status) {
     status.addEventListener("change", async () => {
