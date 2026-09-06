@@ -665,37 +665,29 @@ async function completeTask(taskId, statusId) {
 }
 
 /**
- * Удаляет задачу в Planfix — для случая «поставил не то».
+ * Отменяет задачу в Planfix — для случая «поставил не то».
  *
- * Адрес удаления в разных версиях Planfix отличается, поэтому пробуем
- * известные варианты по очереди, как со списком комментариев. Порядок
- * важен: сначала то, что удаляет одну конкретную задачу.
+ * Раньше здесь была попытка УДАЛИТЬ задачу, и она возвращала HTTP 405.
+ * Причина оказалась не в правах: в REST API Planfix удаления задач нет
+ * вовсе — под /task доступны только GET и POST, метода DELETE не
+ * существует. Поэтому «убрать задачу» — это перевод её в статус
+ * «Отмененная» (системный CANCELED) тем же запросом, каким мы её
+ * завершаем, а из ИСУ она после этого пропадает.
  *
- * Отдельно про безопасность повторов: пробовать следующий вариант можно
- * только после ВНЯТНОГО отказа. Если связь оборвалась, задача могла
- * удалиться, и повтор ничего не испортит, но и ошибку глотать нельзя —
- * поэтому такая ошибка пробрасывается наружу как есть.
+ * Номер статуса у каждого аккаунта свой, поэтому берём его из окружения
+ * или подбираем по уже загруженным задачам — как и со статусом
+ * завершения.
  */
-const TASK_DELETE_ENDPOINTS = [
-  ["POST", (id) => `/task/${id}/delete`],
-  ["DELETE", (id) => `/task/${id}`],
-];
-
-async function deletePlanfixTask(taskId) {
-  const id = Number(taskId);
-  let lastError = null;
-  for (const [method, makePath] of TASK_DELETE_ENDPOINTS) {
-    try {
-      await planfixRequest(method, makePath(id), method === "POST" ? {} : undefined);
-      return true;
-    } catch (err) {
-      if (!err.planfixRefused) throw err;
-      lastError = err;
-    }
+async function cancelPlanfixTask(taskId, statusId) {
+  if (!statusId) {
+    throw new Error(
+      "Не задан номер статуса «Отмененная» в Planfix. Откройте любую отменённую " +
+      "задачу, посмотрите номер статуса и укажите его в .env как " +
+      "PLANFIX_CANCELLED_STATUS_ID."
+    );
   }
-  throw new Error(
-    "Planfix не дал удалить задачу: " + (lastError?.message || "неизвестная причина")
-  );
+  await planfixRequest("POST", `/task/${Number(taskId)}`, { status: { id: Number(statusId) } });
+  return true;
 }
 
 module.exports = {
@@ -703,7 +695,7 @@ module.exports = {
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
-  peopleToIds, completeTask, deletePlanfixTask, fetchTask,
+  peopleToIds, completeTask, cancelPlanfixTask, fetchTask,
   fetchFieldCatalogue, resolveFieldIds,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,

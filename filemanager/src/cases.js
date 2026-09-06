@@ -375,8 +375,11 @@ const TASKS_QUERY = `
  */
 async function withWriteFlag(rows, user, folderOf) {
   const me = user.planfix_user_id || null;
+  // can_remove — «эту задачу я могу убрать». Считаем на сервере, чтобы не
+  // показывать кнопку, которая всё равно упрётся в отказ.
   const decorate = (r, canWrite) => ({
-    ...r, mine: isAssignee(r, me), byMe: isAssigner(r, me), can_write: canWrite,
+    ...r, mine: isAssignee(r, me), byMe: isAssigner(r, me),
+    can_write: canWrite, can_remove: canWrite && canRemoveTask(user, r),
   });
 
   if (user.role === "admin") return rows.map((r) => decorate(r, true));
@@ -390,6 +393,17 @@ async function withWriteFlag(rows, user, folderOf) {
 function isAssignee(task, planfixUserId) {
   if (!planfixUserId) return false;
   return Array.isArray(task.assignee_ids) && task.assignee_ids.includes(Number(planfixUserId));
+}
+
+/**
+ * Может ли этот человек убрать задачу.
+ *
+ * Только постановщик и администратор: чужую задачу убирать нельзя, иначе
+ * поручение исчезнет, а тот, кто его дал, об этом не узнает.
+ */
+function canRemoveTask(user, task) {
+  if (user.role === "admin") return true;
+  return isAssigner(task, user.planfix_user_id);
 }
 
 /** Я поставил эту задачу? */
@@ -529,6 +543,22 @@ async function doneStatusId() {
   const { rows } = await db.query(
     `SELECT status_id, COUNT(*)::int AS c FROM case_tasks
       WHERE is_done = true AND status_id IS NOT NULL
+      GROUP BY status_id ORDER BY c DESC LIMIT 1`
+  );
+  return rows.length ? Number(rows[0].status_id) : null;
+}
+
+/**
+ * Номер статуса «Отмененная». Ищем так же, как и статус завершения:
+ * сначала в окружении, потом по уже загруженным задачам — у отменённых
+ * в Planfix статус называется «Отмененная»/«Отменена».
+ */
+async function cancelledStatusId() {
+  const fromEnv = Number(process.env.PLANFIX_CANCELLED_STATUS_ID || 0);
+  if (fromEnv) return fromEnv;
+  const { rows } = await db.query(
+    `SELECT status_id, COUNT(*)::int AS c FROM case_tasks
+      WHERE status_id IS NOT NULL AND status_name ILIKE '%отмен%'
       GROUP BY status_id ORDER BY c DESC LIMIT 1`
   );
   return rows.length ? Number(rows[0].status_id) : null;
@@ -815,20 +845,39 @@ cases.patch("/tasks/:id", async (req, res) => {
  * остаётся и в журнале действий Planfix, и в общей истории: кто, когда
  * и что именно убрал.
  */
+/**
+ * Убрать задачу.
+ *
+ * В Planfix удаления задач нет: их REST API знает под /task только GET и
+ * POST, а DELETE отвечает 405. Поэтому «убрать» — это перевести задачу в
+ * статус «Отмененная» в Planfix и убрать её из ИСУ. Порядок тот же, что
+ * и при завершении: сначала Planfix, потом мы. Если он не согласился, у
+ * нас ничего не меняется и человек видит причину.
+ *
+ * Убрать задачу может тот, кто её поставил, и администратор. Чужие
+ * задачи не трогаем: постановщик не узнает, что его поручение исчезло.
+ */
 cases.delete("/tasks/:id", async (req, res) => {
   try {
     const task = await loadVisibleTask(req, res);
     if (!task) return;
     if (!(await canWriteTask(req.user, task))) {
-      return res.status(403).json({ message: "Нет прав на удаление этой задачи" });
+      return res.status(403).json({ message: "Нет прав на изменение этого проекта" });
+    }
+    if (!canRemoveTask(req.user, task)) {
+      return res.status(403).json({
+        message: "Убрать задачу может только тот, кто её поставил. " +
+          "Эту задачу поставил " + (task.assigner || "другой сотрудник") + ".",
+      });
     }
 
+    const statusId = await cancelledStatusId();
     const actor = planfixPeople.actorOf(req.user);
     try {
-      await planfixSync.deletePlanfixTask(task.planfix_id);
+      await planfixSync.cancelPlanfixTask(task.planfix_id, statusId);
     } catch (err) {
       await planfixPeople.logAction({
-        user: req.user, actor, action: "delete", taskId: task.id,
+        user: req.user, actor, action: "cancel", taskId: task.id,
         planfixTaskId: task.planfix_id, caseId: task.case_id,
         payload: { name: task.name }, ok: false, error: err.message,
       });
@@ -837,7 +886,7 @@ cases.delete("/tasks/:id", async (req, res) => {
 
     await db.query("DELETE FROM case_tasks WHERE id = $1", [task.id]);
     await planfixPeople.logAction({
-      user: req.user, actor, action: "delete", taskId: task.id,
+      user: req.user, actor, action: "cancel", taskId: task.id,
       planfixTaskId: task.planfix_id, caseId: task.case_id,
       payload: { name: task.name }, ok: true,
     });
@@ -847,12 +896,11 @@ cases.delete("/tasks/:id", async (req, res) => {
 
     res.json({ ok: true, name: task.name });
   } catch (err) {
-    console.error("Не удалось удалить задачу:", err);
-    res.status(502).json({ message: "Planfix не дал удалить задачу: " + err.message });
+    console.error("Не удалось убрать задачу:", err);
+    res.status(502).json({ message: err.message });
   }
 });
 
-/** Комментарий к задаче от имени текущего пользователя. */
 cases.post("/tasks/:id/comment", async (req, res) => {
   const text = String(req.body?.text || "").trim();
   if (!text) return res.status(400).json({ message: "Комментарий пустой" });
@@ -1651,25 +1699,13 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
     const canWrite = await canWriteTask(req.user, kase);
     const today = taskDates.todayIso();
 
-    const [tasks, courtEvents, history, manager] = await Promise.all([
+    const [tasks, history, manager] = await Promise.all([
       db.query(
         `SELECT id, planfix_id, name, description, status_name, is_done,
                 assignees, assigner, assignee_ids, assigner_id,
                 start_date, end_date, completed_at
            FROM case_tasks WHERE case_id = $1
           ORDER BY is_done ASC, end_date NULLS LAST, id`,
-        [kase.id]
-      ),
-      db.query(
-        `SELECT e.id, e.outcome_name, e.event_date, e.hearing_date, e.note,
-                e.applied, e.applied_at,
-                c.username AS created_by_name, a.username AS applied_by_name
-           FROM case_court_events e
-           LEFT JOIN users c ON c.id = e.created_by
-           LEFT JOIN users a ON a.id = e.applied_by
-          WHERE e.case_id = $1
-          ORDER BY e.event_date DESC, e.id DESC
-          LIMIT 20`,
         [kase.id]
       ),
       db.query(
@@ -1691,7 +1727,7 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
         ...t,
         due_state: d.state, due_iso: d.due, days_left: d.daysLeft,
         mine: isAssignee(t, me), byMe: isAssigner(t, me),
-        can_write: canWrite,
+        can_write: canWrite, can_remove: canWrite && canRemoveTask(req.user, t),
       };
     });
 
@@ -1710,7 +1746,6 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
         done: withDue.filter((t) => t.is_done).length,
         overdue: withDue.filter((t) => t.due_state === "overdue").length,
       },
-      courtEvents: courtEvents.rows,
       history: history.rows,
       // Задач не будет вовсе, если проект ещё не заведён в Planfix.
       // Пусть интерфейс скажет почему, а не покажет пустое место.
