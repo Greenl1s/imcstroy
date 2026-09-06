@@ -1803,6 +1803,10 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
       project: {
         ...courtCase.decorateCase(kase),
         manager_name: manager.rows.length ? manager.rows[0].username : null,
+        // Ссылка на карточку проекта в самом Planfix. Собирается из
+        // PLANFIX_BASE_URL на сервере, чтобы адрес аккаунта не был вшит
+        // в интерфейс и следовал настройке.
+        planfix_url: planfixSync.projectWebUrl(kase.planfix_id),
       },
       canWrite,
       today,

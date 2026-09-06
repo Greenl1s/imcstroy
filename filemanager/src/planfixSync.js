@@ -1,6 +1,22 @@
 const PLANFIX_BASE_URL = process.env.PLANFIX_BASE_URL || "https://cse.planfix.ru/rest";
 const PLANFIX_TOKEN = process.env.PLANFIX_TOKEN;
 
+/**
+ * Адрес самого Planfix, а не его API: из «https://cse.planfix.ru/rest»
+ * получаем «https://cse.planfix.ru». Нужен, чтобы из карточки проекта
+ * можно было открыть его страницу в Planfix.
+ *
+ * Считаем из PLANFIX_BASE_URL, а не пишем отдельной настройкой: адрес
+ * аккаунта один, и две настройки для одного адреса однажды разъедутся.
+ */
+const PLANFIX_WEB_URL = PLANFIX_BASE_URL.replace(/\/rest\/?$/, "").replace(/\/+$/, "");
+
+/** Ссылка на карточку проекта в Planfix. null — если проекта там ещё нет. */
+function projectWebUrl(planfixId) {
+  const id = Number(planfixId);
+  return id ? `${PLANFIX_WEB_URL}/project/${id}` : null;
+}
+
 // ID пользовательских полей проекта в Planfix (Управление аккаунтом →
 // Типы объектов → Проект → Настраиваемые поля) — свои для этого
 // конкретного аккаунта, узнаны один раз через интерфейс 25.08.2026.
@@ -696,7 +712,7 @@ module.exports = {
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
   peopleToIds, completeTask, cancelPlanfixTask, fetchTask,
-  fetchFieldCatalogue, resolveFieldIds,
+  fetchFieldCatalogue, resolveFieldIds, projectWebUrl, PLANFIX_WEB_URL,
   FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };
