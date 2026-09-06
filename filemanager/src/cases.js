@@ -340,6 +340,74 @@ cases.post("/planfix/bindings/:userId", auth.requireAdmin, async (req, res) => {
   }
 });
 
+/* ---------------- Список дел ----------------
+   Все дела центра в одном месте, разложенные по стадиям: посмотреть, что
+   с делом, поставить задачу или перевести на другую стадию, не разыскивая
+   его папку.
+
+   Отдельной базы здесь нет и быть не должно: это та же таблица cases, из
+   которой живут и колонка «Дела», и страница задач, и карточка проекта.
+   Поэтому перенос стадии из списка виден везде сразу — запись одна.
+
+   Отдаём всё одним ответом, а плитки стадий и списки под ними интерфейс
+   считает из него же. Так цифра на плитке не может разойтись со списком,
+   который под ней открывается, — а разойтись они могли бы легко, если
+   считать их двумя разными запросами. */
+
+cases.get("/registry", async (req, res) => {
+  try {
+    const today = taskDates.todayIso();
+    const { rows } = await db.query(
+      `SELECT c.id, c.name, c.type, c.stage, c.status, c.is_cancelled, c.cancel_reason,
+              c.case_number, c.folder_path, c.planfix_id, c.updated_at,
+              t.open_tasks, t.due_dates
+         FROM cases c
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS open_tasks,
+                  array_agg(to_char(end_date, 'YYYY-MM-DD')) AS due_dates
+             FROM case_tasks WHERE case_id = c.id AND is_done = false
+         ) t ON true
+        WHERE c.deleted_at IS NULL
+        ORDER BY c.name`
+    );
+
+    // Права те же, что и на папку дела: список не должен показывать
+    // сотруднику проекты, в которые его не пускают. Заодно считаем, где
+    // он может менять, — чтобы не рисовать кнопки, которые упрутся в отказ.
+    let visible = rows;
+    let canWriteOf = () => true;
+    if (req.user.role !== "admin") {
+      if (!req.user.can_cases) visible = [];
+      else {
+        const rules = await folderAccess.getUserRules(req.user.id);
+        visible = rows.filter((r) => folderAccess.resolveAccess(rules, r.folder_path));
+        canWriteOf = (r) => folderAccess.resolveAccess(rules, r.folder_path) === "write";
+      }
+    }
+
+    const list = visible.map((r) => {
+      // Просрочку считаем тем же кодом, что и везде: по московской дате.
+      const overdue = (r.due_dates || []).filter(
+        (d) => d && taskDates.dueState({ end_date: d, is_done: false }, today).state === "overdue"
+      ).length;
+      return {
+        ...courtCase.decorateCase(r),
+        open_tasks: Number(r.open_tasks || 0),
+        overdue_tasks: overdue,
+        // Архив — это одна полка, но в строке видно, чем дело кончилось.
+        archive_kind: r.is_cancelled ? "cancelled" : r.stage === "done" ? "done" : null,
+        can_write: canWriteOf(r),
+        due_dates: undefined,
+      };
+    });
+
+    res.json({ today, cases: list });
+  } catch (err) {
+    console.error("Не удалось получить список дел:", err);
+    res.status(500).json({ message: "Не удалось получить список дел: " + err.message });
+  }
+});
+
 /* ---------------- Задачи всех проектов (отдельная страница) ---------------- */
 
 const folderAccessLib = require("./folderAccess");
