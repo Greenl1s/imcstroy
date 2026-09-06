@@ -370,7 +370,7 @@ let pendingDeepLink = (() => {
 // "tasks" здесь обязателен: страница задач сама пишет ?section=tasks в
 // адрес, и без этого перезагрузка (или ссылка, отправленная коллеге)
 // возвращала бы на файлы.
-const SECTIONS = ["files", "recent", "trash", "history", "tasks", "order", "case"];
+const SECTIONS = ["files", "recent", "trash", "history", "tasks", "case"];
 let pendingSection = (() => {
   if (PICKER_MODE) return null;
   const name = pickerParams.get("section");
@@ -479,10 +479,6 @@ function applyPermissionsUI() {
   // Очистка истории — тоже админское и необратимое.
   const clearHistoryBtn = document.getElementById("historyClearBtn");
   if (clearHistoryBtn) clearHistoryBtn.classList.toggle("hidden", rootOnlyAdmin);
-  // Производственный календарь двигает сроки сразу по всем проектам —
-  // его ведёт администратор или руководитель центра.
-  const calBtn = document.getElementById("calendarBtn");
-  if (calBtn) calBtn.classList.toggle("hidden", !(p.role === "admin" || p.can_manage));
   if (els.createCasesMenu) {
     els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
       .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
@@ -907,7 +903,6 @@ function showSection(name, pushHistory) {
   if (name === "recent") loadRecent();
   if (name === "history") loadHistory();
   if (name === "tasks") loadTasksPage();
-  if (name === "order") loadOrderPage();
   // Карточку не грузим здесь: её открывает openCaseCard, потому что ей
   // нужен ещё и номер проекта, а showSection знает только имя раздела.
 
@@ -2061,20 +2056,18 @@ function renderCaseBanner(project) {
   // где проект, что горит и куда идти за подробностями.
   const overdue = Number(project.overdue_tasks || 0);
 
-  const rare = [];
-  if (!project.is_cancelled && otherStages.length) {
-    rare.push(`
-      <div class="case-strip-menu-row">
-        <select id="caseStageSelect">
-          ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
-        </select>
-        <button type="button" id="caseAdvanceBtn">Переместить</button>
-      </div>`);
-  }
-  if (!project.is_cancelled) {
-    rare.push(`<button type="button" id="caseCourtBtn">Что установил суд</button>`);
-  }
-  rare.push(`<button type="button" id="caseEditBtn">Редактировать</button>`);
+  // Перенос стадии стоит прямо в полосе: это основной способ двигать
+  // проект, и прятать его под «ещё» оказалось неудобно. Под «ещё» ушло
+  // только то, что делают редко.
+  const move = !project.is_cancelled && otherStages.length ? `
+    <span class="case-strip-move">
+      <select id="caseStageSelect" aria-label="Стадия проекта">
+        ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
+      </select>
+      <button type="button" id="caseAdvanceBtn">Переместить</button>
+    </span>` : "";
+
+  const rare = [`<button type="button" id="caseEditBtn">Редактировать</button>`];
   if (!project.is_cancelled) {
     rare.push(`<button type="button" class="danger" id="caseCancelBtn">Отменить проект</button>`);
   }
@@ -2087,6 +2080,7 @@ function renderCaseBanner(project) {
       : ""}
     ${kadLinkHtml(project)}
     <span class="case-strip-right">
+      ${move}
       <button class="case-strip-card" type="button" id="caseCardBtn">
         Карточка проекта
         <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -2104,14 +2098,16 @@ function renderCaseBanner(project) {
 
   bind(document.getElementById("caseCardBtn"), "click", () => openCaseCard(project.id, true));
 
-  // Редкие и тяжёлые действия — под кнопкой «ещё»: перенос стадии двигает
-  // папку на диске, а отмена необратима, и обеим не место рядом с файлами.
   const moreBtn = document.getElementById("caseMoreBtn");
   const moreMenu = document.getElementById("caseMoreMenu");
   bind(moreBtn, "click", (e) => {
     e.stopPropagation();
     moreMenu.classList.toggle("hidden");
   });
+  // Щелчок мимо меню закрывает его — но щелчок ВНУТРИ не должен. Раньше
+  // выбор в выпадающем списке всплывал до document, и меню схлопывалось
+  // прямо во время выбора стадии.
+  bind(moreMenu, "click", (e) => e.stopPropagation());
   document.addEventListener("click", () => moreMenu.classList.add("hidden"));
 
   const advanceBtn = document.getElementById("caseAdvanceBtn");
@@ -2137,9 +2133,6 @@ function renderCaseBanner(project) {
     });
   }
 
-  // Кнопки нет у отменённого проекта — это не ошибка, поэтому и не bind().
-  const courtBtn = document.getElementById("caseCourtBtn");
-  if (courtBtn) courtBtn.addEventListener("click", () => openCourt(project));
   bind(document.getElementById("caseEditBtn"), "click", () => openCaseEdit(project));
 
   const cancelBtn = document.getElementById("caseCancelBtn");
@@ -2487,9 +2480,9 @@ function taskLineHtml(t) {
         ${dueBadgeHtml(t)}
         <span class="task-line-date">${escapeHtml(when)} · ${who}</span>
       </span>
-      ${t.can_write && !t.is_done
+      ${t.can_remove && !t.is_done
         ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
-                   title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
+                   title="Убрать задачу" aria-label="Убрать задачу">✕</button>`
         : ""}
     </div>`;
 }
@@ -2532,6 +2525,14 @@ function dueBadgeHtml(task) {
     default:
       return "";
   }
+}
+
+/** Дата для чтения человеком: 30.11.2026. Пустое остаётся пустым. */
+function fmtDate(iso) {
+  const s = String(iso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  const [y, m, d] = s.split("-");
+  return `${d}.${m}.${y}`;
 }
 
 /** 1 день / 2 дня / 5 дней — иначе «просрочено 3 день». */
@@ -2605,16 +2606,18 @@ async function completeTask(id, btn, onDone) {
 async function deleteTask(id, btn, onDone, knownName) {
   const task = tasksCache.find((t) => String(t.id) === String(id));
   const name = knownName || (task ? task.name : "эту задачу");
-  if (!confirm(`Удалить задачу «${name}»?\n\nОна будет удалена и в Planfix. Вернуть её будет нельзя.`)) return;
+  // Planfix удалять задачи не умеет — в нём задача станет «Отмененной».
+  // Пишем это прямо, чтобы человек не искал её потом в корзине Planfix.
+  if (!confirm(`Убрать задачу «${name}»?\n\nВ Planfix она получит статус «Отмененная», а из ИСУ пропадёт.`)) return;
   if (btn) btn.disabled = true;
   try {
     await apiFetch(`/api/cases/tasks/${id}`, { method: "DELETE" });
-    showToast("Задача удалена");
+    showToast("Задача убрана");
     if (onDone) onDone();
     else loadTasksPage();
   } catch (err) {
     if (btn) btn.disabled = false;
-    alert("Не удалось удалить задачу: " + err.message);
+    alert("Не удалось убрать задачу: " + err.message);
   }
 }
 
@@ -3967,15 +3970,14 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
 });
 
 /* ---------- Карточка проекта ----------
-   Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи,
-   решения суда, история. Открывается щелчком по названию проекта в
-   списке задач, живёт по своему адресу (?section=case&id=11) — ссылку
-   можно отправить коллеге, и F5 не выкидывает на файлы.
+   Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи и
+   история. Открывается щелчком по названию проекта в списке задач, живёт
+   по своему адресу (?section=case&id=11) — ссылку можно отправить
+   коллеге, и F5 не выкидывает на файлы.
 
-   Стадию отсюда не двигаем намеренно: перевод стадии переносит папку на
-   диске и меняет Planfix. Для этого есть «Что установил суд» — и тогда
-   в истории видно, почему проект переехал. Статус же меняется сразу:
-   он ничего не двигает. */
+   Стадию отсюда не двигаем: перевод переносит папку на диске и меняет
+   Planfix, и делается это в самой папке. Статус же меняется сразу — он
+   ничего не двигает. */
 
 let caseCardId = null;
 let caseCardData = null;
@@ -4030,7 +4032,6 @@ function renderCaseCard(data) {
   /* --- кнопки --- */
   const actions = [`<button class="upload-btn" id="ccFolderBtn" type="button">Открыть папку</button>`];
   if (canWrite && !p.is_cancelled) {
-    actions.push(`<button class="upload-btn" id="ccCourtBtn" type="button">Что установил суд</button>`);
     actions.push(`<button class="upload-btn" id="ccEditBtn" type="button">Редактировать</button>`);
     actions.push(`<button class="create-btn" id="ccTaskBtn" type="button" style="height:34px;">Новая задача</button>`);
   }
@@ -4059,7 +4060,6 @@ function renderCaseCard(data) {
     <div class="case-grid">
       <div>
         ${caseCardTasksHtml(data)}
-        ${caseCardCourtHtml(data)}
       </div>
       <div>
         ${caseCardFactsHtml(p, canWrite)}
@@ -4102,27 +4102,14 @@ function caseCardTasksHtml(data) {
           ? `завершена${t.completed_at ? " " + fmtDate(t.completed_at) : ""}`
           : `${t.due_iso ? fmtDate(t.due_iso) : "без срока"}${t.assignees ? " · " + escapeHtml(t.assignees) : ""}`
       }</span>
-      ${t.can_write
+      ${t.can_remove
         ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
                    data-task-name="${escapeHtml(t.name)}"
-                   title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
+                   title="Убрать задачу" aria-label="Убрать задачу">✕</button>`
         : ""}
     </div>`).join("");
 
   return `<h3 class="case-sec">Задачи · ${parts.join(", ")}</h3><div class="case-tasks">${rows}</div>`;
-}
-
-function caseCardCourtHtml(data) {
-  if (!data.courtEvents.length) return "";
-  const rows = data.courtEvents.map((e) => `
-    <div class="case-ev">
-      <div class="case-ev-name">${escapeHtml(e.outcome_name)}</div>
-      <div class="case-ev-meta">Определение от ${fmtDate(e.event_date)}${
-        e.applied ? ", применено" : ", не применено"}${
-        e.created_by_name ? `, вписал ${escapeHtml(e.created_by_name)}` : ""}</div>
-      ${e.note ? `<div class="case-ev-meta">${escapeHtml(e.note)}</div>` : ""}
-    </div>`).join("");
-  return `<div class="case-subpanel"><h3 class="case-sec">Что решал суд</h3>${rows}</div>`;
 }
 
 function caseCardFactsHtml(p, canWrite) {
@@ -4193,9 +4180,6 @@ function wireCaseCard(data) {
       buildTrailExtending([{ label: "Дела", path: CASES_PATH }], CASES_PATH, p.folder_path), true);
   });
 
-  const courtBtn = document.getElementById("ccCourtBtn");
-  if (courtBtn) courtBtn.addEventListener("click", () => openCourt(p));
-
   const editBtn = document.getElementById("ccEditBtn");
   if (editBtn) editBtn.addEventListener("click", () => openCaseEdit(p));
 
@@ -4242,381 +4226,6 @@ function wireCaseCard(data) {
 }
 
 bind(document.getElementById("caseCardBackBtn"), "click", () => history.back());
-
-/* ---------- Порядок работы ----------
-   Рабочая инструкция, разложенная на шаги по стадиям. Сама инструкция —
-   это документ на много страниц, и держать её здесь целиком незачем:
-   в работе нужно знать, что делать на текущем шаге и что будет дальше.
-   Выбранный проект подсвечивает свою стадию — «вы здесь». */
-
-let orderStepsCache = null;
-
-const ORDER_STAGES = [
-  { key: "plan", label: "План", sub: "Проект заведён, экспертиза ещё не назначена" },
-  { key: "active", label: "Активный", sub: "Экспертиза назначена, эксперт работает" },
-  { key: "control", label: "Контроль", sub: "Заключение сдано, ждём оплату и решение суда" },
-  { key: "done", label: "Завершённый", sub: "Оплата получена, проект в архиве" },
-];
-
-async function loadOrderPage() {
-  const body = document.getElementById("orderBody");
-  if (!orderStepsCache) {
-    body.innerHTML = '<div class="empty-hint">Загрузка…</div>';
-    try {
-      const { steps } = await apiFetch("/api/cases/instruction-steps");
-      orderStepsCache = steps;
-    } catch (err) {
-      body.innerHTML = `<div class="empty-hint">Не удалось загрузить порядок работы: ${escapeHtml(err.message)}</div>`;
-      return;
-    }
-  }
-  await fillOrderProjects();
-  renderOrderPage();
-}
-
-/** Список проектов для «вы здесь». Отменённые и архивные не предлагаем. */
-async function fillOrderProjects() {
-  const select = document.getElementById("orderProject");
-  if (select.dataset.filled) return;
-  try {
-    const list = await apiFetch("/api/cases");
-    const open = list.filter((c) => !c.is_cancelled);
-    fillSelect(select, open.map((c) => ({ value: c.id, label: c.name })), "",
-      "Просто инструкция, без проекта");
-    select.dataset.filled = "1";
-    select.dataset.stages = JSON.stringify(
-      Object.fromEntries(open.map((c) => [c.id, c.stage])));
-  } catch {
-    // Без списка проектов страница всё равно полезна — это же инструкция.
-  }
-}
-
-function renderOrderPage() {
-  const body = document.getElementById("orderBody");
-  const select = document.getElementById("orderProject");
-  const stages = select.dataset.stages ? JSON.parse(select.dataset.stages) : {};
-  const hereStage = select.value ? stages[select.value] : null;
-
-  body.innerHTML = ORDER_STAGES.map((stage) => {
-    const steps = (orderStepsCache || []).filter((s) => s.stage === stage.key);
-    const here = hereStage === stage.key;
-    return `
-      <section class="order-stage${here ? " here" : ""}">
-        <div class="order-stage-head">
-          <h2>${escapeHtml(stage.label)}</h2>
-          ${here ? '<span class="order-here">проект сейчас здесь</span>' : ""}
-        </div>
-        <p class="order-stage-sub">${escapeHtml(stage.sub)}</p>
-        <ol class="order-steps">
-          ${steps.map((s) => `
-            <li>
-              <div class="order-step-title">${escapeHtml(s.title)}</div>
-              ${s.detail ? `<div class="order-step-detail">${escapeHtml(s.detail)}</div>` : ""}
-              ${s.clause ? `<div class="order-step-clause">Инструкция, ${escapeHtml(s.clause)}</div>` : ""}
-            </li>`).join("")}
-        </ol>
-      </section>`;
-  }).join("");
-}
-
-bind(document.getElementById("orderProject"), "change", renderOrderPage);
-
-/* ---------- Производственный календарь ----------
-   От этих дат зависят сроки по всем проектам сразу, поэтому правит их
-   только администратор или руководитель, а остальные их даже не видят
-   как кнопку. */
-
-const calendarOverlay = document.getElementById("calendarOverlay");
-
-function closeCalendar() {
-  if (calendarOverlay) calendarOverlay.classList.add("hidden");
-}
-bind(document.getElementById("calendarCloseBtn"), "click", closeCalendar);
-bind(calendarOverlay, "click", (e) => { if (e.target === calendarOverlay) closeCalendar(); });
-
-bind(document.getElementById("calendarBtn"), "click", () => {
-  const select = document.getElementById("calendarYear");
-  if (!select.options.length) {
-    const now = new Date().getFullYear();
-    for (let y = now - 1; y <= now + 3; y++) {
-      const opt = document.createElement("option");
-      opt.value = String(y);
-      opt.textContent = String(y);
-      select.appendChild(opt);
-    }
-    select.value = String(now);
-  }
-  document.getElementById("calendarError").textContent = "";
-  calendarOverlay.classList.remove("hidden");
-  loadCalendar();
-});
-
-bind(document.getElementById("calendarYear"), "change", loadCalendar);
-
-async function loadCalendar() {
-  const list = document.getElementById("calendarList");
-  const year = document.getElementById("calendarYear").value;
-  list.innerHTML = '<div class="empty-hint">Загрузка…</div>';
-  try {
-    const data = await apiFetch(`/api/cases/work-calendar?year=${encodeURIComponent(year)}`);
-
-    // Показываем, на какие годы календарь вообще заполнен: без этого не
-    // видно, что расчёт сроков на следующий год уже ненадёжен.
-    const filled = (data.years || []).map((y) => `${y.year} (${y.days})`).join(", ");
-    document.getElementById("calendarYears").textContent = filled
-      ? `Заведены годы: ${filled}. На остальные сроки в рабочих днях считаются только по выходным.`
-      : "Праздники ещё не заведены ни на один год — сроки в рабочих днях считаются только по выходным.";
-
-    if (!data.days.length) {
-      list.innerHTML = '<div class="empty-hint">На этот год ничего не заведено</div>';
-      return;
-    }
-    list.innerHTML = data.days.map((d) => `
-      <div class="cal-day">
-        <span class="cal-day-date">${fmtDate(d.day)}</span>
-        <span class="cal-day-kind">${d.kind === "holiday" ? "праздник" : "рабочий день"}</span>
-        <span class="cal-day-note">${escapeHtml(d.note || "")}</span>
-        <button type="button" class="back-btn danger-outline" data-cal-del="${escapeHtml(d.day)}">Убрать</button>
-      </div>`).join("");
-    list.querySelectorAll("[data-cal-del]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        try {
-          await apiFetch(`/api/cases/work-calendar/${btn.dataset.calDel}`, { method: "DELETE" });
-          loadCalendar();
-        } catch (err) {
-          document.getElementById("calendarError").textContent = err.message;
-        }
-      });
-    });
-  } catch (err) {
-    list.innerHTML = `<div class="empty-hint">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
-  }
-}
-
-bind(document.getElementById("calendarAddBtn"), "click", async () => {
-  const errorEl = document.getElementById("calendarError");
-  const day = document.getElementById("calendarDay").value;
-  if (!day) { errorEl.textContent = "Укажите дату"; return; }
-  errorEl.textContent = "";
-  try {
-    await apiFetch("/api/cases/work-calendar", {
-      method: "POST",
-      body: JSON.stringify({
-        day,
-        kind: document.getElementById("calendarKind").value,
-        note: document.getElementById("calendarNote").value.trim() || null,
-      }),
-    });
-    // Год в списке переключаем на тот, куда добавили: иначе день исчезает
-    // из виду и кажется, что ничего не сохранилось.
-    const select = document.getElementById("calendarYear");
-    const year = day.slice(0, 4);
-    if ([...select.options].some((o) => o.value === year)) select.value = year;
-    document.getElementById("calendarDay").value = "";
-    document.getElementById("calendarNote").value = "";
-    loadCalendar();
-  } catch (err) {
-    errorEl.textContent = err.message;
-  }
-});
-
-/* ---------- Что установил суд ----------
-   Человек вписывает исход, программа считает по инструкции, что из него
-   следует, и показывает это списком. Ничего не происходит, пока не нажата
-   «Применить»: перевод стадии двигает папку на диске и карточку в Planfix,
-   и делать это молча по вписанному вручную тексту нельзя. */
-
-const courtOverlay = document.getElementById("courtOverlay");
-let courtProject = null;
-let courtOutcomesCache = [];
-// Предложение, которое сейчас на экране: его же и применяем.
-let courtPendingEvent = null;
-
-function closeCourt() {
-  if (courtOverlay) courtOverlay.classList.add("hidden");
-  courtProject = null;
-  courtPendingEvent = null;
-}
-bind(document.getElementById("courtCloseBtn"), "click", closeCourt);
-bind(courtOverlay, "click", (e) => { if (e.target === courtOverlay) closeCourt(); });
-
-function todayIso() {
-  const d = new Date();
-  const p2 = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-}
-
-function fmtDate(iso) {
-  const s = String(iso || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
-  const [y, m, d] = s.split("-");
-  return `${d}.${m}.${y}`;
-}
-
-/** Подсказка под выбранным исходом: что о нём говорит инструкция. */
-function renderCourtOutcomeHint() {
-  const hint = document.getElementById("courtOutcomeHint");
-  const id = document.getElementById("courtOutcome").value;
-  const outcome = courtOutcomesCache.find((o) => String(o.id) === String(id));
-  if (!outcome) { hint.textContent = ""; return; }
-  const parts = [];
-  if (outcome.note) parts.push(outcome.note);
-  if (outcome.clause) parts.push(`Инструкция, ${outcome.clause}.`);
-  if (outcome.requires_manager) parts.push("Применить может только руководитель центра.");
-  hint.textContent = parts.join(" ");
-}
-
-async function openCourt(project) {
-  if (!courtOverlay) return;
-  courtProject = project;
-  courtPendingEvent = null;
-  document.getElementById("courtHead").textContent = `Что установил суд: ${project.name}`;
-  document.getElementById("courtError").textContent = "";
-  document.getElementById("courtPlan").classList.add("hidden");
-  document.getElementById("courtEventDate").value = todayIso();
-  document.getElementById("courtHearingDate").value = "";
-  document.getElementById("courtExpertiseDue").value = "";
-  document.getElementById("courtNote").value = "";
-  courtOverlay.classList.remove("hidden");
-
-  const select = document.getElementById("courtOutcome");
-  select.innerHTML = "<option value=''>Загрузка…</option>";
-  try {
-    // Спрашиваем исходы для текущей стадии: на «Плане» суд решает одно,
-    // на «Контроле» — другое, и мешать их в одном списке значит
-    // предлагать заведомо неподходящее.
-    const { outcomes } = await apiFetch(
-      `/api/cases/court-outcomes?stage=${encodeURIComponent(project.stage || "")}`);
-    courtOutcomesCache = outcomes;
-    fillSelect(select, outcomes.map((o) => ({ value: o.id, label: o.name })), "", "Выберите…");
-  } catch (err) {
-    select.innerHTML = "";
-    document.getElementById("courtError").textContent =
-      "Не удалось загрузить список исходов: " + err.message;
-  }
-  renderCourtOutcomeHint();
-  loadCourtHistory(project.id);
-}
-
-bind(document.getElementById("courtOutcome"), "change", renderCourtOutcomeHint);
-
-/** Показывает предложение: сначала чего не хватает, потом что будет сделано. */
-function renderCourtPlan(event, plan) {
-  const box = document.getElementById("courtPlan");
-  courtPendingEvent = event;
-
-  const warnings = (plan.warnings || [])
-    .map((w) => `<p class="court-warn">${escapeHtml(w)}</p>`).join("");
-  const steps = (plan.steps || [])
-    .map((s) => `<li>${escapeHtml(s)}</li>`).join("");
-
-  box.innerHTML = `
-    ${warnings}
-    <div class="court-plan">
-      <h4>Что программа сделает по инструкции</h4>
-      <ol>${steps}</ol>
-      ${plan.clause ? `<p class="court-clause">Основание: инструкция, ${escapeHtml(plan.clause)}.</p>` : ""}
-    </div>
-    <div class="court-apply-row">
-      <button class="primary" id="courtApplyBtn" type="button">Применить</button>
-      <button class="back-btn danger-outline" id="courtDropBtn" type="button">Убрать запись</button>
-    </div>
-  `;
-  box.classList.remove("hidden");
-  // Предложение появляется под формой и на невысоком экране остаётся за
-  // краем окна: человек нажал кнопку и решил, что ничего не произошло.
-  box.scrollIntoView({ behavior: "smooth", block: "start" });
-
-  bind(document.getElementById("courtApplyBtn"), "click", applyCourtEvent);
-  bind(document.getElementById("courtDropBtn"), "click", dropCourtEvent);
-}
-
-bind(document.getElementById("courtForm"), "submit", async (e) => {
-  e.preventDefault();
-  if (!courtProject) return;
-  const btn = document.getElementById("courtCalcBtn");
-  const errorEl = document.getElementById("courtError");
-  const val = (id) => document.getElementById(id).value || null;
-
-  btn.disabled = true;
-  errorEl.textContent = "";
-  try {
-    const res = await apiFetch(`/api/cases/${courtProject.id}/court-events`, {
-      method: "POST",
-      body: JSON.stringify({
-        outcomeId: Number(document.getElementById("courtOutcome").value),
-        eventDate: val("courtEventDate"),
-        hearingDate: val("courtHearingDate"),
-        expertiseDue: val("courtExpertiseDue"),
-        note: document.getElementById("courtNote").value.trim() || null,
-      }),
-    });
-    renderCourtPlan(res.event, res.plan);
-    loadCourtHistory(courtProject.id);
-  } catch (err) {
-    errorEl.textContent = err.message;
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-async function applyCourtEvent() {
-  if (!courtPendingEvent) return;
-  const btn = document.getElementById("courtApplyBtn");
-  const errorEl = document.getElementById("courtError");
-  btn.disabled = true;
-  errorEl.textContent = "";
-  try {
-    const res = await apiFetch(`/api/cases/court-events/${courtPendingEvent.id}/apply`,
-      { method: "POST" });
-    closeCourt();
-    showToast(res.done && res.done.length ? res.done.join(" ") : "Решение применено");
-    // Папка проекта могла переехать — стоять в ней больше нельзя.
-    goToColumns(true);
-    loadColumnList("cases");
-  } catch (err) {
-    errorEl.textContent = err.message;
-    btn.disabled = false;
-  }
-}
-
-async function dropCourtEvent() {
-  if (!courtPendingEvent) return;
-  if (!confirm("Убрать эту запись? Проект не изменится.")) return;
-  try {
-    await apiFetch(`/api/cases/court-events/${courtPendingEvent.id}`, { method: "DELETE" });
-    courtPendingEvent = null;
-    document.getElementById("courtPlan").classList.add("hidden");
-    if (courtProject) loadCourtHistory(courtProject.id);
-  } catch (err) {
-    document.getElementById("courtError").textContent = err.message;
-  }
-}
-
-/** История решений: видно, почему проект оказался там, где он есть. */
-async function loadCourtHistory(caseId) {
-  const box = document.getElementById("courtHistory");
-  box.innerHTML = '<div class="empty-hint">Загрузка…</div>';
-  try {
-    const { events } = await apiFetch(`/api/cases/${caseId}/court-events`);
-    if (!events.length) {
-      box.innerHTML = '<div class="empty-hint">Пока ничего не вписано</div>';
-      return;
-    }
-    box.innerHTML = events.map((e) => `
-      <div class="court-event">
-        <div class="court-event-top">
-          <span class="court-event-name">${escapeHtml(e.outcome_name)}</span>
-          <span class="court-tag ${e.applied ? "applied" : ""}">${e.applied ? "применено" : "не применено"}</span>
-        </div>
-        <div class="court-event-meta">Определение от ${fmtDate(e.event_date)}${
-          e.created_by_name ? `, вписал ${escapeHtml(e.created_by_name)}` : ""}</div>
-        ${e.note ? `<div class="court-event-note">${escapeHtml(e.note)}</div>` : ""}
-      </div>`).join("");
-  } catch (err) {
-    box.innerHTML = `<div class="empty-hint">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
-  }
-}
 
 /* ---- Управление списком организаций ("Структура") ---- */
 
