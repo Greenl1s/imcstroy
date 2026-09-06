@@ -95,14 +95,65 @@
 
 /* Баннер проекта — появляется в шапке открытой папки "Дела", если эта
    папка является отслеживаемым проектом (экспертизой/НИ). */
+/* Одна полоса вместо трёх панелей: где проект, что горит и куда идти за
+   подробностями. Раньше здесь стояли пять кнопок одного веса, список
+   задач и ассистент, и до файлов человек доезжал на пятой сотне
+   пикселей — а открывал он всё-таки папку. */
 .case-banner {
-  margin-top: 10px; padding: 10px 14px; background: var(--accent-bg);
-  border-radius: 8px; display: flex; align-items: center; justify-content: space-between;
+  margin-top: 10px; padding: 9px 14px; background: var(--accent-bg);
+  border-radius: var(--radius-sm); display: flex; align-items: center;
   gap: 12px; flex-wrap: wrap;
 }
-.case-banner .case-banner-actions { display: flex; gap: 8px; }
-.case-banner button.danger-outline {
-  color: var(--danger); border-color: var(--danger); background: transparent;
+.case-strip-status { font-size: var(--fs-body); color: var(--accent-on-tint); }
+.case-banner .chip-overdue {
+  font-size: var(--fs-meta); padding: 3px 11px; border-radius: 999px;
+  background: var(--danger-bg); color: var(--danger); font-weight: 500;
+}
+.case-banner .kad-link { background: var(--bg-card); }
+.case-strip-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.case-strip-card {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent); background: var(--bg-card);
+  color: var(--accent-on-tint); font: 600 13px/1 inherit; font-family: inherit; cursor: pointer;
+}
+.case-strip-card:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.case-strip-card svg { width: 15px; height: 15px; fill: none; stroke: currentColor;
+                       stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Редкие и тяжёлые действия — под «ещё»: перенос стадии двигает папку на
+   диске, а отмена необратима, и обеим не место рядом с файлами. */
+.case-strip-more { position: relative; }
+.case-strip-more > button {
+  width: 32px; height: 32px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg-card);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.case-strip-more > button:hover { border-color: var(--accent); }
+.case-strip-more > button svg { width: 18px; height: 18px; fill: var(--text-secondary); stroke: none; }
+
+.case-strip-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  min-width: 232px; padding: 6px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-card);
+  box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 2px;
+}
+.case-strip-menu button {
+  width: 100%; text-align: left; border: none; background: transparent;
+  padding: 8px 10px; border-radius: 6px; font: 400 14px/1.3 inherit; font-family: inherit;
+  color: var(--text-primary); cursor: pointer;
+}
+.case-strip-menu button:hover { background: var(--bg-subtle); }
+.case-strip-menu button.danger { color: var(--danger); }
+.case-strip-menu button.danger:hover { background: var(--danger-bg); }
+.case-strip-menu-row { display: flex; gap: 6px; padding: 4px 6px 6px; }
+.case-strip-menu-row select {
+  flex: 1; min-width: 0; height: 30px; padding: 0 8px; font-family: inherit; font-size: 13px;
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-card);
+}
+.case-strip-menu-row button {
+  width: auto; flex: 0 0 auto; border: 1px solid var(--border-strong); font-size: 13px; padding: 0 11px;
 }
 
 /* Чат-ассистент внутри карточки проекта */
@@ -1961,14 +2012,16 @@ label.picker-item,
 .case-task-name { cursor: pointer; }
 .case-task-name:hover { color: var(--accent-on-tint); }
 .case-task-meta { margin-left: auto; font-size: var(--fs-meta); color: var(--text-muted); white-space: nowrap; }
-.case-tick {
+/* Флажок «задача сделана» — один и тот же в карточке проекта и в списке
+   задач: две копии одного элемента неизбежно разъезжаются. */
+.tick {
   width: 18px; height: 18px; flex: 0 0 18px; border-radius: 5px; padding: 0;
   border: 1.5px solid var(--border-strong); background: var(--bg-card);
   display: inline-flex; align-items: center; justify-content: center;
   color: #fff; cursor: pointer;
 }
-button.case-tick:hover { border-color: var(--success); background: var(--success-bg); }
-.case-tick.on { background: var(--success); border-color: var(--success); cursor: default; }
+button.tick:hover { border-color: var(--success); background: var(--success-bg); }
+.tick.on { background: var(--success); border-color: var(--success); cursor: default; }
 
 .case-subpanel {
   margin-top: 18px; padding: 13px 15px;
@@ -1991,3 +2044,78 @@ button.case-tick:hover { border-color: var(--success); background: var(--success
   line-height: 1.5;
   color: var(--text-muted);
 }
+
+/* ---------- Список задач: группы по срочности ----------
+   Раньше это была таблица на семь колонок — она отвечала на вопрос
+   «какие вообще есть задачи», а человек приходит с вопросом «что мне
+   делать сейчас». Порядок групп и есть порядок работы. */
+
+.task-group + .task-group { margin-top: 22px; }
+
+.task-group-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.task-group-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: 0 0 8px; }
+/* Цифра на светлой плашке того же тона, что и заголовок. Через
+   currentColor это не выразить: фон и текст должны быть разными. */
+.task-group-count {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  padding: 1px 9px;
+  border-radius: 999px;
+}
+.task-group-note { font-weight: 400; font-size: var(--fs-meta); color: var(--text-muted); }
+
+.task-group-head.tone-over { color: var(--danger); }
+.task-group-head.tone-over .task-group-count { background: var(--danger-bg); }
+.task-group-head.tone-soon { color: var(--warning); }
+.task-group-head.tone-soon .task-group-count { background: #fdf6e7; }
+.task-group-head.tone-ok { color: var(--accent); }
+.task-group-head.tone-ok .task-group-count { background: var(--accent-bg); }
+.task-group-head.tone-mute { color: var(--text-secondary); }
+.task-group-head.tone-mute .task-group-count { background: var(--bg-subtle); }
+
+.task-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-body);
+}
+.task-line:last-child { border-bottom: none; }
+.task-line:hover { background: var(--bg-subtle); border-radius: var(--radius-sm); }
+.task-line.is-done { color: var(--text-muted); }
+.task-line.is-done .task-line-name { text-decoration: line-through; }
+
+.task-line-main { flex: 1; min-width: 0; }
+.task-line-name { display: block; font-weight: 500; cursor: pointer; }
+.task-line-name:hover { color: var(--accent-on-tint); }
+.task-line-sub { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.task-line-project {
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-line-project:hover { color: var(--accent-on-tint); }
+
+.task-line-when { text-align: right; white-space: nowrap; flex: 0 0 auto; }
+.task-line-date { display: block; margin-top: 2px; font-size: var(--fs-meta); color: var(--text-muted); }
+
+/* Значок стадии в строке задачи мельче, чем в шапке папки: там он
+   заголовок экрана, здесь — подпись под названием. */
+.stage-badge.stage-mini {
+  padding: 1px 8px;
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+.task-line .task-del-btn { flex: 0 0 auto; }

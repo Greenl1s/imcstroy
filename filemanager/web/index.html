@@ -195,33 +195,6 @@
         </button>
       </div>
       <div id="caseBanner" class="case-banner hidden"></div>
-      <div id="caseTasksBox" class="case-chat-box hidden">
-        <div class="case-chat-header" id="caseTasksToggle">
-          <span id="caseTasksTitle">Задачи проекта</span>
-          <!-- Кнопка стоит там же, где живут задачи проекта: ставить
-               задачу логичнее всего рядом со списком уже поставленных. -->
-          <button class="upload-btn" id="caseNewTaskBtn" type="button">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            Новая задача
-          </button>
-          <span id="caseTasksArrow">▾</span>
-        </div>
-        <div id="caseTasksBody" class="case-tasks-body"></div>
-      </div>
-
-      <div id="caseChatBox" class="case-chat-box hidden">
-        <div class="case-chat-header" id="caseChatToggle">
-          <span>💬 Спросить ассистента по проекту</span>
-          <span id="caseChatArrow">▾</span>
-        </div>
-        <div id="caseChatBody" class="hidden">
-          <div id="caseChatMessages" class="case-chat-messages"></div>
-          <form id="caseChatForm" class="case-chat-form">
-            <input type="text" id="caseChatInput" placeholder="Например: составь отказное письмо" autocomplete="off">
-            <button type="submit" class="primary" id="caseChatSendBtn">Отправить</button>
-          </form>
-        </div>
-      </div>
       <div class="folder-actions" id="folderActions">
         <div class="create-wrap">
           <button class="create-btn" id="createFolderViewBtn" type="button" aria-haspopup="menu" aria-expanded="false">
@@ -506,6 +479,19 @@
       <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;" id="caseCardActions"></div>
     </div>
     <div class="folder-body" id="caseCardBody"></div>
+    <div id="caseChatBox" class="case-chat-box hidden">
+        <div class="case-chat-header" id="caseChatToggle">
+          <span>💬 Спросить ассистента по проекту</span>
+          <span id="caseChatArrow">▾</span>
+        </div>
+        <div id="caseChatBody" class="hidden">
+          <div id="caseChatMessages" class="case-chat-messages"></div>
+          <form id="caseChatForm" class="case-chat-form">
+            <input type="text" id="caseChatInput" placeholder="Например: составь отказное письмо" autocomplete="off">
+            <button type="submit" class="primary" id="caseChatSendBtn">Отправить</button>
+          </form>
+        </div>
+      </div>
   </div>
 
   <!-- Порядок работы: рабочая инструкция, разложенная на шаги по стадиям.

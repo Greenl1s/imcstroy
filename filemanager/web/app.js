@@ -2036,24 +2036,17 @@ function stageBadgeHtml(project) {
  */
 async function updateCaseBanner(path) {
   const banner = document.getElementById("caseBanner");
-  const chatBox = document.getElementById("caseChatBox");
   if (!path.startsWith(CASES_PATH)) {
     banner.classList.add("hidden");
-    chatBox.classList.add("hidden");
-    document.getElementById("caseTasksBox").classList.add("hidden");
     openPlanfixTasksFor(null);
     return;
   }
   try {
     const project = await apiFetch(`/api/cases/by-path?path=${encodeURIComponent(path)}`);
     renderCaseBanner(project);
-    loadCaseTasks(project);
-    openCaseChatFor(project.id);
     openPlanfixTasksFor(project);
   } catch {
     banner.classList.add("hidden");
-    chatBox.classList.add("hidden");
-    document.getElementById("caseTasksBox").classList.add("hidden");
     openPlanfixTasksFor(null);
   }
 }
@@ -2062,31 +2055,64 @@ function renderCaseBanner(project) {
   const banner = document.getElementById("caseBanner");
   const otherStages = ["plan", "active", "control", "done"].filter((s) => s !== project.stage);
 
-  const actions = [];
+  // Папка отвечает за файлы, карточка — за состояние проекта. Раньше здесь
+  // стояли пять кнопок одного веса, список задач и ассистент, и до самих
+  // файлов человек доезжал на пятой сотне пикселей. Осталась одна полоса:
+  // где проект, что горит и куда идти за подробностями.
+  const overdue = Number(project.overdue_tasks || 0);
+
+  const rare = [];
   if (!project.is_cancelled && otherStages.length) {
-    actions.push(`
-      <select id="caseStageSelect" style="padding:6px 10px; border-radius:8px; border:1px solid var(--border);">
-        ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
-      </select>
-      <button class="upload-btn" id="caseAdvanceBtn" type="button">Переместить</button>
-    `);
+    rare.push(`
+      <div class="case-strip-menu-row">
+        <select id="caseStageSelect">
+          ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
+        </select>
+        <button type="button" id="caseAdvanceBtn">Переместить</button>
+      </div>`);
   }
-  // «Что установил суд» стоит перед «Редактировать»: это основной способ
-  // двигать проект по инструкции, а ручное «Переместить» — запасной.
   if (!project.is_cancelled) {
-    actions.push(`<button class="upload-btn" id="caseCourtBtn" type="button">Что установил суд</button>`);
+    rare.push(`<button type="button" id="caseCourtBtn">Что установил суд</button>`);
   }
-  actions.push(`<button class="upload-btn" id="caseEditBtn" type="button">Редактировать</button>`);
+  rare.push(`<button type="button" id="caseEditBtn">Редактировать</button>`);
   if (!project.is_cancelled) {
-    actions.push(`<button class="back-btn danger-outline" id="caseCancelBtn" type="button">Отменить проект</button>`);
+    rare.push(`<button type="button" class="danger" id="caseCancelBtn">Отменить проект</button>`);
   }
 
   banner.innerHTML = `
-    <div>${stageBadgeHtml(project)} <strong style="margin-left:8px;">${escapeHtml(project.name)}</strong>${kadLinkHtml(project)}</div>
-    <div class="case-banner-actions">${actions.join("")}</div>
+    ${stageBadgeHtml(project)}
+    <span class="case-strip-status">${escapeHtml(STATUS_LABEL[project.status] || "")}</span>
+    ${overdue
+      ? `<span class="chip-overdue">${plural(overdue, "задача просрочена", "задачи просрочено", "задач просрочено")}</span>`
+      : ""}
+    ${kadLinkHtml(project)}
+    <span class="case-strip-right">
+      <button class="case-strip-card" type="button" id="caseCardBtn">
+        Карточка проекта
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+      <span class="case-strip-more">
+        <button type="button" id="caseMoreBtn" title="Ещё действия" aria-label="Ещё действия" aria-haspopup="menu">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+        <span class="case-strip-menu hidden" id="caseMoreMenu" role="menu">${rare.join("")}</span>
+      </span>
+    </span>
   `;
   banner.classList.remove("hidden");
   banner.dataset.caseId = project.id;
+
+  bind(document.getElementById("caseCardBtn"), "click", () => openCaseCard(project.id, true));
+
+  // Редкие и тяжёлые действия — под кнопкой «ещё»: перенос стадии двигает
+  // папку на диске, а отмена необратима, и обеим не место рядом с файлами.
+  const moreBtn = document.getElementById("caseMoreBtn");
+  const moreMenu = document.getElementById("caseMoreMenu");
+  bind(moreBtn, "click", (e) => {
+    e.stopPropagation();
+    moreMenu.classList.toggle("hidden");
+  });
+  document.addEventListener("click", () => moreMenu.classList.add("hidden"));
 
   const advanceBtn = document.getElementById("caseAdvanceBtn");
   if (advanceBtn) {
@@ -2143,10 +2169,16 @@ function renderCaseBanner(project) {
    задачу, не уходя в Planfix. Завершение идёт через Planfix — он остаётся
    источником правды, у себя помечаем только после его подтверждения. */
 
+// Открываем страницу на «Мои» и «Текущие»: человек приходит сюда с
+// вопросом «что мне делать», а не «какие вообще есть задачи в центре».
 const tasksFilters = {
-  scope: "all", state: "open", q: "",
+  scope: "mine", state: "open", q: "",
   due: "any", type: "any", stage: "any", assignee: "",
 };
+// Один раз за сеанс: если аккаунт не связан с сотрудником Planfix,
+// «Мои» показать нечего — молча оставлять пустой экран нельзя, поэтому
+// сами переключаемся на «Все» и оставляем объяснение в баннере.
+let tasksScopeFellBack = false;
 
 // Подписи для «фишек» под панелью. Держим здесь, а не берём текст из
 // самого выпадающего списка: там «Срок: любой», а в фишке нужно короткое.
@@ -2162,7 +2194,7 @@ const CASE_STAGE_LABEL = { plan: "План", active: "Активный", control
 /** Все фильтры в адресе, чтобы они пережили F5 и возврат из карточки. */
 function tasksFiltersToUrl() {
   const p = new URLSearchParams({ section: "tasks" });
-  if (tasksFilters.scope !== "all") p.set("scope", tasksFilters.scope);
+  if (tasksFilters.scope !== "mine") p.set("scope", tasksFilters.scope);
   if (tasksFilters.state !== "open") p.set("state", tasksFilters.state);
   if (tasksFilters.q) p.set("q", tasksFilters.q);
   if (tasksFilters.due !== "any") p.set("due", tasksFilters.due);
@@ -2177,7 +2209,7 @@ function tasksFiltersFromUrl(params) {
     const v = params.get(key);
     return v && allowed.includes(v) ? v : def;
   };
-  tasksFilters.scope = take("scope", ["all", "mine", "assigned"], "all");
+  tasksFilters.scope = take("scope", ["all", "mine", "assigned"], "mine");
   tasksFilters.state = take("state", ["open", "done"], "open");
   tasksFilters.q = params.get("q") || "";
   tasksFilters.due = take("due", ["any", "overdue", "today", "week", "none"], "any");
@@ -2322,9 +2354,22 @@ function renderTasksPage(data) {
   const summary = document.getElementById("tasksSummary");
   const counts = data.counts || { open: 0, done: 0, overdue: 0 };
 
-  summary.textContent = counts.overdue
-    ? `В работе ${counts.open}, из них просрочено ${counts.overdue}. Завершено ${counts.done}.`
-    : `В работе ${counts.open}. Завершено ${counts.done}.`;
+  // Счётчики считаются по всем видимым проектам, а не по текущему отбору:
+  // иначе цифра прыгает вслед за фильтром и перестаёт что-либо значить.
+  // Но раз страница открывается на «Моих», сначала говорим про них —
+  // иначе «В работе 37» над списком из пяти строк только запутывает.
+  const all = counts.overdue
+    ? `по всем проектам ${counts.open}, просрочено ${counts.overdue}`
+    : `по всем проектам ${counts.open}`;
+  if (tasksFilters.scope === "mine" && !data.needsBinding) {
+    summary.textContent = counts.mine
+      ? `На вас ${plural(counts.mine, "задача", "задачи", "задач")} — ${all}.`
+      : `На вас сейчас ничего не назначено — ${all}.`;
+  } else {
+    summary.textContent = counts.overdue
+      ? `В работе ${counts.open}, из них просрочено ${counts.overdue}. Завершено ${counts.done}.`
+      : `В работе ${counts.open}. Завершено ${counts.done}.`;
+  }
 
   const badge = document.getElementById("casesTasksCount");
   if (badge) {
@@ -2360,56 +2405,107 @@ function renderTasksPage(data) {
     return;
   }
 
-  const rows = data.tasks.map((t) => {
-    // Состояние срока считает сервер: по московской дате и один раз на
-    // всех. Раньше это считалось ещё и здесь — и задача со сроком
-    // «сегодня» краснела с полуночи, хотя весь день был впереди.
-    const overdue = t.due_state === "overdue";
-    const typeLabel = caseTypeLabel(t.case_type, true);
+  body.innerHTML = tasksGroupsHtml(data);
+  wireTasksRows(body);
+}
+
+/**
+ * Группы срочности.
+ *
+ * Раньше это была таблица на семь колонок: она отвечала на вопрос «какие
+ * вообще есть задачи», а человек открывает список с вопросом «что мне
+ * делать сейчас». Срочность было видно только по цвету даты в четвёртой
+ * колонке — слишком слабый сигнал, отсюда и путаница.
+ *
+ * Порядок групп — это и есть порядок работы: сначала то, что уже
+ * просрочено, в конце то, у чего срока нет вовсе.
+ */
+const DUE_GROUPS = [
+  { key: "overdue", label: "Просрочено", tone: "over" },
+  { key: "today", label: "Сегодня", tone: "soon" },
+  { key: "soon", label: "На этой неделе", tone: "ok" },
+  { key: "later", label: "Позже", tone: "mute" },
+  // Отдельная группа, а не «прочее»: по инструкции у части задач срока
+  // действительно не бывает, и в общей куче про них забывают.
+  { key: "none", label: "Без срока", tone: "mute", note: "срок ставится по ходу работы" },
+];
+
+function tasksGroupsHtml(data) {
+  // Завершённые по срочности не делим: они уже сданы, и «просрочено»
+  // про них ничего не сообщает. Их показываем одним списком.
+  if (tasksFilters.state === "done") {
+    return `<div class="task-group">${data.tasks.map(taskLineHtml).join("")}</div>`;
+  }
+
+  const byState = new Map(DUE_GROUPS.map((g) => [g.key, []]));
+  for (const t of data.tasks) {
+    (byState.get(t.due_state) || byState.get("none")).push(t);
+  }
+
+  return DUE_GROUPS.filter((g) => byState.get(g.key).length).map((g) => {
+    const list = byState.get(g.key);
     return `
-      <tr class="${t.is_done ? "is-done" : ""}${overdue ? " overdue" : ""}" data-task-id="${t.id}">
-        <td class="task-num">${t.planfix_id}</td>
-        <td class="task-title" data-open-task="${t.id}">${escapeHtml(t.name)}</td>
-        <td>
-          <span class="task-project-type">${typeLabel}</span>
-          <span class="task-project-name" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
-        </td>
-        <!-- Метка стоит рядом с самим сроком, а не с названием: «просрочено
-             на 3 дня» — это про дату, и читать их вместе проще. -->
-        <td class="task-date">${taskDateCell(t.end_date)}${dueBadgeHtml(t)}</td>
-        <td class="task-people">${escapeHtml(t.assigner || "")}</td>
-        <td class="task-people">${escapeHtml(t.assignees || "")}</td>
-        <td class="task-actions">${
-          t.is_done
-            ? `<span class="task-done-mark">${svgCheck} завершена</span>`
-            : `<button class="task-done-btn" type="button" data-complete="${t.id}">${svgCheck} Завершить</button>`
-        }${
-          // Удаление показываем только тем, кто может менять этот проект:
-          // кнопка, которую сервер всё равно отклонит, хуже, чем её нет.
-          t.can_write
-            ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
-                       title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
-            : ""
-        }</td>
-      </tr>`;
+      <div class="task-group">
+        <div class="task-group-head tone-${g.tone}">
+          <span class="task-group-dot"></span>
+          <span class="task-group-name">${g.label}</span>
+          <span class="task-group-count">${list.length}</span>
+          ${g.note ? `<span class="task-group-note">— ${g.note}</span>` : ""}
+        </div>
+        ${list.map(taskLineHtml).join("")}
+      </div>`;
   }).join("");
+}
 
-  body.innerHTML = `
-    <table class="tasks-table">
-      <thead>
-        <tr>
-          <th>№</th><th>Название</th><th>Проект</th>
-          <th>Окончание</th><th>Постановщик</th><th>Исполнители</th><th></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+/**
+ * Одна строка задачи.
+ *
+ * Всё существенное собрано слева направо в одном порядке: что сделать,
+ * по какому проекту и на какой он стадии, когда срок и на ком задача.
+ * Раньше глаз ехал через семь колонок на полтора экрана.
+ */
+function taskLineHtml(t) {
+  const when = t.is_done
+    ? `завершена${t.completed_at ? " " + fmtDate(t.completed_at) : ""}`
+    : (t.due_iso ? fmtDate(t.due_iso) : "без срока");
+  const who = t.assignees ? escapeHtml(t.assignees) : "исполнитель не назначен";
 
+  return `
+    <div class="task-line${t.is_done ? " is-done" : ""}" data-task-id="${t.id}">
+      ${t.is_done
+        ? `<span class="tick on" title="Завершена">${svgCheck}</span>`
+        : `<button class="tick" type="button" data-complete="${t.id}"
+                   title="Завершить задачу" aria-label="Завершить задачу"></button>`}
+      <span class="task-line-main">
+        <span class="task-line-name" data-open-task="${t.id}">${escapeHtml(t.name)}</span>
+        <span class="task-line-sub">
+          ${stageChipHtml(t.case_stage)}
+          <span class="task-line-project" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
+        </span>
+      </span>
+      <span class="task-line-when">
+        ${dueBadgeHtml(t)}
+        <span class="task-line-date">${escapeHtml(when)} · ${who}</span>
+      </span>
+      ${t.can_write && !t.is_done
+        ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
+                   title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
+        : ""}
+    </div>`;
+}
+
+/** Маленький значок стадии проекта — тот же цвет, что и везде в «Делах». */
+function stageChipHtml(stage) {
+  const label = { plan: "План", active: "Активный", control: "Контроль", done: "Завершённый" }[stage];
+  if (!label) return "";
+  return `<span class="badge stage-badge stage-${stage} stage-mini">${label}</span>`;
+}
+
+function wireTasksRows(body) {
   body.querySelectorAll("[data-complete]").forEach((btn) => {
     btn.addEventListener("click", () => completeTask(btn.dataset.complete, btn));
   });
   body.querySelectorAll("[data-open-task]").forEach((cell) => {
-    cell.style.cursor = "pointer";
     cell.addEventListener("click", () => openTaskCard(cell.dataset.openTask));
   });
   body.querySelectorAll("[data-delete-task]").forEach((btn) => {
@@ -2419,7 +2515,6 @@ function renderTasksPage(data) {
   // чаще нужно посмотреть, что с проектом, чем лезть в файлы. В саму
   // папку из карточки уводит отдельная кнопка.
   body.querySelectorAll("[data-open-case-id]").forEach((cell) => {
-    cell.style.cursor = "pointer";
     cell.addEventListener("click", () => openCaseCard(cell.dataset.openCaseId, true));
   });
 }
@@ -2462,6 +2557,17 @@ async function loadTasksPage() {
   if (tasksFilters.assignee) params.set("assignee", tasksFilters.assignee);
   try {
     const data = await apiFetch(`/api/cases/tasks/all?${params.toString()}`);
+
+    // Страница открывается на «Моих», но без связи с сотрудником Planfix
+    // моих задач не существует. Оставлять человека перед пустым экраном
+    // нельзя — переключаемся на «Все» один раз и показываем объяснение.
+    if (data.needsBinding && tasksFilters.scope === "mine" && !tasksScopeFellBack) {
+      tasksScopeFellBack = true;
+      tasksFilters.scope = "all";
+      syncTasksFilterControls();
+      return loadTasksPage();
+    }
+
     tasksCache = data.tasks;
     renderTasksPage(data);
   } catch (err) {
@@ -2690,8 +2796,8 @@ async function openTaskCard(id) {
       if (document.getElementById("tasksSection") &&
           !document.getElementById("tasksSection").classList.contains("hidden")) {
         loadTasksPage();
-      } else if (planfixTasksCurrentProject) {
-        loadCaseTasks(planfixTasksCurrentProject);
+      } else if (caseCardId) {
+        loadCaseCard();
       }
     }));
 
@@ -3087,7 +3193,7 @@ bind(document.getElementById("taskNewForm"), "submit", async (e) => {
     }
     // Список задач проекта в его папке пересобираем, чтобы новая
     // задача появилась там сразу, а не после перезагрузки.
-    if (taskNewLockedCase) loadCaseTasks(taskNewLockedCase);
+    if (taskNewLockedCase && caseCardId) loadCaseCard();
   } catch (err) {
     submit.disabled = false;
     hint.textContent = "Не удалось: " + err.message;
@@ -3406,55 +3512,6 @@ function taskRowHtml(task) {
     </div>`;
 }
 
-async function loadCaseTasks(project) {
-  const box = document.getElementById("caseTasksBox");
-  const body = document.getElementById("caseTasksBody");
-  const title = document.getElementById("caseTasksTitle");
-  box.classList.remove("hidden");
-  body.innerHTML = '<div class="empty-hint" style="padding:12px;">Загрузка…</div>';
-
-  let data;
-  try {
-    data = await apiFetch(`/api/cases/${project.id}/tasks`);
-  } catch (err) {
-    title.textContent = "Задачи проекта";
-    body.innerHTML = `<div class="empty-hint" style="padding:12px;">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
-    return;
-  }
-
-  const open = data.tasks.filter((t) => !t.is_done);
-  const done = data.tasks.filter((t) => t.is_done);
-  title.textContent = data.tasks.length
-    ? `Задачи проекта — в работе ${open.length}, завершено ${done.length}`
-    : "Задачи проекта";
-
-  if (!data.tasks.length) {
-    body.innerHTML = `<div class="empty-hint" style="padding:12px;">${
-      project.planfix_id
-        ? "По этому проекту в Planfix пока нет задач."
-        : "Проект ещё не связан с Planfix — задачи появятся после сверки."
-    }</div>`;
-    return;
-  }
-
-  body.innerHTML = `
-    ${open.length ? `<div class="task-group">Сейчас в работе</div>${open.map(taskRowHtml).join("")}` : ""}
-    ${done.length ? `<div class="task-group">Завершённые</div>${done.map(taskRowHtml).join("")}` : ""}
-  `;
-
-  body.querySelectorAll("[data-delete-task]").forEach((btn) => {
-    btn.addEventListener("click", () =>
-      deleteTask(btn.dataset.deleteTask, btn, () => loadCaseTasks(project), btn.dataset.taskName));
-  });
-}
-
-bind(document.getElementById("caseTasksToggle"), "click", () => {
-  const body = document.getElementById("caseTasksBody");
-  const arrow = document.getElementById("caseTasksArrow");
-  body.classList.toggle("hidden");
-  arrow.textContent = body.classList.contains("hidden") ? "▸" : "▾";
-});
-
 /* ---- Чат-ассистент внутри карточки проекта ---- */
 
 let caseChatCurrentId = null;
@@ -3547,14 +3604,6 @@ let planfixTasksCurrentProject = null;
 function openPlanfixTasksFor(project) {
   planfixTasksCurrentProject = project;
 }
-
-bind(document.getElementById("caseNewTaskBtn"), "click", (e) => {
-  // Кнопка лежит внутри заголовка, а тот сворачивает блок по нажатию —
-  // без этого окно открывалось бы и блок тут же схлопывался.
-  e.stopPropagation();
-  if (!planfixTasksCurrentProject) return;
-  openTaskNew(planfixTasksCurrentProject);
-});
 
 /* ---- Форма создания проекта ---- */
 
@@ -4019,6 +4068,9 @@ function renderCaseCard(data) {
     </div>`;
 
   wireCaseCard(data);
+  // Ассистент — это разговор о проекте, а не о файлах, поэтому он живёт
+  // здесь же, под карточкой.
+  openCaseChatFor(p.id);
 }
 
 function caseCardTasksHtml(data) {
@@ -4039,9 +4091,9 @@ function caseCardTasksHtml(data) {
   const rows = data.tasks.map((t) => `
     <div class="case-task${t.is_done ? " is-done" : ""}" data-cc-task="${t.id}">
       ${t.is_done
-        ? `<span class="case-tick on" title="Завершена">${svgCheck}</span>`
+        ? `<span class="tick on" title="Завершена">${svgCheck}</span>`
         : t.can_write
-          ? `<button class="case-tick" type="button" data-cc-complete="${t.id}" title="Завершить задачу" aria-label="Завершить задачу"></button>`
+          ? `<button class="tick" type="button" data-cc-complete="${t.id}" title="Завершить задачу" aria-label="Завершить задачу"></button>`
           : ""}
       <span class="case-task-name" data-cc-open="${t.id}">${escapeHtml(t.name)}</span>
       ${dueBadgeHtml(t)}
@@ -4050,6 +4102,11 @@ function caseCardTasksHtml(data) {
           ? `завершена${t.completed_at ? " " + fmtDate(t.completed_at) : ""}`
           : `${t.due_iso ? fmtDate(t.due_iso) : "без срока"}${t.assignees ? " · " + escapeHtml(t.assignees) : ""}`
       }</span>
+      ${t.can_write
+        ? `<button class="task-del-btn" type="button" data-delete-task="${t.id}"
+                   data-task-name="${escapeHtml(t.name)}"
+                   title="Удалить задачу" aria-label="Удалить задачу">✕</button>`
+        : ""}
     </div>`).join("");
 
   return `<h3 class="case-sec">Задачи · ${parts.join(", ")}</h3><div class="case-tasks">${rows}</div>`;
@@ -4177,6 +4234,10 @@ function wireCaseCard(data) {
   });
   body.querySelectorAll("[data-cc-complete]").forEach((btn) => {
     btn.addEventListener("click", () => completeTask(btn.dataset.ccComplete, btn, () => loadCaseCard()));
+  });
+  body.querySelectorAll("[data-delete-task]").forEach((btn) => {
+    btn.addEventListener("click", () =>
+      deleteTask(btn.dataset.deleteTask, btn, () => loadCaseCard(), btn.dataset.taskName));
   });
 }
 
