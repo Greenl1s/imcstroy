@@ -155,7 +155,19 @@ cases.get("/by-path", async (req, res) => {
   if (!path) return res.status(400).json({ message: "Не указан путь" });
   const { rows } = await db.query(`${CASE_LIST_QUERY} AND c.folder_path = $1`, [path]);
   if (!rows.length) return res.status(404).json({ message: "Не найдено" });
-  res.json(courtCase.decorateCase(rows[0]));
+
+  // Сколько задач горит — единственное, что о задачах говорит полоса в
+  // папке. Считаем здесь, чтобы папка не делала ради одной цифры второй
+  // запрос за полным списком задач.
+  const { rows: due } = await db.query(
+    `SELECT to_char(end_date, 'YYYY-MM-DD') AS end_date, is_done
+       FROM case_tasks WHERE case_id = $1 AND is_done = false`,
+    [rows[0].id]
+  );
+  const today = taskDates.todayIso();
+  const overdue = due.filter((t) => taskDates.dueState(t, today).state === "overdue").length;
+
+  res.json({ ...courtCase.decorateCase(rows[0]), overdue_tasks: overdue });
 });
 
 /**
