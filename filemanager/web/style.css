@@ -346,6 +346,38 @@ button.primary:hover { background: #2569c9; }
 
 .error-text { color: var(--danger); font-size: 14px; margin: 0; min-height: 16px; }
 
+/* ---------- Окно «Добавить эксперта» ----------
+   Подписи под полями объясняют не «что ввести», а что из этого выйдет:
+   куда ляжет файл и как он попадёт в гарантийное письмо. Именно этого
+   раньше нельзя было узнать иначе как на своём опыте. */
+.field-hint {
+  display: block; margin-top: 4px;
+  font-size: var(--fs-meta); font-weight: 400; color: var(--text-muted); line-height: 1.4;
+}
+.field-label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.expert-source {
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px;
+}
+/* Селектор с .modal-panel form — иначе общее правило форм
+   (.modal-panel form label { flex-direction: column }) окажется
+   специфичнее и поставит кружок над подписью. Тот же приём, что
+   у .picker-item ниже. */
+.radio-row,
+.modal-panel form label.radio-row {
+  display: flex; flex-direction: row; align-items: center; gap: 9px; padding: 5px 0;
+  font-size: var(--fs-body); font-weight: 400; color: var(--text-primary); cursor: pointer;
+}
+.radio-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+/* Кнопка «Завести эксперта» — последняя в прокручиваемой форме:
+   без отступа она упиралась в край окна и выглядела обрезанной. */
+#expertForm .modal-actions { padding-bottom: 4px; }
+#expertForm textarea {
+  width: 100%; font-family: inherit; font-size: 14px; line-height: 1.5;
+  padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-primary); resize: vertical;
+}
+#expertForm input[type="file"] { font-size: 13px; padding: 6px 0; }
+
 /* Зоны прикрепления файлов в форме создания проекта */
 .pf-attach-zone { margin-top: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; }
 .pf-attach-zone-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }

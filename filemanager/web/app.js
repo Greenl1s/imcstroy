@@ -127,6 +127,16 @@ const els = {
   casesCancelSelectBtn: document.getElementById("casesCancelSelectBtn"),
   gpOverlay: document.getElementById("gpOverlay"),
   gpCloseBtn: document.getElementById("gpCloseBtn"),
+  expertOverlay: document.getElementById("expertOverlay"),
+  expertForm: document.getElementById("expertForm"),
+  expertName: document.getElementById("expertName"),
+  expertInfoText: document.getElementById("expertInfoText"),
+  expertInfoFile: document.getElementById("expertInfoFile"),
+  expertAttachments: document.getElementById("expertAttachments"),
+  expertTextWrap: document.getElementById("expertTextWrap"),
+  expertFileWrap: document.getElementById("expertFileWrap"),
+  expertError: document.getElementById("expertError"),
+  addExpertBtn: document.getElementById("addExpertBtn"),
   gpForm: document.getElementById("gpForm"),
   gpCaseSelect: document.getElementById("gpCaseSelect"),
   gpCourtHeader: document.getElementById("gpCourtHeader"),
@@ -930,6 +940,141 @@ document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
     showSection(btn.dataset.section, true);
   });
 });
+
+/* ---------- Эксперты ----------
+   Справочник экспертов лежит в файлах: /База данных/Эксперты/<Имя>/,
+   внутри «Сведения.docx» (из него ГП берёт абзацы описания) и подпапка
+   «Приложения» (дипломы и сертификаты).
+
+   Раньше всё это делали руками в Word и проводнике, и эксперт «не
+   появлялся» в списке ГП, если файл назвали иначе или забыли положить.
+   Форма делает то же самое, но имена задаёт код. */
+
+const EXPERTS_PATH = DB_PATH + "/Эксперты";
+
+/** Кнопка нужна ровно в одной папке — в самой папке «Эксперты». */
+function updateExpertButton(path) {
+  if (!els.addExpertBtn) return;
+  els.addExpertBtn.classList.toggle("hidden", path !== EXPERTS_PATH);
+}
+
+bind(els.addExpertBtn, "click", () => openExpertForm());
+bind(document.getElementById("expertCloseBtn"), "click", closeExpertForm);
+
+function openExpertForm() {
+  els.expertForm.reset();
+  els.expertError.textContent = "";
+  toggleExpertSource("text");
+  els.expertOverlay.classList.remove("hidden");
+  els.expertName.focus();
+}
+
+function closeExpertForm() {
+  els.expertOverlay.classList.add("hidden");
+}
+
+/** Сведения — либо текстом, либо файлом. Показываем только выбранное. */
+function toggleExpertSource(mode) {
+  els.expertTextWrap.classList.toggle("hidden", mode !== "text");
+  els.expertFileWrap.classList.toggle("hidden", mode !== "file");
+}
+
+document.querySelectorAll('input[name="expertInfoSource"]').forEach((radio) => {
+  radio.addEventListener("change", () => toggleExpertSource(radio.value));
+});
+
+function expertInfoSource() {
+  const checked = document.querySelector('input[name="expertInfoSource"]:checked');
+  return checked ? checked.value : "text";
+}
+
+/**
+ * Заведение идёт в три шага, и порядок здесь важен.
+ *
+ *   1. POST /api/experts — папка, подпапка «Приложения» и, если сведения
+ *      набрали текстом, готовый «Сведения.docx».
+ *   2. Готовый файл сведений — обычной загрузкой под именем «Сведения.docx».
+ *   3. Приложения — той же загрузкой в подпапку.
+ *
+ * Файлы идут через ту же загрузку, что и всё остальное в системе, а не
+ * через свой отдельный приём: иначе у экспертов оказались бы свои
+ * ограничения на размер и своя проверка прав, и они бы разошлись
+ * с остальными файлами.
+ *
+ * Если папка создалась, а файл не долетел, эксперт остаётся заведённым,
+ * но без сведений — и об этом честно сообщается: в списке для ГП он не
+ * появится, пока сведений нет.
+ */
+bind(els.expertForm, "submit", async (e) => {
+  e.preventDefault();
+  const button = document.getElementById("expertSubmitBtn");
+  const name = els.expertName.value.trim();
+  const mode = expertInfoSource();
+  const infoText = els.expertInfoText.value;
+  const infoFile = els.expertInfoFile.files[0] || null;
+  const attachments = Array.from(els.expertAttachments.files || []);
+
+  els.expertError.textContent = "";
+  if (!name) return (els.expertError.textContent = "Укажите имя эксперта");
+  if (mode === "text" && !infoText.trim()) {
+    return (els.expertError.textContent = "Заполните сведения — без них эксперта нельзя выбрать в ГП");
+  }
+  if (mode === "file" && !infoFile) {
+    return (els.expertError.textContent = "Приложите файл со сведениями");
+  }
+  if (mode === "file" && !/\.docx$/i.test(infoFile.name)) {
+    return (els.expertError.textContent = "Сведения должны быть файлом .docx — из него берутся абзацы для письма");
+  }
+
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = "Заводим…";
+  try {
+    const { expert } = await apiFetch("/api/experts", {
+      method: "POST",
+      body: JSON.stringify({ name, infoText: mode === "text" ? infoText : "" }),
+    });
+
+    if (mode === "file") {
+      await uploadOneFile(infoFile, expert.path, "Сведения.docx");
+    }
+    for (const file of attachments) {
+      await uploadOneFile(file, expert.path + "/Приложения", file.name);
+    }
+
+    closeExpertForm();
+    showToast(`Эксперт «${expert.name}» заведён`);
+    if (currentPath === EXPERTS_PATH) renderFolder(currentPath);
+  } catch (err) {
+    els.expertError.textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+});
+
+/**
+ * Одна загрузка через общий /api/upload.
+ *
+ * relativePath задаёт имя, под которым файл ляжет: так принесённый
+ * «Иванов сведения (финал, правка 3).docx» становится «Сведения.docx» —
+ * именем, по которому его ищет генератор ГП.
+ */
+async function uploadOneFile(file, targetPath, saveAs) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("path", targetPath);
+  form.append("relativePath", saveAs);
+  const res = await fetch("/api/upload", { method: "POST", body: form, credentials: "include" });
+  if (!res.ok) {
+    let message = `Не удалось загрузить «${file.name}»`;
+    try {
+      const data = await res.json();
+      if (data && data.message) message = data.message;
+    } catch { /* тело не JSON — оставляем общий текст */ }
+    throw new Error(message);
+  }
+}
 
 /* ---------- Учёт оборудования ----------
    Раньше это была одна из строк во всплывающем списке «Ссылки»: чтобы
@@ -4757,6 +4902,7 @@ async function renderFolder(path) {
   renderBreadcrumbs();
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   updateCaseBanner(path);
+  updateExpertButton(path);
   try {
     // В корне стадии список делится по типу проекта — значит типы нужны
     // до отрисовки, иначе группы «прыгнут» уже после показа.

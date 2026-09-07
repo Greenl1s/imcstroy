@@ -185,6 +185,12 @@
       </div>
       <div id="caseBanner" class="case-banner hidden"></div>
       <div class="folder-actions" id="folderActions">
+        <!-- Видна только в «База данных/Эксперты»: в остальных папках
+             заводить экспертов бессмысленно. -->
+        <button class="create-btn hidden" id="addExpertBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+          <span>Добавить эксперта</span>
+        </button>
         <div class="create-wrap">
           <button class="create-btn" id="createFolderViewBtn" type="button" aria-haspopup="menu" aria-expanded="false">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
@@ -641,6 +647,56 @@
         Ваш браузер не поддерживает сохранение папки напрямую — доступен только ZIP
       </p>
     </div>
+  </div>
+</div>
+
+<div id="expertOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:620px;">
+    <div class="modal-header">
+      <span>Добавить эксперта</span>
+      <button class="back-btn" id="expertCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="expertForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <label>Имя эксперта
+        <input id="expertName" type="text" required maxlength="120" placeholder="Иванов Иван Иванович">
+        <span class="field-hint">Так эксперт будет подписан в гарантийном письме, и так будет называться его папка.</span>
+      </label>
+
+      <div class="expert-source">
+        <span class="field-label">Сведения об эксперте</span>
+        <label class="radio-row">
+          <input type="radio" name="expertInfoSource" value="text" checked>
+          <span>Набрать здесь</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="expertInfoSource" value="file">
+          <span>Приложить готовый файл</span>
+        </label>
+      </div>
+
+      <label id="expertTextWrap">
+        <textarea id="expertInfoText" rows="7" placeholder="Образование: ...&#10;Стаж работы: ...&#10;Сертификаты: ..."></textarea>
+        <span class="field-hint">Каждая строка станет отдельным абзацем — ровно в таком виде сведения попадут в гарантийное письмо.</span>
+      </label>
+
+      <label id="expertFileWrap" class="hidden">Файл со сведениями (.docx)
+        <input type="file" id="expertInfoFile" accept=".docx">
+        <span class="field-hint">Файл будет сохранён как «Сведения.docx». В письмо попадут его абзацы.</span>
+      </label>
+
+      <label>Приложения — дипломы, сертификаты, удостоверения
+        <input type="file" id="expertAttachments" multiple>
+        <span class="field-hint">Лягут в подпапку «Приложения». При создании ГП копии попадут в папку письма, а их названия — в перечень приложений.</span>
+      </label>
+
+      <p class="error-text" id="expertError"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="expertSubmitBtn">Завести эксперта</button>
+      </div>
+    </form>
   </div>
 </div>
 
