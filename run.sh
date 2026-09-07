@@ -7,7 +7,7 @@
 # набору сервисы не нужны, он работает с чистой базой.
 printf '%-14s %s\n' "db-fresh:" "$(bash "$(dirname "$0")/db-fresh.test.sh" 2>&1 | tail -1)"
 
-for t in api linked-file user-delete ui; do
+for t in api linked-file user-delete ui kits; do
   sh "$(dirname "$0")/up.sh" > /dev/null 2>&1
   sleep 6
   printf '%-14s %s\n' "$t:" "$(node "$(dirname "$0")/$t.test.mjs" 2>&1 | tail -1)"
