@@ -2506,6 +2506,7 @@ function taskLineHtml(t) {
         <span class="task-line-sub">
           ${stageChipHtml(t.case_stage)}
           <span class="task-line-project" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
+          ${copyCaseBtnHtml(t.case_name, t.case_number)}
         </span>
       </span>
       <span class="task-line-when">
@@ -2517,6 +2518,52 @@ function taskLineHtml(t) {
                    title="Убрать задачу" aria-label="Убрать задачу">✕</button>`
         : ""}
     </div>`;
+}
+
+/**
+ * Что именно кладём в буфер: «ЭКС.Гараж (Талдом) А41-58392/2026».
+ *
+ * Одной строкой и через пробел — так строка одинаково годится и в поиск
+ * (в Planfix, в картотеку), и в письмо. Если номера дела нет, копируем
+ * одно название: пустой хвост вроде «— » пришлось бы стирать руками.
+ */
+function copyCaseText(name, number) {
+  return [String(name || "").trim(), String(number || "").trim()].filter(Boolean).join(" ");
+}
+
+const svgCopy = `<svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.9"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>`;
+
+/**
+ * Значок «скопировать» рядом с названием проекта.
+ *
+ * Копирует название и номер дела разом: руками их каждый раз собирают из
+ * двух разных мест, а нужны они почти всегда вместе.
+ */
+function copyCaseBtnHtml(name, number) {
+  const text = copyCaseText(name, number);
+  if (!text) return "";
+  const hint = number
+    ? "Скопировать название и номер дела"
+    : "Скопировать название (номер дела не заполнен)";
+  return `<button class="copy-case-btn" type="button" data-copy-case="${escapeHtml(text)}"
+                  title="${hint}" aria-label="${hint}">${svgCopy}</button>`;
+}
+
+/** Общая привязка значка копирования — одинаково во всех списках. */
+function wireCopyCaseButtons(root) {
+  root.querySelectorAll("[data-copy-case]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await copyTextToClipboard(btn.dataset.copyCase);
+        btn.classList.add("copied");
+        setTimeout(() => btn.classList.remove("copied"), 1200);
+        showToast("Скопировано: " + btn.dataset.copyCase);
+      } catch (err) {
+        showToast("Не удалось скопировать: " + err.message);
+      }
+    });
+  });
 }
 
 /** Маленький значок стадии проекта — тот же цвет, что и везде в «Делах». */
@@ -2542,6 +2589,7 @@ function wireTasksRows(body) {
   body.querySelectorAll("[data-open-case-id]").forEach((cell) => {
     cell.addEventListener("click", () => openCaseCard(cell.dataset.openCaseId, true));
   });
+  wireCopyCaseButtons(body);
 }
 
 /** Метка срока рядом с названием: «просрочено 3 дня», «завтра», «сегодня». */
@@ -2742,6 +2790,7 @@ async function openTaskCard(id) {
     <div class="task-card-meta">
       <span>${escapeHtml(caseTypeLabel(t.case_type, true))}</span>
       <span class="task-card-project" data-open-case-id="${t.case_id}">${escapeHtml(t.case_name)}</span>
+      ${copyCaseBtnHtml(t.case_name, t.case_number)}
       <span>${escapeHtml(t.status_name || "")}</span>
     </div>
     ${t.description ? `<p class="task-card-desc">${escapeHtml(t.description)}</p>` : ""}
@@ -2787,6 +2836,8 @@ async function openTaskCard(id) {
         <button class="primary" type="button" id="taskCardCommentSend">Отправить</button>
       </div>
     </section>`;
+
+  wireCopyCaseButtons(body);
 
   const countAssignees = () => {
     const el = document.getElementById("taskCardAssigneesCount");
@@ -4172,6 +4223,7 @@ function registryRowHtml(c) {
   return `
     <div class="reg-row" data-case-id="${c.id}">
       <span class="reg-name" data-reg-card="${c.id}">${escapeHtml(c.name)}</span>
+      ${copyCaseBtnHtml(c.name, c.case_number)}
       ${kadLinkHtml(c)}
       ${archived
         ? `<span class="reg-chip ${c.is_cancelled ? "cancelled" : "done"}">${c.is_cancelled ? "отменено" : "завершено"}</span>`
@@ -4190,6 +4242,7 @@ function wireRegistryRows(body) {
   body.querySelectorAll("[data-reg-move]").forEach((btn) => {
     btn.addEventListener("click", () => moveCaseFromRegistry(btn));
   });
+  wireCopyCaseButtons(body);
 }
 
 /** Перенос стадии из списка: общий код плюс перечитывание страницы. */
@@ -4281,7 +4334,9 @@ function renderCaseCard(data) {
     ${stageBadgeHtml(p)}
     <span class="case-chip">${escapeHtml(STATUS_LABEL[p.status] || p.status || "")}</span>
     <span class="case-chip muted">${escapeHtml(typeLabel)}</span>
-    ${kadLinkHtml(p)}`;
+    ${kadLinkHtml(p)}
+    ${copyCaseBtnHtml(p.name, p.case_number)}`;
+  wireCopyCaseButtons(document.getElementById("caseCardBadges"));
 
   /* --- кнопки --- */
   const actions = [`<button class="upload-btn" id="ccFolderBtn" type="button">Открыть папку</button>`];

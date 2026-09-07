@@ -1943,6 +1943,38 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 .task-line-when { text-align: right; white-space: nowrap; flex: 0 0 auto; }
 .task-line-date { display: block; margin-top: 2px; font-size: var(--fs-meta); color: var(--text-muted); }
 
+/* Значок «скопировать название и номер дела».
+   Держится бледным, пока на строку не навели: в списке из сорока задач
+   сорок заметных кнопок читались бы как сорок ошибок. */
+.copy-case-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s, background .12s, color .12s;
+}
+.task-line:hover .copy-case-btn,
+.reg-row:hover .copy-case-btn,
+.copy-case-btn:focus-visible { opacity: 1; }
+/* В карточках кнопка одна на экран — прятать её не за что. */
+.case-card-badges .copy-case-btn,
+.task-card-meta .copy-case-btn { opacity: 1; }
+.copy-case-btn:hover { background: var(--accent-bg); color: var(--accent-on-tint); }
+.copy-case-btn.copied {
+  opacity: 1;
+  background: var(--success-bg);
+  color: var(--success);
+}
+
 /* Значок стадии в строке задачи мельче, чем в шапке папки: там он
    заголовок экрана, здесь — подпись под названием. */
 .stage-badge.stage-mini {
