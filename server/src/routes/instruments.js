@@ -3,11 +3,15 @@ import { query, transaction } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 import { logEvent } from '../history.js';
 import { fetchLinkedFile } from '../fileLink.js';
+import { todayIso } from '../dates.js';
 
 export const instruments = Router();
 instruments.use(requireAuth);
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Сегодняшняя дата по Москве. Раньше здесь был toISOString(), считавший
+// дату по Гринвичу: с полуночи до 03:00 МСК прибор записывался вчерашним
+// числом. См. server/src/dates.js.
+const today = () => todayIso();
 
 /**
  * Все переходы состояния сделаны одним UPDATE с условием на текущий статус.
@@ -696,8 +700,13 @@ instruments.post('/bulk/book', async (req, res) => {
  * Привязать (или отвязать) сразу несколько приборов к компании-владельцу.
  * Работает независимо от текущего статуса прибора — это просто смена
  * учётного поля, а не операция выдачи/возврата.
+ *
+ * Только администратор — как и смена того же поля в карточке прибора
+ * (PATCH /:id, где company_code входит в EDITABLE). Без этой проверки
+ * сотрудник не мог поменять владельца одному прибору, но мог поменять
+ * его сразу сотне.
  */
-instruments.post('/bulk/set-company', async (req, res) => {
+instruments.post('/bulk/set-company', requireAdmin, async (req, res) => {
   const ids = (req.body?.ids || []).map(Number).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
 
