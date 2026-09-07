@@ -68,6 +68,7 @@
             <div class="toolbar-buttons">
               <button id="addInstrumentButton" class="primary admin-only" type="button">Добавить</button>
               <button id="retiredButton" class="secondary admin-only" type="button">Списанные</button>
+              <button id="kitsButton" class="secondary" type="button">Комплекты</button>
               <button id="massToggleBtn" class="secondary" type="button">Выбрать</button>
               <button id="pendingTransfersBtn" class="danger" type="button" style="display:none;">Передачи (<span id="pendingTransfersCount">0</span>)</button>
             </div>
@@ -132,6 +133,7 @@
           <button id="massTransferBtn" type="button">Передать</button>
           <button id="massQrWordBtn" type="button">QR-коды в Word</button>
           <button id="massSetCompanyBtn" type="button">Назначить владельца</button>
+          <button id="massMakeKitBtn" type="button">Собрать комплект</button>
           <span class="mass-spacer"></span>
           <button id="massRetireBtn" class="admin-only mass-danger" type="button">Списать</button>
           <button id="massDeleteBtn" class="admin-only mass-danger" type="button">Удалить</button>
@@ -141,6 +143,10 @@
 
       <!-- Карточка прибора -->
       <section id="cardScreen" class="hidden"></section>
+
+      <!-- Комплекты: и список, и карточка одного комплекта
+           (она же — экран проверки перед выездом). -->
+      <section id="kitsScreen" class="hidden"></section>
     </section>
   </main>
 

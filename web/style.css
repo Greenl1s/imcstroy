@@ -451,7 +451,9 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #6b342c; }
 .toolbar-bottom {
   display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
 }
-.toolbar-buttons { display: flex; gap: 8px; margin-right: auto; }
+/* flex-wrap обязателен: кнопок в ряду стало пять, и на узком экране
+   они не влезают в строку — без переноса страница уезжала вбок. */
+.toolbar-buttons { display: flex; gap: 8px; margin-right: auto; flex-wrap: wrap; }
 
 .filters-row {
   display: flex; gap: var(--col-gap);
@@ -526,6 +528,119 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
 /* Промежуточная точка. Когда кнопкам и фильтрам не хватает ширины,
    фильтры целиком переезжают на свою строку — и остаются выровненными
    по правому краю, а не сползают вбок, ломая решётку. */
+
+/* ============================================================
+   Комплекты
+   Комплект — сохранённый список приборов, который берётся одной
+   кнопкой. Экран комплекта — это проверка перед выездом: не форма,
+   а честное состояние приборов на сейчас.
+   ============================================================ */
+
+.kits-loading { padding: 30px; text-align: center; color: var(--muted); }
+
+.kits-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.kits-head h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.kits-count { color: var(--muted); font-size: 13px; }
+
+/* Строка комплекта: у бейджей состояния своя ширина — их число
+   меняется от комплекта к комплекту, жёсткая сетка колонок,
+   как в списке приборов, здесь только мешала бы. */
+.kit-cols { flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.kit-row .row-main { padding-right: 12px; }
+
+/* ---------- Карточка комплекта ---------- */
+
+.kit-card { padding: 0; overflow: hidden; }
+
+.kit-card-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.kit-card-title h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.kit-card-title p { font-size: 13.5px; color: var(--muted); }
+
+/* Сводка над списком: сколько берём, сколько недоступно, где вопросы
+   по поверке. Это первое, что человек видит, открыв комплект. */
+.kit-summary {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  background: var(--badge-bg);
+}
+.kit-summary .chip {
+  font-size: 13px; font-weight: 600; padding: 3px 11px; border-radius: 20px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+}
+.kit-summary .chip.ok   { border-color: #b6d9c4; color: var(--success); }
+.kit-summary .chip.warn { border-color: var(--issued-line); color: var(--accent); }
+.kit-summary .chip.bad  { border-color: #e0b8b5; color: var(--danger); }
+
+/* ---------- Строка проверки ---------- */
+
+.kit-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px; border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.kit-item:hover { background: var(--badge-bg); }
+/* Недоступный прибор — не решение человека, а факт: галочка выключена,
+   строка притушена. Просроченная поверка, наоборот, галочку не снимает —
+   это предупреждение, а не запрет. */
+.kit-item.is-off { background: var(--badge-bg); cursor: default; opacity: 0.75; }
+.kit-item.is-warn { background: var(--issued-bg); }
+
+.kit-item input[type="checkbox"] { width: 18px; height: 18px; flex: none; accent-color: var(--primary); }
+.kit-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kit-item-title { font-weight: 600; font-size: 15px; }
+.kit-item-title i {
+  font-style: normal; font-family: var(--font-mono); font-size: 12.5px;
+  color: var(--muted); margin-left: 8px;
+}
+.kit-why { font-size: 13px; color: var(--muted); }
+.kit-why.warn { color: var(--accent); font-weight: 500; }
+.kit-why.bad  { color: var(--danger); font-weight: 500; }
+.kit-item-badge { flex: none; }
+.kit-item-act { flex: none; }
+.kit-item-act button { min-height: 30px; padding: 4px 11px; font-size: 12.5px; }
+
+/* ---------- Низ карточки: куда, кому, кнопка ---------- */
+
+.kit-foot { padding: 14px 16px; }
+.kit-form { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: 12px; }
+.kit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.kit-form input {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px;
+  font: inherit; font-size: 15px; background: var(--input-bg); color: var(--text);
+}
+.kit-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px;
+}
+.kit-hint { flex: 1; font-size: 13px; color: var(--muted); }
+
+/* ---------- Выбор приборов в комплект ---------- */
+
+.kit-pick { max-height: 46vh; overflow-y: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.kit-pick-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.kit-pick-row:last-child { border-bottom: 0; }
+.kit-pick-row:hover { background: var(--badge-bg); }
+/* Прибор, который уже в комплекте: галочка стоит и выключена — иначе
+   человек будет гадать, почему «не добавляется». */
+.kit-pick-row.is-in { opacity: 0.7; cursor: default; }
+.kit-pick-row input[type="checkbox"] { width: 17px; height: 17px; flex: none; accent-color: var(--primary); }
+.kit-pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.kit-pick-title { font-weight: 600; font-size: 14.5px; }
+.kit-pick-title i {
+  font-style: normal; font-family: var(--font-mono); font-size: 12px;
+  color: var(--muted); margin-left: 8px;
+}
+.kit-pick-sub { font-size: 12.5px; color: var(--muted); }
+.kit-pick-count { flex: 1; font-size: 13px; color: var(--muted); }
+
 @media (max-width: 1180px) {
   .filters-row { margin-left: 0; width: 100%; }
   .toolbar-buttons { margin-right: 0; }
@@ -554,7 +669,7 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
   .toolbar { padding: 12px; }
   .search-full { font-size: 16px; min-height: 44px; }
   .toolbar-bottom { flex-direction: column; align-items: stretch; }
-  .toolbar-buttons { justify-content: stretch; }
+  .toolbar-buttons { justify-content: stretch; flex-wrap: wrap; }
   .toolbar-buttons button { flex: 1 1 auto; min-height: 44px; font-size: 15px; }
 
   /* Четыре фильтра в две колонки — треть прежней высоты. */
@@ -601,4 +716,35 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
   .modal-actions { flex-direction: column; }
   .modal-actions button { width: 100%; }
   .form-grid input, .form-grid select { min-height: 44px; font-size: 16px; }
+
+  /* Комплекты на телефоне: это основной сценарий — человек стоит
+     у шкафа и отмечает, что берёт. Кнопки крупные, лишнее убрано. */
+  .kits-head { gap: 8px; }
+  .kits-head button { flex: 1 1 auto; min-height: 42px; }
+  .kits-head h2 { flex: 1 1 100%; }
+  .kit-cols { justify-content: flex-start; }
+
+  .kit-card-head { gap: 8px; }
+  .kit-card-title { flex: 1 1 100%; order: -1; }
+  .kit-card-head button { flex: 1 1 auto; min-height: 40px; }
+
+  .kit-item { padding: 12px; gap: 10px; flex-wrap: wrap; }
+  .kit-item input[type="checkbox"] { width: 22px; height: 22px; }
+  .kit-item-main { flex: 1 1 auto; }
+  .kit-item-badge { order: 3; }
+  /* «Убрать из состава» — редкое и необратимое действие: на телефоне
+     уводим его на отдельную строку, чтобы не задеть пальцем. */
+  .kit-item-act { flex: 1 1 100%; }
+  .kit-item-act button { width: 100%; min-height: 38px; }
+
+  .kit-form { grid-template-columns: 1fr; gap: 10px; }
+  .kit-form input { min-height: 44px; font-size: 16px; }
+  .kit-actions button { flex: 1 1 auto; min-height: 44px; font-size: 15px; }
+  /* Главное действие экрана — во всю ширину: на телефоне человек
+     жмёт его в перчатке, стоя у шкафа. */
+  .kit-actions [data-kit-issue] { flex: 1 1 100%; order: 5; }
+  .kit-hint { flex: 1 1 100%; }
+
+  .kit-pick { max-height: 50vh; }
+  .kit-pick-row input[type="checkbox"] { width: 21px; height: 21px; }
 }
