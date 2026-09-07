@@ -122,6 +122,25 @@ export const api = {
   // ---------- История ----------
   instrumentHistory: (id) => request(`/instruments/${id}/history`),
 
+  // ---------- Комплекты ----------
+  // Комплект — сохранённый список приборов, который берётся одной кнопкой.
+  // Состояние комплекта нигде не хранится: getKit каждый раз считает его
+  // заново из статусов приборов, поэтому список всегда честный.
+  listKits: () => request('/kits'),
+  getKit: (id) => request(`/kits/${id}`),
+  createKit: (data) => request('/kits', { method: 'POST', body: data }),
+  updateKit: (id, data) => request(`/kits/${id}`, { method: 'PATCH', body: data }),
+  deleteKit: (id) => request(`/kits/${id}`, { method: 'DELETE' }),
+  addKitItems: (id, ids) => request(`/kits/${id}/items`, { method: 'POST', body: { ids } }),
+  // Убрать прибор из состава НАСОВСЕМ — не путать со снятой галочкой
+  // на экране проверки перед выездом, та действует только на один выезд.
+  removeKitItem: (id, instrumentId) =>
+    request(`/kits/${id}/items/${instrumentId}`, { method: 'DELETE' }),
+  issueKit: (id, ids, data) => request(`/kits/${id}/issue`, { method: 'POST', body: { ids, ...data } }),
+  returnKit: (id) => request(`/kits/${id}/return`, { method: 'POST', body: {} }),
+  /** В какие комплекты входит прибор — для блока в его карточке. */
+  instrumentKits: (id) => request(`/instruments/${id}/kits`),
+
   // ---------- Классификации ----------
   listControlTypes: () => request('/control-types'),
   createControlType: (data) => request('/control-types', { method: 'POST', body: data }),

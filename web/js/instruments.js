@@ -436,6 +436,11 @@ export async function renderCard(id, goList) {
             : ''}
         </div>
 
+        <!-- В какие комплекты входит прибор. Подгружается отдельным
+             запросом, чтобы карточка не ждала лишнего; пока пусто — блока
+             не видно вообще. -->
+        <div class="card-box hidden" id="cardKits"></div>
+
         <div class="card-minor">
           <button class="secondary" type="button" data-history>История прибора</button>
           <button class="secondary" type="button" data-copy>Копировать данные</button>
@@ -461,10 +466,41 @@ export async function renderCard(id, goList) {
   }
   renderCardQr(item);
   bindGallery(item);
+  renderCardKits(item);
 
   bindCardActions(item, goList);
 }
 
+
+/**
+ * Блок «Входит в комплекты». Прибор может входить в сколько угодно
+ * комплектов — физически он один, поэтому взятый в одном комплекте
+ * в остальных покажется занятым. Об этом и написано в подсказке:
+ * иначе человек решит, что комплект сломался.
+ *
+ * Ошибку запроса глотаем молча: это справочный блок, из-за него
+ * карточка прибора падать не должна.
+ */
+async function renderCardKits(item) {
+  let list = [];
+  try {
+    list = await api.instrumentKits(item.id);
+  } catch {
+    return;
+  }
+  const box = document.getElementById('cardKits');
+  if (!box || !list.length) return;
+
+  box.innerHTML = `<h4>Входит в комплекты</h4>
+    ${list.map((k) => `
+      <div class="card-kv">
+        <span class="card-k"><a href="?kit=${escapeAttr(k.id)}">${escapeHtml(k.name)}</a></span>
+        <span class="card-v">${k.total} шт.</span>
+      </div>`).join('')}
+    <div class="card-missing">Прибор один, а комплектов может быть несколько:
+      пока он на руках, в остальных комплектах он будет помечен как занятый.</div>`;
+  box.classList.remove('hidden');
+}
 
 /** Чипы состояния в шапке карточки: где прибор и чей он. */
 function cardStateChips(item) {

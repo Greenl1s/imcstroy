@@ -5,6 +5,7 @@ import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
+import { renderKits, renderKitCard, showKitForm } from './kits.js';
 import { displayNo, verificationBadge, verificationText, today, verificationInfo,
   VERIFICATION_SOON_DAYS } from './utils.js';
 
@@ -69,6 +70,7 @@ function bindEvents() {
   document.getElementById('profileButton').onclick = () => showUserForm(state.currentUser);
   document.getElementById('addInstrumentButton').onclick = () => showInstrumentForm();
   document.getElementById('retiredButton').onclick = showRetired;
+  document.getElementById('kitsButton').onclick = goKits;
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
@@ -118,6 +120,14 @@ function bindEvents() {
     downloadSelectedQrAsWord();
   };
 
+  // «Собрать комплект» из отмеченных галочками приборов: самый частый
+  // способ завести комплект — отметить то, что и так берёшь вместе.
+  document.getElementById('massMakeKitBtn').onclick = () => {
+    const ids = selectedIds();
+    if (!ids.length) return toast('Выберите приборы', true);
+    showKitForm(null, ids);
+  };
+
   document.getElementById('massSetCompanyBtn').onclick = (e) => {
     showBulkSetCompanyForm();
   };
@@ -146,6 +156,13 @@ function bindEvents() {
     renderSummary();
   });
   window.addEventListener('app:show-retired', () => showRetired());
+  // Модуль комплектов не знает про историю браузера — он только сообщает,
+  // куда хочет перейти, а маршрутизация живёт здесь, в одном месте.
+  window.addEventListener('app:go-list', () => goList());
+  window.addEventListener('app:open-kit', (event) => {
+    setMassMode(false);
+    openKit(event.detail.id);
+  });
   window.addEventListener('popstate', renderRoute);
   window.addEventListener('app:control-types-changed', () => {
     loadControlTypes();
@@ -340,16 +357,49 @@ function showAuth() {
 
 // ---------- Маршрутизация ----------
 
+/**
+ * Три экрана и один адрес. Что показать, решает строка запроса:
+ *   ?id=<n>    — карточка прибора
+ *   ?kit=<n>   — карточка комплекта (она же проверка перед выездом)
+ *   ?kits      — список комплектов
+ *   пусто      — список приборов
+ * Так работает кнопка «назад» в браузере и так ссылку можно переслать.
+ */
+function showScreen(name) {
+  for (const id of ['listScreen', 'cardScreen', 'kitsScreen']) {
+    document.getElementById(id).classList.toggle('hidden', id !== name);
+  }
+}
+
 function renderRoute() {
   if (!state.currentUser) return;
-  const id = new URLSearchParams(location.search).get('id');
-  if (id) {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('id');
+  const kitId = params.get('kit');
+
+  if (kitId) {
+    showScreen('kitsScreen');
+    renderKitCard(kitId, goKits);
+  } else if (params.has('kits')) {
+    showScreen('kitsScreen');
+    renderKits(openKit);
+  } else if (id) {
+    showScreen('cardScreen');
     renderCard(id, goList);
   } else {
-    document.getElementById('cardScreen').classList.add('hidden');
-    document.getElementById('listScreen').classList.remove('hidden');
+    showScreen('listScreen');
     renderList(openCard);
   }
+}
+
+function openKit(id) {
+  history.pushState(null, '', `?kit=${encodeURIComponent(id)}`);
+  renderRoute();
+}
+
+function goKits() {
+  history.pushState(null, '', '?kits');
+  renderRoute();
 }
 
 function openCard(id) {
