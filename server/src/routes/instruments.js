@@ -94,11 +94,17 @@ instruments.get('/:id/photo', async (req, res) => {
   const linkPath = instRows[0].photo_link_path;
   if (linkPath) {
     try {
-      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      // Передаём, КТО смотрит: файловый менеджер проверит его права на
+      // папку. Без этого привязанный документ из закрытой папки "Дел"
+      // видел любой, кто просто вошёл в "Учёт приборов".
+      const { buffer, contentType } = await fetchLinkedFile(linkPath, req.user.id);
       res.set('Content-Type', contentType);
-      res.set('Cache-Control', 'private, max-age=300');
+      res.set('Cache-Control', 'private, no-store');
       return res.send(buffer);
     } catch (err) {
+      if (err.status === 403) {
+        return res.status(403).json({ error: 'У вас нет доступа к этому файлу' });
+      }
       console.error('Не удалось получить привязанное фото из файлового менеджера:', err);
       return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
     }
@@ -166,11 +172,14 @@ instruments.get('/:id/document', async (req, res) => {
   const linkPath = instRows[0].document_link_path;
   if (linkPath) {
     try {
-      const { buffer, contentType } = await fetchLinkedFile(linkPath);
+      const { buffer, contentType } = await fetchLinkedFile(linkPath, req.user.id);
       res.set('Content-Type', contentType);
-      res.set('Cache-Control', 'private, max-age=300');
+      res.set('Cache-Control', 'private, no-store');
       return res.send(buffer);
     } catch (err) {
+      if (err.status === 403) {
+        return res.status(403).json({ error: 'У вас нет доступа к этому файлу' });
+      }
       console.error('Не удалось получить привязанный документ из файлового менеджера:', err);
       return res.status(502).json({ error: 'Не удалось получить файл из файлового менеджера' });
     }

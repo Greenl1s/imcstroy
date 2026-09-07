@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query } from '../db.js';
-import { hashPassword, requireAuth, requireAdmin } from '../auth.js';
+import { hashPassword, checkPassword, requireAuth, requireAdmin } from '../auth.js';
 
 export const users = Router();
 users.use(requireAuth);
@@ -59,6 +59,18 @@ users.patch('/:id', requireAdmin, async (req, res) => {
     if (String(req.body.password).length < 6) {
       return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
     }
+    // Свой собственный пароль администратор меняет по тем же правилам,
+    // что и все: с вводом текущего. Иначе достаточно было бы открытой
+    // вкладки администратора, чтобы забрать его учётную запись.
+    if (id === req.user.id) {
+      const { rows: self } = await query('SELECT password_hash FROM users WHERE id = $1', [id]);
+      if (!req.body?.current_password) {
+        return res.status(400).json({ error: 'Введите текущий пароль' });
+      }
+      if (!(await checkPassword(req.body.current_password, self[0].password_hash))) {
+        return res.status(403).json({ error: 'Текущий пароль указан неверно' });
+      }
+    }
     params.push(await hashPassword(req.body.password));
     fields.push(`password_hash = $${params.length}`);
   }
@@ -83,6 +95,35 @@ users.patch('/:id', requireAdmin, async (req, res) => {
     if (err.code === '23505') return res.status(409).json({ error: 'Такой логин уже есть' });
     throw err;
   }
+});
+
+/**
+ * Что пропадёт в ИСУ, если удалить этого пользователя.
+ *
+ * Таблица users общая у "Учёта приборов" и ИСУ, а права ИСУ привязаны
+ * к тому же id внешним ключом ON DELETE CASCADE. То есть удаление
+ * сотрудника здесь молча стирает его доступы там. Отдаём эти цифры
+ * интерфейсу, чтобы он предупредил ДО удаления, а не после.
+ *
+ * Таблиц ИСУ может не быть вовсе (например, если развёрнут только
+ * "Учёт приборов") — тогда просто возвращаем нули, а не падаем.
+ */
+users.get('/:id/isu-impact', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const count = async (sql) => {
+    try {
+      const { rows } = await query(sql, [id]);
+      return Number(rows[0]?.n || 0);
+    } catch {
+      return 0;   // таблицы ИСУ в этой базе нет
+    }
+  };
+
+  res.json({
+    has_permissions: (await count('SELECT count(*)::int AS n FROM fm_permissions WHERE user_id = $1')) > 0,
+    folder_rules: await count('SELECT count(*)::int AS n FROM fm_folder_permissions WHERE user_id = $1'),
+    managed_cases: await count('SELECT count(*)::int AS n FROM cases WHERE manager_id = $1 AND deleted_at IS NULL'),
+  });
 });
 
 /**

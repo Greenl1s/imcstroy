@@ -57,12 +57,30 @@ auth.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-/** Смена собственного пароля и доп. информации. */
+/**
+ * Смена собственного пароля и доп. информации.
+ *
+ * Новый пароль принимается только вместе с текущим. Без этого любой, кто
+ * добрался до чужой оставленной открытой вкладки, менял пароль и запирал
+ * владельца снаружи. Администратор, меняющий пароль ДРУГОМУ человеку,
+ * старый вводить не должен — это другой маршрут (PATCH /api/users/:id).
+ */
 auth.patch('/me', requireAuth, async (req, res) => {
-  const { password, extra } = req.body || {};
+  const { password, extra, current_password } = req.body || {};
 
   if (password !== undefined && String(password).length < 6) {
     return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
+  }
+
+  if (password) {
+    const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    if (!rows.length) return res.status(401).json({ error: 'Пользователь не найден' });
+    if (!current_password) {
+      return res.status(400).json({ error: 'Введите текущий пароль' });
+    }
+    if (!(await checkPassword(current_password, rows[0].password_hash))) {
+      return res.status(403).json({ error: 'Текущий пароль указан неверно' });
+    }
   }
 
   const fields = [];
