@@ -1,5 +1,10 @@
 export const $ = (id) => document.getElementById(id);
-export const today = () => new Date().toISOString().slice(0, 10);
+// Сегодня — по Москве, тем же способом, что и на сервере (server/src/dates.js).
+// toISOString() отдаёт время по Гринвичу, поэтому с полуночи до 03:00 МСК
+// в формах подставлялась вчерашняя дата — и она же уходила на сервер.
+const MSK_OFFSET_MINUTES = 3 * 60;
+export const today = () =>
+  new Date(Date.now() + MSK_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10);
 export const pad = (value) => String(value).padStart(2, '0');
 
 export function escapeHtml(value = '') {
