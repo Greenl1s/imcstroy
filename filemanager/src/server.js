@@ -16,6 +16,7 @@ const fileLink = require("./fileLink");
 const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
+const expertsLib = require("./experts");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
 const trash = require("./trash");
@@ -364,17 +365,31 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
 
 /* ---------------- Гарантийные письма (ГП) ---------------- */
 
-const EXPERTS_DIR = "/База данных/Эксперты";
-// У каждого эксперта — своя папка, а сведения для ГП берутся из одного
-// файла с фиксированным именем внутри неё. Остальное (фото, сертификаты
-// и т.д.) можно класть туда же свободно — система их не трогает.
-const EXPERT_INFO_FILENAME = "Сведения.docx";
+// Устройство папки эксперта, сборка "Сведения.docx" и разбор приложений
+// живут в отдельном модуле — здесь только маршруты.
+const EXPERTS_DIR = expertsLib.EXPERTS_DIR;
+const EXPERT_INFO_FILENAME = expertsLib.INFO_FILENAME;
 
+function requireExpertsAccess(req, res) {
+  if (req.user.role !== "admin" && !req.user.can_db) {
+    res.status(403).json({ message: "Нет доступа к этому разделу" });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Список экспертов.
+ *
+ * Отдаём и тех, у кого ещё нет "Сведения.docx": папка эксперта может быть
+ * заведена, а файл — не дописан. Раньше такой эксперт просто не появлялся
+ * в списке, и было непонятно, потерялся он или его не заводили. Теперь он
+ * виден с пометкой has_info = false, а выбрать его для ГП по-прежнему
+ * нельзя — брать в письмо нечего.
+ */
 app.get("/api/experts", auth.requireAuth, async (req, res) => {
   try {
-    if (req.user.role !== "admin" && !req.user.can_db) {
-      return res.status(403).json({ message: "Нет доступа к этому разделу" });
-    }
+    if (!requireExpertsAccess(req, res)) return;
     const dirAbs = filesLib.safeResolve(EXPERTS_DIR);
     let entries;
     try {
@@ -386,19 +401,50 @@ app.get("/api/experts", auth.requireAuth, async (req, res) => {
     const experts = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const infoAbs = path.join(dirAbs, entry.name, EXPERT_INFO_FILENAME);
-      try {
-        await fs.promises.access(infoAbs);
-      } catch {
-        continue; // в папке эксперта нет "Сведения.docx" — пока нечего выбрать, пропускаем
-      }
-      experts.push({ name: entry.name, path: EXPERTS_DIR + "/" + entry.name });
+      experts.push({
+        name: entry.name,
+        path: expertsLib.expertPath(entry.name),
+        has_info: await expertsLib.hasInfo(filesLib.safeResolve, entry.name),
+        attachments: await expertsLib.listAttachments(filesLib.safeResolve, entry.name),
+      });
     }
     experts.sort((a, b) => a.name.localeCompare(b.name, "ru"));
     res.json({ experts });
   } catch (err) {
     console.error("Не удалось получить список экспертов:", err);
     res.status(500).json({ message: "Не удалось получить список экспертов" });
+  }
+});
+
+/**
+ * Завести эксперта: папка, подпапка «Приложения» и — если сведения
+ * набрали текстом — готовый "Сведения.docx".
+ *
+ * Файлы (готовые сведения и сами приложения) сюда не идут: их кладёт
+ * обычная загрузка /api/upload уже в созданную папку. Так не приходится
+ * заводить второй способ принимать файлы со своими ограничениями
+ * размера и своей проверкой прав.
+ */
+app.post("/api/experts", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+
+    const infoText = String(req.body?.infoText || "");
+    const infoLines = infoText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+    const expert = await expertsLib.createExpert(filesLib.safeResolve, {
+      name: req.body?.name,
+      infoLines,
+    });
+
+    events.log(req.user, "upload", { path: expert.path, name: expert.name });
+    res.status(201).json({ expert });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось завести эксперта:", err);
+    res.status(status).json({
+      message: status === 500 ? "Не удалось завести эксперта" : err.message,
+    });
   }
 });
 
@@ -456,7 +502,8 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       }
       const descLines = gpGenerate.extractParagraphTexts(buffer);
       const name = path.basename(p); // имя папки эксперта — как он подписывается в письме
-      experts.push({ name, descLines });
+      const attachments = await expertsLib.listAttachments(filesLib.safeResolve, name);
+      experts.push({ name, descLines, attachments });
     }
 
     const data = {
@@ -468,6 +515,10 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       costText: `${body.costAmount || ""} (${body.costWords || ""})`,
       termText: `${body.termDays || ""} (${body.termWords || ""})`,
       experts,
+      // В письме перечисляем ровно те документы, которые рядом с ним и
+      // лягут, — иначе перечень и содержимое папки разойдутся, и в суд
+      // уедет список того, чего в конверте нет.
+      attachments: experts.flatMap((e) => e.attachments.map((a) => a.name)),
     };
 
     const buffer = gpGenerate.generateGP(data);
@@ -484,7 +535,42 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
 
     await fs.promises.writeFile(destPath, buffer);
     events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + fileName, name: fileName });
-    res.json({ ok: true, name: fileName, path: gpOutputDir + "/" + fileName, caseFolderPath: kase.folder_path });
+
+    // ---------- Приложения выбранных экспертов ----------
+    // Кладём копии рядом с письмом, в подпапку: пакет для суда собирается
+    // целиком в одном месте, и не надо ходить по папкам экспертов.
+    // Копии, а не ссылки: справочник экспертов живёт своей жизнью, а то,
+    // что отправили в суд по конкретному делу, меняться потом не должно.
+    const copied = [];
+    const skipped = [];
+    for (const expert of experts) {
+      for (const attachment of expert.attachments) {
+        const attachDir = path.join(destDir, "Приложения");
+        try {
+          await fs.promises.mkdir(attachDir, { recursive: true });
+          const target = path.join(attachDir, attachment.name);
+          // Файл с таким именем уже есть — не перезаписываем: у двух
+          // экспертов вполне может быть «Диплом.pdf», и второй не должен
+          // молча затирать первого.
+          const finalTarget = fs.existsSync(target)
+            ? path.join(attachDir, uniqueSuffix(attachment.name, expert.name))
+            : target;
+          await fs.promises.copyFile(filesLib.safeResolve(attachment.path), finalTarget);
+          copied.push(path.basename(finalTarget));
+        } catch (err) {
+          // Одно нечитаемое приложение не должно отменять письмо: оно уже
+          // создано и лежит на месте. Говорим, что именно не доехало.
+          console.error("Не удалось приложить файл к ГП:", attachment.path, err);
+          skipped.push(attachment.name);
+        }
+      }
+    }
+
+    res.json({
+      ok: true, name: fileName, path: gpOutputDir + "/" + fileName,
+      caseFolderPath: kase.folder_path,
+      attachments: copied, attachmentsFailed: skipped,
+    });
   } catch (err) {
     console.error("Не удалось создать ГП:", err);
     res.status(500).json({ message: "Не удалось создать документ: " + err.message });
@@ -868,6 +954,13 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUplo
     res.status(400).json({ message: "Не удалось загрузить файл: " + err.message });
   }
 });
+
+/** «Диплом.pdf» + «Иванов И.И.» → «Диплом (Иванов И.И.).pdf». */
+function uniqueSuffix(fileName, expertName) {
+  const ext = path.extname(fileName);
+  const base = path.basename(fileName, ext);
+  return `${base} (${expertName})${ext}`;
+}
 
 app.get("/api/download", auth.requireAuth, requireColumnAccess(), (req, res) => {
   try {

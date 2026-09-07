@@ -121,8 +121,76 @@ function generateGP(data) {
   }
   xml = replaceRange(xml, nameMold.start, blankEndTag, expertsXml);
 
+  // ---------- Приложения ----------
+  xml = fillAttachments(xml, data.attachments || []);
+
   docEntry.setData(Buffer.from(xml, "utf8"));
   return zip.toBuffer();
+}
+
+/**
+ * Строка «Приложение:» превращается в перечень приложенных документов.
+ *
+ * В шаблоне это обычный абзац с общей фразой «Приложение: Документы,
+ * подтверждающие квалификацию экспертов» — без плейсхолдера. Плейсхолдер
+ * сюда сознательно НЕ добавлен: тогда пришлось бы заменить и сам шаблон
+ * на сервере, а он у людей уже правленый, и подменять его — значит
+ * молча стереть чужие изменения. Поэтому ищем абзац по тексту.
+ *
+ * Если приложений нет — оставляем прежнюю фразу как была. Если абзац
+ * не нашёлся (шаблон переписали) — тоже ничего не делаем: письмо должно
+ * получиться в любом случае, пусть и без перечня.
+ */
+function fillAttachments(xml, attachments) {
+  if (!attachments.length) return xml;
+
+  const marker = findAttachmentParagraph(xml);
+  if (!marker) return xml;
+
+  const head = marker.xml.replace(marker.text, escapeXmlText("Приложение:"));
+  const items = attachments
+    .map((name, i) => marker.xml.replace(marker.text, escapeXmlText(`${i + 1}. ${name}`)))
+    .join("");
+
+  return replaceRange(xml, marker.start, marker.end, head + items);
+}
+
+/**
+ * Находит абзац, начинающийся со слова «Приложение», и возвращает его
+ * вместе с текстом ровно в том виде, в каком он лежит внутри <w:t> —
+ * заменять надо именно эту подстроку, иначе слетит разметка абзаца.
+ *
+ * Word умеет разбивать одну фразу на несколько <w:t> (например, после
+ * правки в середине), поэтому берём самый длинный кусок текста в абзаце:
+ * заменяем его, а остальные обнуляем.
+ */
+function findAttachmentParagraph(xml) {
+  const paragraphs = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || [];
+  for (const p of paragraphs) {
+    const runs = p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
+    const joined = decodeXmlEntities(
+      runs.map((r) => r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "")).join("")
+    ).trim();
+    if (!/^Приложение/i.test(joined)) continue;
+
+    // Самый длинный <w:t> в абзаце — тот, где лежит основная фраза.
+    let longest = "";
+    for (const r of runs) {
+      const inner = r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "");
+      if (inner.length > longest.length) longest = inner;
+    }
+    if (!longest) continue;
+
+    const start = xml.indexOf(p);
+    // Лишние куски фразы убираем, чтобы «Приложение:» не задвоилось.
+    let cleaned = p;
+    for (const r of runs) {
+      const inner = r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "");
+      if (inner !== longest) cleaned = cleaned.replace(r, r.replace(inner, ""));
+    }
+    return { start, end: start + p.length, xml: cleaned, text: longest };
+  }
+  return null;
 }
 
 module.exports = { generateGP, extractParagraphTexts };
