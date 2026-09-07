@@ -93,6 +93,60 @@
 .stage-done { background: #dcf3e3; color: #1e6b3f; }
 .stage-cancelled { background: #f7dcda; color: #a3241c; }
 
+/* ---------- Стадия как кнопка ----------
+   Бейдж показывает, где проект сейчас; щелчок открывает список — куда
+   перевести. Раньше рядом стояли выпадающий список и кнопка
+   «Переместить», и список показывал не текущую стадию, а первую из
+   оставшихся: в разделе «Планы» во всех строках было написано
+   «Активный». Один предмет вместо двух противоречащих. */
+.stage-pick { position: relative; display: inline-flex; }
+.stage-badge-btn {
+  border: 1px solid transparent; cursor: pointer; font-family: inherit;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  gap: 6px; padding: 4px 8px 4px 10px;
+  transition: border-color .15s, box-shadow .15s;
+}
+/* Обводка появляется при наведении: до наведения бейдж выглядит как
+   обычная подпись, и лишнего шума в строке нет. */
+.stage-badge-btn:hover { border-color: currentColor; }
+.stage-badge-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage-chevron {
+  width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round; opacity: .75;
+}
+.stage-badge-btn[aria-expanded="true"] .stage-chevron { transform: rotate(180deg); }
+
+.stage-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+  display: flex; flex-direction: column; gap: 2px; min-width: 190px; padding: 6px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: 0 10px 30px rgba(20, 30, 25, .16);
+}
+.stage-menu-head {
+  padding: 4px 8px 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.stage-menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px;
+  border: 0; border-radius: var(--radius-sm); background: transparent;
+  font-family: inherit; font-size: 14px; font-weight: 500; color: var(--text-primary);
+  text-align: left; cursor: pointer; text-transform: none; letter-spacing: 0;
+}
+.stage-menu button:hover { background: var(--bg-subtle); }
+/* Цветная точка повторяет цвет бейджа целевой стадии — так выбор
+   узнаётся глазами, без чтения. */
+.stage-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: currentColor; }
+.stage-dot.stage-plan { background: #c4a13a; }
+.stage-dot.stage-active { background: #1a5488; }
+.stage-dot.stage-control { background: #b8792f; }
+.stage-dot.stage-done { background: #1e6b3f; }
+
+/* В списке дел бейдж чуть мельче: строк много, и высота ряда важнее. */
+.reg-actions .stage-badge-btn { padding: 3px 7px 3px 9px; font-size: 11.5px; }
+/* Меню у правого края таблицы — прижимаем к правой стороне бейджа,
+   иначе оно уезжает за границу окна. */
+.reg-actions .stage-menu { left: auto; right: 0; }
+
 /* Баннер проекта — появляется в шапке открытой папки "Дела", если эта
    папка является отслеживаемым проектом (экспертизой/НИ). */
 /* Одна полоса вместо трёх панелей: где проект, что горит и куда идти за
@@ -147,20 +201,6 @@
 .case-strip-menu button:hover { background: var(--bg-subtle); }
 .case-strip-menu button.danger { color: var(--danger); }
 .case-strip-menu button.danger:hover { background: var(--danger-bg); }
-/* Перенос стадии — прямо в полосе, а не под «ещё»: это основной способ
-   двигать проект, и прятать его оказалось неудобно. */
-.case-strip-move { display: inline-flex; gap: 6px; align-items: center; }
-.case-strip-move select {
-  height: 32px; padding: 0 9px; font-family: inherit; font-size: 13px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card);
-  color: var(--text-primary);
-}
-.case-strip-move button {
-  height: 32px; padding: 0 12px; font-family: inherit; font-size: 13px; font-weight: 500;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  background: var(--bg-card); color: var(--text-secondary); cursor: pointer;
-}
-.case-strip-move button:hover { border-color: var(--accent); color: var(--accent-on-tint); }
 
 /* Чат-ассистент внутри карточки проекта */
 .case-chat-box {
@@ -1944,8 +1984,9 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 .task-line-date { display: block; margin-top: 2px; font-size: var(--fs-meta); color: var(--text-muted); }
 
 /* Значок «скопировать название и номер дела».
-   Держится бледным, пока на строку не навели: в списке из сорока задач
-   сорок заметных кнопок читались бы как сорок ошибок. */
+   Видно всегда: кнопка, которая появляется только при наведении, для
+   человека всё равно что её нет. Спокойный, но различимый — рамка и
+   бледная заливка, чтобы значок читался как кнопка, а не как точка. */
 .copy-case-btn {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1954,24 +1995,22 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s, background .12s, color .12s;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.task-line:hover .copy-case-btn,
-.reg-row:hover .copy-case-btn,
-.copy-case-btn:focus-visible { opacity: 1; }
-/* В карточках кнопка одна на экран — прятать её не за что. */
-.case-card-badges .copy-case-btn,
-.task-card-meta .copy-case-btn { opacity: 1; }
-.copy-case-btn:hover { background: var(--accent-bg); color: var(--accent-on-tint); }
+.copy-case-btn:hover,
+.copy-case-btn:focus-visible {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent-on-tint);
+}
 .copy-case-btn.copied {
-  opacity: 1;
   background: var(--success-bg);
+  border-color: var(--success);
   color: var(--success);
 }
 
@@ -2038,11 +2077,6 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 .reg-chip.cancelled { background: var(--danger-bg); color: var(--danger); }
 
 .reg-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.reg-actions select {
-  height: 30px; padding: 0 8px; font-family: inherit; font-size: var(--fs-meta);
-  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  background: var(--bg-card); color: var(--text-primary);
-}
 .reg-btn {
   height: 30px; padding: 0 11px; font-family: inherit; font-size: var(--fs-meta); font-weight: 500;
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);

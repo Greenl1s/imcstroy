@@ -40,7 +40,6 @@ const els = {
   folderView: document.getElementById("folderView"),
   dbList: document.getElementById("dbList"),
   casesList: document.getElementById("casesList"),
-  toolsList: document.getElementById("toolsList"),
   breadcrumbs: document.getElementById("breadcrumbs"),
   folderList: document.getElementById("folderList"),
   backBtn: document.getElementById("backBtn"),
@@ -49,8 +48,6 @@ const els = {
   profileInitials: document.getElementById("profileInitials"),
   profileName: document.getElementById("profileName"),
   profileRole: document.getElementById("profileRole"),
-  linksBtn: document.getElementById("linksBtn"),
-  linksPopover: document.getElementById("linksPopover"),
   trashCount: document.getElementById("trashCount"),
   filesSection: document.getElementById("filesSection"),
   trashList: document.getElementById("trashList"),
@@ -74,7 +71,6 @@ const els = {
   createCasesMenu: document.getElementById("createCasesMenu"),
   createFolderViewBtn: document.getElementById("createFolderViewBtn"),
   createFolderViewMenu: document.getElementById("createFolderViewMenu"),
-  addToolBtn: document.getElementById("addToolBtn"),
   profileBtn: document.getElementById("profileBtn"),
   usersOverlay: document.getElementById("usersOverlay"),
   usersCloseBtn: document.getElementById("usersCloseBtn"),
@@ -467,8 +463,6 @@ function renderProfileCard() {
 function applyPermissionsUI() {
   const p = currentUser || {};
   renderProfileCard();
-  // Раздел "Инструменты" стал кнопкой "Ссылки" в боковой панели.
-  els.linksBtn.parentElement.classList.toggle("hidden", !(p.can_tools || p.role === "admin"));
   document.querySelector('[data-col="db"]').classList.toggle("hidden", !p.can_db);
   document.querySelector('[data-col="cases"]').classList.toggle("hidden", !p.can_cases);
   // Создавать что-либо прямо в корне "Дела" может только администратор —
@@ -905,7 +899,6 @@ function showSection(name, pushHistory) {
   document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.section === name);
   });
-  closeLinksPopover();
   if (name === "trash") loadTrash();
   if (name === "recent") loadRecent();
   if (name === "history") loadHistory();
@@ -927,27 +920,28 @@ function showSection(name, pushHistory) {
 }
 
 document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
-  btn.addEventListener("click", () => showSection(btn.dataset.section, true));
+  btn.addEventListener("click", () => {
+    // «Главная» всегда возвращает к двум колонкам («База данных» и «Дела»),
+    // даже если раздел уже открыт и человек стоит глубоко в папках.
+    // Раньше раздел помнил последнюю папку: нажимаешь «Файлы» — и ничего
+    // не происходит, потому что ты и так «в файлах». Теперь это надёжный
+    // способ вернуться в начало из любого места.
+    if (btn.dataset.section === "files") goToColumns(false);
+    showSection(btn.dataset.section, true);
+  });
 });
 
-/* ---------- Всплывающее окно со ссылками ---------- */
+/* ---------- Учёт оборудования ----------
+   Раньше это была одна из строк во всплывающем списке «Ссылки»: чтобы
+   попасть в соседний сервис, надо было открыть список и найти в нём
+   нужную строку. Теперь это обычный пункт боковой панели, рядом с
+   «Корзиной», — переход в одно нажатие.
 
-function closeLinksPopover() {
-  els.linksPopover.classList.add("hidden");
-}
+   Сервис живёт на том же домене (/instruments/), поэтому открываем его
+   в этой же вкладке: общий вход уже действует, повторно входить не надо. */
 
-els.linksBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  const wasHidden = els.linksPopover.classList.contains("hidden");
-  els.linksPopover.classList.toggle("hidden", !wasHidden);
-  // Список подтягиваем при первом открытии, а не на каждой загрузке страницы.
-  if (wasHidden && !toolsLoaded) loadToolsColumn();
-});
-
-els.linksPopover.addEventListener("click", (e) => e.stopPropagation());
-document.addEventListener("click", closeLinksPopover);
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeLinksPopover();
+bind(document.getElementById("instrumentsBtn"), "click", () => {
+  location.href = INSTRUMENTS_URL;
 });
 
 /* ---------- Login ---------- */
@@ -1182,86 +1176,16 @@ els.folderPermCloseBtn.addEventListener("click", () => {
   els.folderPermOverlay.classList.add("hidden");
 });
 
-/* ---------- Columns ---------- */
+/* Адрес соседнего сервиса «Учёт оборудования».
 
-// Встроенная ссылка, которая была отдельной кнопкой в боковой панели.
-// Теперь живёт первым пунктом в том же списке — чтобы все переходы на
-// другие наши сайты были собраны в одном месте.
-const BUILTIN_LINKS = [{ label: "Учёт оборудования", url: "/instruments/", builtin: true }];
+   Записан относительным путём, а не полным адресом: оба сервиса живут на
+   одном домене (files.<домен>), общий вход действует на обоих, и переход
+   не требует повторной авторизации. Полный адрес пришлось бы менять при
+   каждом переезде домена.
 
-let toolsLoaded = false;
-
-async function loadToolsColumn() {
-  els.toolsList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
-  try {
-    const { links } = await apiFetch("/api/tools");
-    renderToolsColumn(links);
-    toolsLoaded = true;
-  } catch (err) {
-    els.toolsList.innerHTML = '<div class="empty-hint">Не удалось загрузить</div>';
-  }
-}
-
-// Ссылка "внутренняя" (тот же сайт), если после разбора совпадает домен —
-// неважно, записана она относительным путём ("/instruments/") или полным
-// адресом ("https://files.imcstroy.ru/instruments/").
-function isSameOriginUrl(url) {
-  try {
-    return new URL(url, location.origin).origin === location.origin;
-  } catch {
-    return false;
-  }
-}
-
-function renderToolsColumn(links) {
-  els.toolsList.innerHTML = "";
-  const all = [...BUILTIN_LINKS, ...(links || [])];
-  for (const link of all) {
-    const row = document.createElement("div");
-    row.className = "links-popover-item";
-    // Внутренняя ссылка — если после разбора у неё тот же домен, что и у
-    // текущей страницы (неважно, записана она относительным путём вроде
-    // "/instruments/" или полным адресом "https://files.imcstroy.ru/instruments/").
-    // Такие открываем в этой же вкладке. Настоящие внешние — как раньше, в новой.
-    const isInternal = isSameOriginUrl(link.url);
-    const linkAttrs = isInternal ? "" : 'target="_blank" rel="noopener"';
-    row.innerHTML = `
-      <a href="${escapeHtml(link.url)}" ${linkAttrs} style="display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;flex:1;min-width:0;">
-        <span class="links-dot"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(link.label)}</span>
-      </a>
-      ${link.builtin ? "" : `<button class="delete-btn" title="Удалить ссылку" aria-label="Удалить ссылку">${svgTrash}</button>`}
-    `;
-    if (link.builtin) {
-      els.toolsList.appendChild(row);
-      continue;
-    }
-    row.querySelector(".delete-btn").addEventListener("click", async (e) => {
-      e.preventDefault();
-      if (!confirm(`Удалить ссылку «${link.label}»?`)) return;
-      try {
-        await apiFetch(`/api/tools/${link.id}`, { method: "DELETE" });
-        loadToolsColumn();
-      } catch (err) {
-        alert("Не удалось удалить ссылку: " + err.message);
-      }
-    });
-    els.toolsList.appendChild(row);
-  }
-}
-
-els.addToolBtn?.addEventListener("click", async () => {
-  const label = prompt("Название ссылки (как будет подписана):");
-  if (!label) return;
-  let url = prompt("Адрес ссылки (например, https://example.com):");
-  if (!url) return;
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  try {
-    await apiFetch("/api/tools", { method: "POST", body: JSON.stringify({ label, url }) });
-    loadToolsColumn();
-  } catch (err) {
-    alert("Не удалось добавить ссылку: " + err.message);
-  }
-});
+   Раньше эта ссылка была первой строкой во всплывающем списке «Ссылки».
+   Список из панели убран — остался один этот переход, и он стал кнопкой. */
+const INSTRUMENTS_URL = "/instruments/";
 
 // Состояние каждой из файловых колонок: что сейчас показываем (обычный
 // список или результаты поиска) и откуда брать данные.
@@ -2058,11 +1982,100 @@ async function advanceCaseStage(kase, targetStage, btn) {
   }
 }
 
+const STAGE_ORDER = ["plan", "active", "control", "done"];
+
 function stageBadgeHtml(project) {
   if (project.is_cancelled) return `<span class="stage-badge stage-cancelled">Отменён</span>`;
   const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[project.stage];
   return `<span class="stage-badge ${cls}">${STAGE_LABEL[project.stage]}</span>`;
 }
+
+/**
+ * Стадия проекта как кнопка: бейдж показывает, где проект сейчас,
+ * щелчок открывает список — куда перевести.
+ *
+ * Раньше рядом с бейджем стояли выпадающий список и кнопка «Переместить».
+ * Получалось два разных предмета об одном и том же: бейдж говорил «План»,
+ * а список рядом показывал «Активный» — просто потому, что это была первая
+ * из оставшихся стадий. Человек читал это как «проект активный» и не
+ * понимал, где правда. Теперь предмет один: что написано на бейдже — там
+ * проект и есть, а куда его двигать, спрашивается только после щелчка.
+ *
+ * Один и тот же код рисует и полосу в папке, и строку в списке дел —
+ * иначе два места неизбежно разъедутся.
+ *
+ * Если двигать нельзя (проект отменён, нет прав, стадия последняя) —
+ * возвращается обычный бейдж без всякого поведения. Кнопка, которая
+ * упрётся в отказ, хуже, чем её отсутствие.
+ */
+function stagePickerHtml(kase, { canWrite = true } = {}) {
+  const targets = STAGE_ORDER.filter((st) => st !== kase.stage);
+  if (kase.is_cancelled || !canWrite || !targets.length) return stageBadgeHtml(kase);
+
+  const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[kase.stage];
+  return `<span class="stage-pick" data-stage-pick="${escapeHtml(kase.id)}">
+    <button type="button" class="stage-badge ${cls} stage-badge-btn"
+            aria-haspopup="menu" aria-expanded="false"
+            title="Стадия проекта — нажмите, чтобы перевести на другую">
+      ${STAGE_LABEL[kase.stage]}
+      <svg class="stage-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <span class="stage-menu hidden" role="menu">
+      <span class="stage-menu-head">Перевести на стадию</span>
+      ${targets.map((st) => `
+        <button type="button" role="menuitem" data-stage-to="${st}">
+          <span class="stage-dot stage-${st}"></span>${STAGE_LABEL[st]}
+        </button>`).join("")}
+    </span>
+  </span>`;
+}
+
+/**
+ * Оживляет все бейджи-кнопки внутри root.
+ *
+ * findCase по id находит сам проект — у полосы в папке он один, у списка
+ * дел их сотня, и таскать объект через разметку было бы хуже.
+ * onMoved вызывается только после успешного перевода: в папке надо уйти
+ * наверх (путь только что переехал), в списке — перечитать страницу.
+ */
+function wireStagePickers(root, findCase, onMoved) {
+  root.querySelectorAll("[data-stage-pick]").forEach((wrap) => {
+    const button = wrap.querySelector(".stage-badge-btn");
+    const menu = wrap.querySelector(".stage-menu");
+
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = menu.classList.contains("hidden");
+      // Открытым может быть только одно меню: иначе в списке из сотни
+      // строк они копятся друг под другом и перекрывают соседей.
+      closeStageMenus();
+      menu.classList.toggle("hidden", !willOpen);
+      button.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    menu.addEventListener("click", (e) => e.stopPropagation());
+
+    menu.querySelectorAll("[data-stage-to]").forEach((item) => {
+      item.addEventListener("click", async () => {
+        const kase = findCase(wrap.dataset.stagePick);
+        if (!kase) return;
+        closeStageMenus();
+        if (!(await advanceCaseStage(kase, item.dataset.stageTo, item))) return;
+        onMoved();
+      });
+    });
+  });
+}
+
+function closeStageMenus() {
+  document.querySelectorAll(".stage-menu").forEach((m) => m.classList.add("hidden"));
+  document.querySelectorAll(".stage-badge-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+
+document.addEventListener("click", closeStageMenus);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeStageMenus();
+});
 
 /**
  * Проверяет, является ли открытая сейчас в "Дела" папка отслеживаемым
@@ -2090,7 +2103,6 @@ async function updateCaseBanner(path) {
 
 function renderCaseBanner(project) {
   const banner = document.getElementById("caseBanner");
-  const otherStages = ["plan", "active", "control", "done"].filter((s) => s !== project.stage);
 
   // Папка отвечает за файлы, карточка — за состояние проекта. Раньше здесь
   // стояли пять кнопок одного веса, список задач и ассистент, и до самих
@@ -2098,31 +2110,23 @@ function renderCaseBanner(project) {
   // где проект, что горит и куда идти за подробностями.
   const overdue = Number(project.overdue_tasks || 0);
 
-  // Перенос стадии стоит прямо в полосе: это основной способ двигать
-  // проект, и прятать его под «ещё» оказалось неудобно. Под «ещё» ушло
-  // только то, что делают редко.
-  const move = !project.is_cancelled && otherStages.length ? `
-    <span class="case-strip-move">
-      <select id="caseStageSelect" aria-label="Стадия проекта">
-        ${otherStages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
-      </select>
-      <button type="button" id="caseAdvanceBtn">Переместить</button>
-    </span>` : "";
-
   const rare = [`<button type="button" id="caseEditBtn">Редактировать</button>`];
   if (!project.is_cancelled) {
     rare.push(`<button type="button" class="danger" id="caseCancelBtn">Отменить проект</button>`);
   }
 
+  // Перенос стадии — это сам бейдж: щёлкнул по «ПЛАН», выбрал куда.
+  // Отдельные «список стадий + кнопка Переместить» отсюда убраны: они
+  // говорили об одном и том же, но показывали разное, и полоса из-за
+  // них была тесной.
   banner.innerHTML = `
-    ${stageBadgeHtml(project)}
+    ${stagePickerHtml(project)}
     <span class="case-strip-status">${escapeHtml(STATUS_LABEL[project.status] || "")}</span>
     ${overdue
       ? `<span class="chip-overdue">${plural(overdue, "задача просрочена", "задачи просрочено", "задач просрочено")}</span>`
       : ""}
     ${kadLinkHtml(project)}
     <span class="case-strip-right">
-      ${move}
       <button class="case-strip-card" type="button" id="caseCardBtn">
         Карточка проекта
         <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -2152,18 +2156,13 @@ function renderCaseBanner(project) {
   bind(moreMenu, "click", (e) => e.stopPropagation());
   document.addEventListener("click", () => moreMenu.classList.add("hidden"));
 
-  const advanceBtn = document.getElementById("caseAdvanceBtn");
-  if (advanceBtn) {
-    advanceBtn.addEventListener("click", async () => {
-      const target = document.getElementById("caseStageSelect").value;
-      if (!(await advanceCaseStage(project, target, advanceBtn))) return;
-      // Баннер виден, только когда стоишь ровно в папке проекта, — значит
-      // этот самый путь только что переехал и больше не существует.
-      // Поднимаемся к колонкам и обновляем список «Дела».
-      goToColumns(true);
-      loadColumnList("cases");
-    });
-  }
+  // Полоса видна, только когда стоишь ровно в папке проекта, — значит
+  // после перевода этот самый путь переехал и больше не существует.
+  // Поднимаемся к колонкам и обновляем список «Дела».
+  wireStagePickers(banner, () => project, () => {
+    goToColumns(true);
+    loadColumnList("cases");
+  });
 
   bind(document.getElementById("caseEditBtn"), "click", () => openCaseEdit(project));
 
@@ -4209,16 +4208,18 @@ function registryRowHtml(c) {
       ? `<span class="reg-chip">${plural(c.open_tasks, "задача", "задачи", "задач")}</span>`
       : `<span class="reg-chip none">задач нет</span>`;
 
-  // В архиве вместо переноса стадии — чем кончилось дело. И менять
-  // что-либо предлагаем только тому, кто может: кнопка, которая упрётся
-  // в отказ, хуже, чем её отсутствие.
+  // В архиве вместо переноса стадии — чем кончилось дело.
   const archived = registryBucket(c) === "archive";
-  const stages = ["plan", "active", "control", "done"].filter((s) => s !== c.stage);
-  const move = archived || !stages.length || !c.can_write ? "" : `
-    <select data-reg-stage="${c.id}" aria-label="Куда перевести дело">
-      ${stages.map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join("")}
-    </select>
-    <button type="button" class="reg-btn" data-reg-move="${c.id}">Переместить</button>`;
+
+  // Стадия — тот же бейдж-кнопка, что и в папке проекта.
+  //
+  // Раньше здесь стоял выпадающий список, и он показывал не текущую
+  // стадию, а первую из оставшихся: заходишь в «Планы», а во всех
+  // строчках написано «Активный». Читалось это как состояние дела и
+  // сбивало с толку. Теперь на бейдже написано, где дело есть на самом
+  // деле, — в разделе «Планы» во всех строках будет «План», — а куда
+  // его двигать, спрашивается по щелчку.
+  const stage = archived ? "" : stagePickerHtml(c, { canWrite: !!c.can_write });
 
   return `
     <div class="reg-row" data-case-id="${c.id}">
@@ -4229,7 +4230,7 @@ function registryRowHtml(c) {
         ? `<span class="reg-chip ${c.is_cancelled ? "cancelled" : "done"}">${c.is_cancelled ? "отменено" : "завершено"}</span>`
         : tasks}
       <span class="reg-actions">
-        ${move}
+        ${stage}
         <button type="button" class="reg-btn accent" data-reg-card="${c.id}">Карточка →</button>
       </span>
     </div>`;
@@ -4239,23 +4240,17 @@ function wireRegistryRows(body) {
   body.querySelectorAll("[data-reg-card]").forEach((el) => {
     el.addEventListener("click", () => openCaseCard(el.dataset.regCard, true));
   });
-  body.querySelectorAll("[data-reg-move]").forEach((btn) => {
-    btn.addEventListener("click", () => moveCaseFromRegistry(btn));
-  });
+  // Перечитываем страницу целиком: после перевода изменились и плитки
+  // стадий сверху, и состав обоих списков.
+  wireStagePickers(
+    body,
+    (id) => (registryCases || []).find((c) => String(c.id) === String(id)),
+    async () => {
+      await loadRegistry(true);
+      loadColumnList("cases");
+    }
+  );
   wireCopyCaseButtons(body);
-}
-
-/** Перенос стадии из списка: общий код плюс перечитывание страницы. */
-async function moveCaseFromRegistry(btn) {
-  const id = btn.dataset.regMove;
-  const kase = (registryCases || []).find((c) => String(c.id) === String(id));
-  const select = document.querySelector(`[data-reg-stage="${id}"]`);
-  if (!kase || !select) return;
-
-  if (!(await advanceCaseStage(kase, select.value, btn))) return;
-  // Перечитываем целиком: изменились и плитки, и обе стадии.
-  await loadRegistry(true);
-  loadColumnList("cases");
 }
 
 bind(document.getElementById("registryBackBtn"), "click", () => {
