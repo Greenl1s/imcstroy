@@ -14,6 +14,12 @@
   --danger-hover: #8c1e17;
   --success: #2f7d4f;
   --warning: #c2660d;
+  --col-w: 150px;
+  --col-gap: 10px;
+  --act-w: 96px;
+  --pad-x: 16px;
+  --busy: #4a6478;
+  --busy-bg: #e8edf2;
   --radius: 6px;
   --shadow: 0 2px 10px rgba(20, 30, 40, 0.07);
   --shadow-hover: 0 8px 28px rgba(20, 30, 40, 0.14);
@@ -28,6 +34,8 @@
 }
 
 body.dark-theme {
+  --busy: #93a9bd;
+  --busy-bg: #263442;
   --bg: #10161d;
   --panel: #1a222b;
   --text: #dbe3ea;
@@ -60,13 +68,6 @@ body {
   font-size: 16px;
   line-height: 1.6;
   transition: background var(--transition), color var(--transition);
-  /* Едва заметная координатная сетка на фоне — весь предметный контент
-     сидит поверх сплошных панелей, сетка видна только в промежутках. */
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 32px 32px;
-  background-position: -1px -1px;
 }
 
 .shell { width: min(1300px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 40px; }
@@ -104,7 +105,9 @@ body {
   margin-bottom: 24px; padding-bottom: 12px;
   border-bottom: 2px solid var(--primary);
 }
-.topbar h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.topbar h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.topbar-title { display: flex; align-items: center; gap: 14px; }
+.user-name { color: var(--muted); font-size: 13px; }
 .sync-status { color: var(--muted); font-size: 13px; font-family: var(--font-mono); }
 .topbar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
@@ -155,37 +158,109 @@ input:focus, select:focus {
 label { display: grid; gap: 6px; font-weight: 500; font-size: 14px; }
 .form-grid { display: grid; gap: 14px; }
 
+/* ---------- Сводка ----------
+   Числа над фильтрами — это и есть фильтры: щелчок оставляет в списке
+   ровно то, о чём число говорит. Считаются по всем приборам, а не по
+   текущей выборке, иначе цифра прыгала бы вслед за фильтром. */
+.summary {
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 12px; overflow: hidden;
+}
+.summary-cell {
+  min-height: 0; border: 0; border-right: 1px solid var(--line); border-radius: 0;
+  padding: 10px 16px; background: transparent; color: var(--muted);
+  font-size: 13.5px; font-weight: 400; gap: 7px; cursor: pointer;
+}
+.summary-cell b { font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.summary-cell:hover { background: var(--badge-bg); }
+.summary-cell.on { background: var(--badge-bg); box-shadow: inset 0 -2px 0 var(--primary); }
+.summary-cell.bad b { color: var(--danger); }
+.summary-cell.warn b { color: var(--warning); }
+.summary-grow { flex: 1; }
+
 /* ---------- Список ---------- */
-:root { --col-width: 144px; --col-gap: 10px; }
 
-.list { display: grid; gap: 10px; }
+.list { display: grid; gap: 6px; }
+
+/* Строка списка. Слева — название и номер, справа — четыре колонки,
+   каждая ровно под своим фильтром, и место под кнопку действия.
+   Ширины взяты из переменных: тех же, что и у фильтров сверху. */
 .row {
-  display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center;
-  padding: 16px 20px; border: 1px solid var(--line); background: var(--panel);
-  border-radius: var(--radius);
-  transition: border-color var(--transition), box-shadow var(--transition), transform 0.15s;
+  display: flex; align-items: center; gap: var(--col-gap);
+  padding: 10px var(--pad-x) 10px 13px;
+  border: 1px solid var(--line); border-left: 3px solid var(--success);
+  background: var(--panel); border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
-.row:hover { border-color: var(--primary); box-shadow: var(--shadow-hover); }
-.row-selectable { grid-template-columns: auto 1fr; }
-.row-link {
-  display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center;
-  text-decoration: none; color: inherit;
+.row-busy { border-left-color: var(--busy); }
+.row-booked { border-left-color: var(--warning); }
+.row-retired { border-left-color: var(--muted); }
+.row:hover { box-shadow: var(--shadow); }
+.row-main {
+  flex: 1; min-width: 0; display: block; text-decoration: none; color: inherit;
+  padding-right: 6px;
 }
-.row-title { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+.row-title {
+  display: block; font-weight: 600; font-size: 15px; letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row-title i {
+  font-style: normal; font-family: var(--font-mono); font-size: 13px;
+  font-weight: 500; color: var(--muted); margin-left: 8px;
+}
 .row-subtitle {
-  color: var(--muted); font-size: 13px; margin-top: 4px; overflow-wrap: anywhere;
+  display: block; color: var(--muted); font-size: 12.5px; margin-top: 1px;
   font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.instrument-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary); }
+.row-cols { display: flex; gap: var(--col-gap); flex-shrink: 0; }
+.row-col { width: var(--col-w); text-align: center; }
+.row-col .badge { max-width: 100%; }
+.col-who {
+  display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.col-date { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.col-rest { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.col-date.t-bad, .col-rest.t-bad { color: var(--danger); }
+.col-date.t-warn, .col-rest.t-warn { color: var(--warning); }
+.col-empty { font-size: 13px; color: var(--muted); }
+/* «Срок не заполнен» — это не свойство прибора, а незаполненное поле.
+   Курсив отличает дыру в данных от осознанного «не требуется». */
+.col-empty.is-unset { font-style: italic; }
+.row-act { width: var(--act-w); flex-shrink: 0; text-align: right; }
+.row-act button { min-height: 32px; padding: 6px 13px; font-size: 13px; font-weight: 600; }
+.instrument-checkbox { width: 17px; height: 17px; cursor: pointer; accent-color: var(--primary); flex-shrink: 0; }
+.row-selectable { cursor: pointer; }
 
-/* Две колонки под карточкой, выровненные с фильтрами сверху: поверка / состояние. */
-.row-status-group { display: flex; gap: var(--col-gap); }
-.row-status-col {
-  width: var(--col-width); display: flex; justify-content: center; align-items: center;
-  text-align: center; overflow-wrap: anywhere;
+/* Пустой результат */
+.empty-state {
+  background: var(--panel); border: 1px dashed var(--line-strong, var(--line));
+  border-radius: var(--radius); padding: 34px 20px; text-align: center;
 }
-.row-status-col .badge { width: 100%; justify-content: center; }
-.row-status-col .muted-text { color: var(--muted); font-size: 14px; font-family: var(--font-mono); }
+.empty-title { font-size: 16px; font-weight: 600; }
+.empty-text { color: var(--muted); font-size: 14px; margin-top: 5px; }
+.empty-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+/* Панель массовых действий */
+.mass-panel {
+  position: sticky; bottom: 0; z-index: 20; margin-top: 10px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #182129; color: #fff; border-radius: var(--radius); padding: 11px 14px;
+  box-shadow: 0 -6px 24px rgba(16, 22, 29, 0.18);
+}
+.mass-count { font-size: 14px; font-weight: 600; margin-right: 6px; }
+.mass-count.is-empty { color: #9fb0bf; font-weight: 400; }
+.mass-panel button {
+  min-height: 34px; padding: 7px 13px; font-size: 13px; font-weight: 500;
+  background: rgba(255, 255, 255, 0.1); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+.mass-panel button:hover { background: rgba(255, 255, 255, 0.18); }
+.mass-panel .mass-danger { border-color: #a86058; color: #ffbfb7; }
+.mass-panel .mass-cancel { background: transparent; border-color: transparent; color: #b9c6d1; }
+.mass-spacer { flex: 1; }
 
 /* ---------- Бейджи ---------- */
 /* Похожи на индикаторы приборной панели: маленькая точка-«светодиод»
@@ -193,14 +268,11 @@ label { display: grid; gap: 6px; font-weight: 500; font-size: 14px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
 .badges-left { justify-content: flex-start; margin-top: 8px; }
 .badge {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 3px 10px;
-  border-radius: 4px; font-size: 12px; font-weight: 700; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.04em;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 24px; padding: 3px 10px; border-radius: 5px;
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0;
   background: var(--badge-bg); color: var(--text); white-space: nowrap;
-}
-.badge::before {
-  content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: currentColor; flex-shrink: 0;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .muted { background: #e9edf1; color: #48555f; }
 .ok    { background: #dcf3e3; color: #1e6b3f; }
@@ -244,7 +316,99 @@ body.dark-theme .badge.palette-7 { background: #3a1526; color: #e087b0; }
 body.dark-theme .badge.palette-8 { background: #251a3f; color: #b39ddb; }
 body.dark-theme .badge.palette-9 { background: #1a2140; color: #8fa0e0; }
 
-/* ---------- Карточка ---------- */
+/* ---------- Карточка прибора ----------
+   Слева фотографии и QR, справа — состояние, поверка и характеристики.
+   Прибор опознают глазами, поэтому снимок занимает половину экрана,
+   а не прячется над заголовком. */
+.card-screen {
+  display: grid; grid-template-columns: 400px 1fr; gap: 22px; align-items: start;
+}
+.card-gallery { display: grid; gap: 8px; }
+.card-photo {
+  height: 280px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); display: grid; place-items: center;
+  color: var(--muted); font-size: 14px; overflow: hidden;
+}
+.card-photo img { width: 100%; height: 100%; object-fit: contain; }
+.card-doc-link { color: var(--primary); font-weight: 600; }
+.card-strip { display: flex; gap: 8px; }
+.card-thumb {
+  min-height: 34px; padding: 7px 14px; font-size: 13px; font-weight: 500;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+}
+.card-thumb.is-on { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.card-qr {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.card-qr-box { flex-shrink: 0; line-height: 0; }
+.card-qr-box img, .card-qr-box canvas { background: #fff; padding: 5px; border-radius: 4px; }
+.card-qr-text { font-size: 12.5px; color: var(--muted); }
+.card-qr-text b { display: block; font-size: 14px; color: var(--text); margin-bottom: 2px; }
+.card-qr button { margin-left: auto; }
+
+.card-main { min-width: 0; }
+.card-head { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
+.card-head-text { flex: 1; min-width: 0; }
+.card-head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.card-ids { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
+.card-state { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.card-chip {
+  display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 12px;
+  font-size: 12.5px; font-weight: 600; background: var(--badge-bg); color: var(--muted);
+}
+.card-chip.free { background: var(--ok-bg, #e3f2e9); color: var(--success); }
+.card-chip.busy { background: var(--badge-bg); color: var(--primary); }
+.card-chip.warn { background: var(--issued-bg); color: var(--warning); }
+.card-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+
+/* Поверка — отдельной строкой: дата, сколько осталось и чем это грозит. */
+.card-verif {
+  display: flex; align-items: center; gap: 14px; margin-top: 14px;
+  padding: 13px 16px; border-radius: var(--radius);
+  background: var(--panel); border: 1px solid var(--line);
+}
+.card-verif-date { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card-verif-text { font-size: 13px; color: var(--muted); }
+.card-verif-text b { display: block; font-size: 14px; color: var(--text); }
+.card-verif button { margin-left: auto; }
+.card-verif.v-warn { background: var(--issued-bg); border-color: var(--issued-line); }
+.card-verif.v-warn .card-verif-date { color: var(--warning); }
+.card-verif.v-bad { background: #fae7e4; border-color: #ecc3bd; }
+.card-verif.v-bad .card-verif-date { color: var(--danger); }
+body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; }
+
+.card-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 18px; margin-top: 11px;
+}
+.card-box.holder { border-color: var(--issued-line); background: var(--issued-bg); }
+.card-box h4 {
+  margin: 0 0 12px; font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.card-kv {
+  display: grid; grid-template-columns: 190px 1fr; gap: 8px 16px;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.card-box h4 + .card-kv { border-top: 0; padding-top: 0; }
+.card-k { color: var(--muted); font-size: 13px; }
+.card-v { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.card-missing {
+  margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--muted);
+}
+.card-missing b { color: var(--text); font-weight: 600; }
+.card-minor { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
+.card-danger {
+  margin-top: 11px; border: 1px dashed #dcbcb6; border-radius: var(--radius);
+  padding: 11px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.card-danger-note { flex: 1; font-size: 12.5px; color: var(--muted); }
+.card-danger .danger { background: transparent; border: 1px solid #dcbcb6; color: var(--danger); }
+.card-danger .danger:hover { background: #fae7e4; }
+
+/* Старая карточка — оставлена для модальных окон (история, документ). */
 .card { padding: 24px; }
 .card h1 { font-weight: 600; font-size: 26px; letter-spacing: -0.01em; }
 .card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 20px; }
@@ -273,54 +437,45 @@ body.dark-theme .issued.booked { background: #3b1a1a; border-color: #6b342c; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; align-items: center; }
 
-/* ---------- Панель фильтров ---------- */
+/* ---------- Панель фильтров ----------
+   Ширина фильтра равна ширине его колонки в строке (--col-w), зазоры
+   одинаковые (--col-gap), а справа зарезервировано ровно столько,
+   сколько занимает колонка действия (--act-w) с её зазором. Только
+   поэтому фильтр стоит точно над своим столбцом. */
 .toolbar {
-  display: flex; flex-direction: column; gap: 14px;
-  padding: 16px 20px; margin-bottom: 20px;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 13px var(--pad-x); margin-bottom: 10px;
 }
 .search-full { width: 100%; }
 
 .toolbar-bottom {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 14px; flex-wrap: nowrap;
+  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
 }
-.toolbar-buttons { display: flex; flex-wrap: nowrap; gap: 8px; flex-shrink: 0; }
+.toolbar-buttons { display: flex; gap: 8px; margin-right: auto; }
 
-/* Фильтры — компактные «чипы»: подпись сверху, значение снизу,
-   всё внутри своей ширины, без выпирающего текста. */
-.filters-row { display: flex; gap: var(--col-gap, 10px); flex-shrink: 0; }
-.filter-chip {
-  width: var(--col-width, 144px);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; padding: 8px 10px; border-radius: var(--radius);
-  background: var(--badge-bg); border: 1px solid var(--line);
-  transition: border-color var(--transition), box-shadow var(--transition);
+.filters-row {
+  display: flex; gap: var(--col-gap);
+  margin-left: auto; margin-right: calc(var(--act-w) + var(--col-gap));
 }
-.filter-chip:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(31, 92, 138, 0.18); }
+.filter-chip { width: var(--col-w); display: flex; flex-direction: column; gap: 4px; }
 .filter-chip-label {
-  font-size: 11px; font-weight: 700; font-family: var(--font-mono); text-transform: uppercase;
-  letter-spacing: 0.05em; color: var(--muted);
-  /* Резервируем место под подпись в две строки (даже если она в одну) —
-     иначе у чипов с более длинной подписью ("Поверка/Калибровка") значение
-     "Все" съезжает ниже, чем у соседних чипов с однострочной подписью.
-     Текст прижимаем к низу этой области — тогда "Все" у всех чипов
-     оказывается на одной высоте, независимо от переноса строки. */
-  min-height: 2.6em; line-height: 1.3;
-  display: flex; align-items: flex-end; justify-content: center; text-align: center;
+  font-size: 12px; color: var(--muted); text-align: center; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-radius: 4px;
 }
+.filter-chip-label:hover { color: var(--text); }
+/* Стрелка сортировки дописывается из data-атрибута: она относится
+   к состоянию экрана, а не к самому слову. */
+.filter-chip-label::after { content: attr(data-arrow); }
+.filter-chip-label.sorted { color: var(--primary); font-weight: 600; }
 .filter-chip select {
-  border: none; padding: 3px 12px; min-height: auto; width: 100%; max-width: 100%;
-  text-align: center; text-align-last: center; font-weight: 600; font-size: 14px;
-  color: var(--text); cursor: pointer; appearance: none; outline: none;
-  /* Значение фильтра — скруглённая "таблетка" чуть темнее фона самого чипа.
-     width:100% (а не auto) — иначе браузер меряет ширину по самому длинному
-     варианту в списке (например, у "Классификация" это длинные названия),
-     а не по тому, что видно сейчас, и капсула вылезает за пределы чипа. */
-  background: var(--filter-value-bg); border-radius: 999px;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  transition: filter var(--transition);
+  width: 100%; min-height: 38px; padding: 8px 11px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--input-bg); color: var(--text);
+  font-size: 13.5px; font-weight: 600; cursor: pointer;
+  text-overflow: ellipsis;
 }
-.filter-chip select:hover { filter: brightness(0.94); }
+.filter-chip select:hover { border-color: var(--line-strong, var(--filter-value-bg)); }
 
 /* ---------- Модальные окна ---------- */
 dialog {
@@ -368,33 +523,73 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
 .document-photo { max-width: 100%; max-height: 70vh; object-fit: contain; }
 .qr-caption { text-align: center; color: var(--muted); margin-top: 8px; font-family: var(--font-mono); font-size: 13px; }
 
-/* Промежуточная точка: три фильтра-чипа + кнопки могут не поместиться
-   в одну строку на нешироких десктопных окнах, ещё не дошедших до
-   мобильной раскладки. Даём им перенестись, не трогая остальную вёрстку. */
+/* Промежуточная точка. Когда кнопкам и фильтрам не хватает ширины,
+   фильтры целиком переезжают на свою строку — и остаются выровненными
+   по правому краю, а не сползают вбок, ломая решётку. */
+@media (max-width: 1180px) {
+  .filters-row { margin-left: 0; width: 100%; }
+  .toolbar-buttons { margin-right: 0; }
+}
+
 @media (max-width: 900px) {
-  .toolbar-bottom { flex-wrap: wrap; row-gap: 10px; }
-  .toolbar-buttons { flex-wrap: wrap; }
-  .filters-row { flex-wrap: wrap; }
+  .row { flex-wrap: wrap; }
+  .row-main { flex: 1 1 100%; }
+  .row-cols { flex: 1 1 auto; }
+  .row-act { width: auto; }
 }
 
 /* ---------- Мобильные экраны ---------- */
 @media (max-width: 720px) {
   .shell { padding: 12px 8px; }
   .topbar { flex-direction: column; align-items: stretch; gap: 10px; }
+  .topbar-title { justify-content: space-between; }
   .topbar-actions > * { flex: 1 1 auto; }
+
+  /* Сводка становится лентой из пяти-шести ячеек в одну строку. */
+  .summary { flex-wrap: nowrap; overflow-x: auto; }
+  .summary-cell { flex: 1 0 auto; flex-direction: column; gap: 0; padding: 8px 12px; text-align: center; }
+  .summary-cell b { font-size: 16px; }
+  .summary-grow { display: none; }
+
   .toolbar { padding: 12px; }
   .search-full { font-size: 16px; min-height: 44px; }
   .toolbar-bottom { flex-direction: column; align-items: stretch; }
   .toolbar-buttons { justify-content: stretch; }
   .toolbar-buttons button { flex: 1 1 auto; min-height: 44px; font-size: 15px; }
-  .filters-row { flex-direction: column; align-items: stretch; }
-  .filter-chip { width: 100%; }
-  .row, .row-link { grid-template-columns: 1fr; gap: 8px; }
-  .row-selectable { grid-template-columns: auto 1fr; }
-  .row { padding: 12px 14px; }
-  .row-status-group { flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
-  .row-status-col { width: auto; justify-content: flex-start; text-align: left; }
-  .row-status-col .badge { width: auto; }
+
+  /* Четыре фильтра в две колонки — треть прежней высоты. */
+  .filters-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin-right: 0; width: 100%;
+  }
+  .filter-chip { width: auto; }
+  .filter-chip select { min-height: 42px; font-size: 14px; }
+
+  /* Строка складывается: название сверху, значения — бейджами под ним,
+     кнопка действия во всю ширину. */
+  .row { flex-wrap: wrap; padding: 11px 12px 11px 11px; gap: 8px; }
+  .row-main { flex: 1 1 100%; padding-right: 0; }
+  .row-title { white-space: normal; }
+  .row-cols { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; justify-content: flex-start; }
+  .row-col { width: auto; text-align: left; }
+  .col-who { display: inline; margin-left: 6px; }
+  .col-date { font-size: 12.5px; }
+  .col-rest { display: inline; margin-left: 5px; font-size: 12px; }
+  .row-act { width: 100%; text-align: stretch; }
+  .row-act button { width: 100%; min-height: 42px; font-size: 15px; }
+
+  .mass-panel { padding: 10px; gap: 6px; }
+  .mass-panel button { flex: 1 1 auto; min-height: 40px; }
+  .mass-count { flex: 1 1 100%; }
+
+  .card-screen { grid-template-columns: 1fr; gap: 14px; }
+  .card-photo { height: 210px; }
+  .card-head h1 { font-size: 20px; }
+  .card-actions { width: 100%; }
+  .card-actions button { flex: 1 1 auto; min-height: 44px; }
+  .card-kv { grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .card-v { text-align: right; }
+  .card-minor button { flex: 1 1 45%; min-height: 42px; }
   .card { padding: 16px; }
   .card h1 { font-size: 20px; }
   .card-grid { grid-template-columns: 1fr; gap: 10px; }
