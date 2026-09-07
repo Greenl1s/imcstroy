@@ -428,7 +428,7 @@ const TASKS_QUERY = `
          t.assignees, t.assigner, t.assignee_ids, t.assigner_id,
          t.start_date, t.end_date, t.completed_at,
          cb.username AS completed_by_name,
-         c.id AS case_id, c.name AS case_name, c.type AS case_type,
+         c.id AS case_id, c.name AS case_name, c.type AS case_type, c.case_number,
          c.stage AS case_stage, c.folder_path, c.planfix_id AS case_planfix_id
     FROM case_tasks t
     JOIN cases c ON c.id = t.case_id
