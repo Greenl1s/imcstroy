@@ -41,7 +41,21 @@ export async function showUsersManager() {
   document.querySelectorAll('[data-delete-user]').forEach((node) => {
     node.onclick = async (event) => {
       const user = state.users.find((u) => String(u.id) === node.dataset.deleteUser);
-      if (!confirm(`Удалить пользователя «${user.username}»?`)) return;
+
+      // Таблица пользователей общая с ИСУ, и права там привязаны к тому же
+      // id. Удаление стирает их заодно — молча и безвозвратно. Спрашиваем
+      // у сервера, что именно пропадёт, и говорим об этом до удаления.
+      let warning = '';
+      try {
+        const impact = await api.userIsuImpact(user.id);
+        const parts = [];
+        if (impact.has_permissions) parts.push('доступ к разделам ИСУ');
+        if (impact.folder_rules) parts.push(`персональные права на ${impact.folder_rules} папок(и) дел`);
+        if (impact.managed_cases) parts.push(`он указан руководителем в ${impact.managed_cases} делах(е) — там поле опустеет`);
+        if (parts.length) warning = '\n\nВместе с ним в ИСУ пропадут: ' + parts.join('; ') + '.';
+      } catch { /* не смогли спросить — удаляем как раньше, без подсказки */ }
+
+      if (!confirm(`Удалить пользователя «${user.username}»?${warning}`)) return;
       const result = await run(() => api.deleteUser(user.id), {
         button: event.currentTarget,
         success: 'Пользователь удалён'
@@ -72,6 +86,12 @@ export function showUserForm(user = null) {
            <div class="field-value">${escapeHtml(user?.username || '')}</div></div>`}
       ${input('password', isEdit ? 'Новый пароль (оставьте пустым, чтобы не менять)' : 'Пароль',
               '', 'password', !isEdit)}
+      ${isSelf
+        // Свой пароль меняем только с вводом текущего — чтобы чужую
+        // забытую открытую вкладку нельзя было превратить в захват учётной
+        // записи. Чужой пароль администратор меняет без этого поля.
+        ? input('current_password', 'Текущий пароль (нужен только при смене пароля)', '', 'password')
+        : ''}
       ${admin && !isSelf
         ? select('role', 'Роль', user?.role || 'employee',
                  [['employee', 'Пользователь'], ['admin', 'Администратор']])
@@ -85,10 +105,18 @@ export function showUserForm(user = null) {
     const button = event.target.querySelector('button[type="submit"]');
     const data = formData(event.target);
     if (!data.password) delete data.password; // пустое поле = пароль не меняем
+    if (!data.password || !data.current_password) delete data.current_password;
+    if (data.password && isSelf && !data.current_password) {
+      return toast('Чтобы поменять пароль, введите текущий', true);
+    }
 
     const result = await run(async () => {
       if (!isEdit) return api.createUser(data);
-      if (isSelf && !admin) return api.updateMe({ password: data.password, extra: data.extra });
+      if (isSelf && !admin) {
+        return api.updateMe({
+          password: data.password, current_password: data.current_password, extra: data.extra,
+        });
+      }
       return api.updateUser(user.id, data);
     }, { button, success: 'Сохранено' });
 

@@ -85,6 +85,8 @@ export const api = {
   createUser: (data) => request('/users', { method: 'POST', body: data }),
   updateUser: (id, data) => request(`/users/${id}`, { method: 'PATCH', body: data }),
   deleteUser: (id) => request(`/users/${id}`, { method: 'DELETE' }),
+  // Что пропадёт в ИСУ вместе с этим пользователем — спрашиваем перед удалением.
+  userIsuImpact: (id) => request(`/users/${id}/isu-impact`),
 
   // ---------- Приборы ----------
   listInstruments: () => request('/instruments'),
