@@ -5,7 +5,8 @@ import { openModal, closeModal, toast, setSync, run } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
-import { displayNo, verificationBadge, verificationText, today } from './utils.js';
+import { displayNo, verificationBadge, verificationText, today, verificationInfo,
+  VERIFICATION_SOON_DAYS } from './utils.js';
 
 // ---------- Тема ----------
 
@@ -76,47 +77,48 @@ function bindEvents() {
   document.getElementById('companyFilter').onchange = (e) => setFilter('company', e.target.value);
 
   document.getElementById('massToggleBtn').onclick = () => setMassMode(!state.massMode);
-  bindMassActionsMenu();
-  document.getElementById('massIssueBtn').onclick = () => {
-    closeMassActionsMenu();
+  document.getElementById('massCancelBtn').onclick = () => setMassMode(false);
+
+  // Счётчик выбранного обновляется на любой щелчок по списку: галочки
+  // рисуются заново при каждой перерисовке, вешать обработчик на каждую
+  // по отдельности незачем.
+  document.getElementById('instrumentList').addEventListener('click', updateMassCount);
+
+  // Подпись фильтра работает и как заголовок колонки: щелчок сортирует
+  // список по этому полю, повторный щелчок переворачивает порядок.
+  document.querySelectorAll('.filter-chip-label[data-sort]').forEach((label) => {
+    label.onclick = () => toggleSort(label.dataset.sort);
+  });
+  document.getElementById('massIssueBtn').onclick = (e) => {
     showBulkTakeForm();
   };
-  document.getElementById('massBookBtn').onclick = () => {
-    closeMassActionsMenu();
+  document.getElementById('massBookBtn').onclick = (e) => {
     showBulkBookForm();
   };
   document.getElementById('massRetireBtn').onclick = (e) => {
-    closeMassActionsMenu();
     bulk(e.currentTarget, 'retire');
   };
   document.getElementById('massDeleteBtn').onclick = (e) => {
-    closeMassActionsMenu();
     bulk(e.currentTarget, 'delete');
   };
   document.getElementById('massReturnBtn').onclick = (e) => {
-    closeMassActionsMenu();
     bulkSimple(e.currentTarget, 'return');
   };
   document.getElementById('massConfirmBookingBtn').onclick = (e) => {
-    closeMassActionsMenu();
     bulkSimple(e.currentTarget, 'confirm-booking');
   };
   document.getElementById('massCancelBookingBtn').onclick = (e) => {
-    closeMassActionsMenu();
     bulkSimple(e.currentTarget, 'cancel-booking');
   };
-  document.getElementById('massTransferBtn').onclick = () => {
-    closeMassActionsMenu();
+  document.getElementById('massTransferBtn').onclick = (e) => {
     showBulkTransferForm();
   };
 
-  document.getElementById('massQrWordBtn').onclick = () => {
-    closeMassActionsMenu();
+  document.getElementById('massQrWordBtn').onclick = (e) => {
     downloadSelectedQrAsWord();
   };
 
-  document.getElementById('massSetCompanyBtn').onclick = () => {
-    closeMassActionsMenu();
+  document.getElementById('massSetCompanyBtn').onclick = (e) => {
     showBulkSetCompanyForm();
   };
 
@@ -127,8 +129,23 @@ function bindEvents() {
   });
   window.addEventListener('app:changed', () => {
     setSync(`Приборов: ${state.instruments.length}`);
+    renderSummary();
   });
   window.addEventListener('app:refresh-route', renderRoute);
+
+  // Кнопки на экране «ничего не нашлось» — их рисует список, а сбрасывать
+  // фильтры и открывать списанные умеет этот файл.
+  window.addEventListener('app:reset-filters', () => {
+    state.search = ''; state.condition = 'all'; state.verification = 'all';
+    state.controlType = 'all'; state.company = 'all';
+    document.getElementById('searchInput').value = '';
+    for (const id of ['conditionFilter', 'verificationFilter', 'controlTypeFilter', 'companyFilter']) {
+      document.getElementById(id).value = 'all';
+    }
+    renderList(openCard);
+    renderSummary();
+  });
+  window.addEventListener('app:show-retired', () => showRetired());
   window.addEventListener('popstate', renderRoute);
   window.addEventListener('app:control-types-changed', () => {
     loadControlTypes();
@@ -141,6 +158,83 @@ function bindEvents() {
 function setFilter(key, value) {
   state[key] = value;
   renderList(openCard);
+  renderSummary();
+}
+
+/**
+ * Сортировка по колонке. Первый щелчок ставит сортировку по этому полю,
+ * второй — переворачивает порядок.
+ */
+function toggleSort(field) {
+  if (state.sort === field) state.sortDesc = !state.sortDesc;
+  else { state.sort = field; state.sortDesc = false; }
+  markSortedColumn();
+  renderList(openCard);
+}
+
+function markSortedColumn() {
+  document.querySelectorAll('.filter-chip-label[data-sort]').forEach((label) => {
+    const on = label.dataset.sort === state.sort;
+    label.classList.toggle('sorted', on);
+    label.dataset.arrow = on ? (state.sortDesc ? ' ↓' : ' ↑') : '';
+  });
+}
+
+/**
+ * Сводка над фильтрами. Числа кликабельны: каждое ставит фильтры так,
+ * чтобы в списке остались ровно те приборы, о которых оно говорит.
+ * Считаем по всем приборам, а не по текущей выборке, — иначе цифра
+ * прыгала бы вслед за фильтром и ничего не значила.
+ */
+function renderSummary() {
+  const bar = document.getElementById('summaryBar');
+  if (!bar) return;
+  const all = state.instruments;
+  const kinds = all.map((i) => verificationInfo(i).kind);
+  const cells = [
+    { key: 'all',      n: all.length,                                   label: 'всего' },
+    { key: 'free',     n: all.filter((i) => i.status === 'free').length,   label: 'свободно' },
+    { key: 'busy',     n: all.filter((i) => i.status === 'busy').length,   label: 'на руках' },
+    { key: 'booked',   n: all.filter((i) => i.status === 'booked').length, label: 'в брони' },
+    { key: 'expired',  n: kinds.filter((k) => k === 'expired').length,  label: 'поверка истекла', tone: 'bad' },
+    { key: 'soon',     n: kinds.filter((k) => k === 'soon').length,
+      label: `истекает ≤ ${VERIFICATION_SOON_DAYS} дней`, tone: 'warn' },
+  ];
+
+  bar.innerHTML = cells.map((c) => `
+    <button class="summary-cell${c.tone ? ' ' + c.tone : ''}${isSummaryActive(c.key) ? ' on' : ''}"
+            type="button" data-summary="${c.key}">
+      <b>${c.n}</b> ${escapeHtml(c.label)}
+    </button>`).join('') +
+    '<span class="summary-grow"></span>';
+
+  bar.querySelectorAll('[data-summary]').forEach((btn) => {
+    btn.onclick = () => applySummaryFilter(btn.dataset.summary);
+  });
+}
+
+/** Подсвечиваем то число, которое сейчас и показано в списке. */
+function isSummaryActive(key) {
+  const noFilters = state.condition === 'all' && state.verification === 'all';
+  if (key === 'all') return noFilters;
+  if (['free', 'busy', 'booked'].includes(key)) {
+    return state.condition === key && state.verification === 'all';
+  }
+  return state.verification === key && state.condition === 'all';
+}
+
+function applySummaryFilter(key) {
+  const condition = document.getElementById('conditionFilter');
+  const verification = document.getElementById('verificationFilter');
+
+  if (key === 'all') { state.condition = 'all'; state.verification = 'all'; }
+  else if (['free', 'busy', 'booked'].includes(key)) { state.condition = key; state.verification = 'all'; }
+  else { state.verification = key; state.condition = 'all'; }
+
+  condition.value = state.condition;
+  verification.value = state.verification;
+  renderList(openCard);
+  renderSummary();
 }
 
 /**
@@ -234,6 +328,8 @@ async function enterApp() {
     toast(err.message, true);
     return;
   }
+  markSortedColumn();
+  renderSummary();
   renderRoute();
 }
 
@@ -270,15 +366,28 @@ function goList() {
 
 function setMassMode(enabled) {
   state.massMode = enabled;
-  document.getElementById('massActionsWrapper').style.display = state.massMode ? 'inline-flex' : 'none';
-  document.getElementById('massActionsDropdown').classList.add('hidden');
+  document.getElementById('massPanel').classList.toggle('hidden', !state.massMode);
   document.getElementById('massToggleBtn').textContent = state.massMode ? 'Отменить выбор' : 'Выбрать';
   if (state.currentUser) renderList(openCard);
+  updateMassCount();
 }
 
 function selectedIds() {
   return Array.from(document.querySelectorAll('.instrument-checkbox:checked'))
     .map((cb) => Number(cb.value));
+}
+
+/**
+ * Сколько приборов выбрано — пишем прямо в панели. Массовое списание
+ * на десяток лишних позиций отменить нельзя, поэтому число должно быть
+ * перед глазами, а не в голове.
+ */
+function updateMassCount() {
+  const node = document.getElementById('massCount');
+  if (!node) return;
+  const n = selectedIds().length;
+  node.textContent = n ? `Выбрано ${n}` : 'Ничего не выбрано';
+  node.classList.toggle('is-empty', n === 0);
 }
 
 /**
@@ -540,25 +649,6 @@ async function showRetired() {
 
 // ---------- Меню экспорта в Excel ----------
 
-function bindMassActionsMenu() {
-  const button = document.getElementById('massActionsBtn');
-  const dropdown = document.getElementById('massActionsDropdown');
-
-  button.onclick = (event) => {
-    event.stopPropagation();
-    dropdown.classList.toggle('hidden');
-  };
-
-  document.addEventListener('click', (event) => {
-    if (!dropdown.classList.contains('hidden') && !dropdown.contains(event.target) && event.target !== button) {
-      dropdown.classList.add('hidden');
-    }
-  });
-}
-
-function closeMassActionsMenu() {
-  document.getElementById('massActionsDropdown').classList.add('hidden');
-}
 
 /* ---------- Массовая выгрузка QR-кодов в ИСУ ---------- */
 

@@ -2,7 +2,7 @@ import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
 import {
   escapeAttr, escapeHtml, formData, today, displayNo,
-  verificationBadge, verificationText, verificationState,
+  verificationBadge, verificationText, verificationState, verificationInfo, fmtDate,
   statusBadge, statusText, checkTypeText,
   dateFieldLabel, validUntilLabel, documentButtonLabel,
   getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge,
@@ -17,12 +17,15 @@ export const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
 export function filteredInstruments() {
   const q = state.search.trim().toLowerCase();
 
-  return state.instruments.filter((i) => {
+  const list = state.instruments.filter((i) => {
     const matchesSearch = !q || [i.name, i.serial_number, i.model, i.inventory_no]
       .some((v) => String(v || '').toLowerCase().includes(q));
 
+    // Фильтр поверки различает пять случаев вместо прежних трёх:
+    // действует, истекает в ближайший месяц, просрочена, не требуется
+    // и «срок не заполнен» — последнее раньше сливалось с «нет поверки».
     const matchesVerification = state.verification === 'all' ||
-      verificationState(i) === state.verification;
+      verificationInfo(i).kind === state.verification;
 
     const matchesStatus = state.condition === 'all' || i.status === state.condition;
 
@@ -34,6 +37,82 @@ export function filteredInstruments() {
 
     return matchesSearch && matchesVerification && matchesStatus && matchesControlType && matchesCompany;
   });
+
+  return sortInstruments(list);
+}
+
+/**
+ * Сортировка списка. Приборы без значения всегда уходят в конец,
+ * в какую бы сторону ни сортировали: пустая строка вверху списка,
+ * отсортированного по названию, — это мусор, а не результат.
+ */
+function sortInstruments(list) {
+  const dir = state.sortDesc ? -1 : 1;
+  const key = state.sort || 'inventory_no';
+
+  const value = (i) => {
+    if (key === 'valid_until') return i.check_type === 'none' ? null : (i.valid_until || null);
+    if (key === 'status') return statusText(i.status);
+    if (key === 'control_type') return i.control_type ? controlTypeShort(i.control_type) : null;
+    if (key === 'company') return i.company_code ? companyName(i.company_code) : null;
+    if (key === 'name') return i.name;
+    return i.inventory_no || null;
+  };
+
+  return [...list].sort((a, b) => {
+    const va = value(a);
+    const vb = value(b);
+    if (va === vb) return a.id - b.id;
+    if (va === null || va === undefined || va === '') return 1;   // пустые — в конец
+    if (vb === null || vb === undefined || vb === '') return -1;
+    return dir * String(va).localeCompare(String(vb), 'ru', { numeric: true });
+  });
+}
+
+/** Ячейка колонки «Поверка»: дата сверху, сколько осталось — снизу. */
+function verificationCell(item) {
+  const v = verificationInfo(item);
+  const tone = v.tone ? ' t-' + v.tone : '';
+  if (!v.date) {
+    // «Не требуется» и «срок не заполнен» — разные вещи. Второе показываем
+    // курсивом: это не свойство прибора, а незаполненное поле.
+    const cls = v.kind === 'unset' ? 'col-empty is-unset' : 'col-empty';
+    return `<span class="${cls}">${escapeHtml(v.rest)}</span>`;
+  }
+  return `<span class="col-date${tone}">${escapeHtml(v.date)}</span>
+          <span class="col-rest${tone}">${escapeHtml(v.rest)}</span>`;
+}
+
+/** Что написано в колонке «Состояние»: у занятого — ещё и кто держит. */
+function statusCell(item) {
+  const badge = `<span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>`;
+  if (item.status === 'busy' && item.taken_by_name) {
+    return `${badge}<span class="col-who">${escapeHtml(item.taken_by_name)}</span>`;
+  }
+  if (item.status === 'booked') {
+    const who = item.booked_by_name || '';
+    const when = item.booked_for ? ' · ' + fmtDate(item.booked_for) : '';
+    return `${badge}<span class="col-who">${escapeHtml(who + when)}</span>`;
+  }
+  return badge;
+}
+
+/**
+ * Кнопка действия в строке — та, которую человек нажмёт с наибольшей
+ * вероятностью, глядя именно на этот прибор. Остальное остаётся в карточке.
+ * Кнопки нет, когда действие человеку недоступно: занятый чужой прибор
+ * возвращает тот, кто взял, или администратор.
+ */
+function rowAction(item) {
+  const admin = isAdmin();
+  const me = state.currentUser?.id;
+
+  if (item.status === 'free') return { act: 'issue', label: 'Взять', primary: true };
+  if (item.status === 'busy' && (item.taken_by === me || admin)) return { act: 'return', label: 'Вернуть' };
+  if (item.status === 'booked' && (item.booked_by === me || admin)) {
+    return { act: 'confirm-booking', label: 'Выдать' };
+  }
+  return null;
 }
 
 export function renderList(openCard) {
@@ -42,45 +121,47 @@ export function renderList(openCard) {
   const showCheckboxes = state.massMode;
 
   const html = list.length
-    ? list.map((item) => `
-      <div class="row panel${showCheckboxes ? ' row-selectable' : ''}">
+    ? list.map((item) => {
+      const action = showCheckboxes ? null : rowAction(item);
+      return `
+      <div class="row row-${escapeAttr(item.status)}${showCheckboxes ? ' row-selectable' : ''}"
+           data-row-id="${escapeAttr(item.id)}">
         ${showCheckboxes
-          ? `<input type="checkbox" class="instrument-checkbox" value="${escapeAttr(item.id)}">`
+          ? `<input type="checkbox" class="instrument-checkbox" value="${escapeAttr(item.id)}"
+                    aria-label="Выбрать ${escapeAttr(item.name)}">`
           : ''}
-        <a class="row-link" href="?id=${escapeAttr(item.id)}" data-open-id="${escapeAttr(item.id)}">
-          <div>
-            <div class="row-title">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
-            <div class="row-subtitle">
-              ${escapeHtml(item.model || 'Модель не указана')} ·
-              ${escapeHtml(item.serial_number || 'Серийный номер не указан')}
-            </div>
-          </div>
-          <div class="row-status-group">
-            <div class="row-status-col">
-              <span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>
-            </div>
-            <div class="row-status-col">
-              <span class="badge ${controlTypeBadge(item.control_type)}" title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
-            </div>
-            <div class="row-status-col">
-              <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-            </div>
-            <div class="row-status-col">
-              <span class="badge ${item.company_code ? companyBadge(item.company_code) : 'muted'}" title="Владелец: ${escapeAttr(item.company_name || 'Не привязан')}" style="max-width:140px;">
-                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">${escapeHtml(item.company_name || 'Не привязан')}</span>
-              </span>
-            </div>
-          </div>
+        <a class="row-main" href="?id=${escapeAttr(item.id)}" data-open-id="${escapeAttr(item.id)}">
+          <span class="row-title">${escapeHtml(item.name)}<i>${escapeHtml(displayNo(item))}</i></span>
+          <span class="row-subtitle">${escapeHtml(item.model || 'модель не указана')} ·
+            с/н ${escapeHtml(item.serial_number || 'не указан')}</span>
         </a>
-      </div>`).join('')
-    : '<div class="panel card">Нет приборов по выбранным условиям</div>';
+        <div class="row-cols">
+          <div class="row-col">${statusCell(item)}</div>
+          <div class="row-col">
+            <span class="badge ${controlTypeBadge(item.control_type)}"
+                  title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
+          </div>
+          <div class="row-col">${verificationCell(item)}</div>
+          <div class="row-col">
+            <span class="badge ${item.company_code ? companyBadge(item.company_code) : 'muted'}"
+                  title="${escapeAttr(companyName(item.company_code))}">${escapeHtml(companyName(item.company_code))}</span>
+          </div>
+        </div>
+        <div class="row-act">${action
+          ? `<button class="${action.primary ? 'primary' : 'secondary'}" type="button"
+                     data-row-act="${action.act}" data-row-target="${escapeAttr(item.id)}">${action.label}</button>`
+          : ''}</div>
+      </div>`;
+    }).join('')
+    : emptyStateHtml();
 
   document.getElementById('instrumentList').innerHTML = html;
+
   document.querySelectorAll('[data-open-id]').forEach((node) => {
     node.onclick = (event) => {
       event.preventDefault();
       if (showCheckboxes) {
-        // В режиме "Выбрать" клик по любому месту строки переключает
+        // В режиме «Выбрать» щелчок по любому месту строки переключает
         // галочку — не обязательно попадать точно в маленький квадратик.
         const checkbox = node.closest('.row')?.querySelector('.instrument-checkbox');
         if (checkbox) checkbox.checked = !checkbox.checked;
@@ -89,6 +170,87 @@ export function renderList(openCard) {
       openCard(node.dataset.openId);
     };
   });
+
+  document.querySelectorAll('[data-row-act]').forEach((btn) => {
+    btn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      runRowAction(btn.dataset.rowAct, Number(btn.dataset.rowTarget), btn);
+    };
+  });
+
+  bindEmptyState();
+}
+
+/**
+ * Действие из строки списка. «Взять» и «Забронировать» открывают ту же
+ * форму, что и в карточке: место использования — главное, что потом ищут
+ * в журнале, и спрашивать его надо в момент выдачи, а не «когда-нибудь».
+ */
+async function runRowAction(act, id, button) {
+  const item = state.instruments.find((i) => i.id === id);
+  if (!item) return;
+
+  if (act === 'issue') return showTakeForm(item);
+
+  const questions = {
+    return: `Вернуть «${item.name}»?`,
+    'confirm-booking': `Подтвердить бронирование и выдать «${item.name}»?`,
+  };
+  if (!confirm(questions[act])) return;
+
+  const actions = {
+    return: () => api.return(item.id),
+    'confirm-booking': () => api.confirmBooking(item.id),
+  };
+  const messages = { return: 'Прибор возвращён', 'confirm-booking': 'Прибор выдан' };
+
+  const result = await run(actions[act], { button, success: messages[act] });
+  if (result === null) return;
+  await refresh();
+  window.dispatchEvent(new Event('app:refresh-route'));
+}
+
+/**
+ * Пустой список. Раньше здесь была одна строка «Нет приборов по выбранным
+ * условиям», из которой непонятно, виноват поиск или фильтры. Теперь видно
+ * и то и другое — и чем это исправить.
+ */
+function emptyStateHtml() {
+  const q = state.search.trim();
+  const active = [];
+  if (state.condition !== 'all') active.push(`состояние «${statusText(state.condition)}»`);
+  if (state.controlType !== 'all') {
+    active.push(`классификация «${state.controlType === 'none' ? 'не указана' : controlTypeShort(state.controlType)}»`);
+  }
+  if (state.verification !== 'all') {
+    const names = { valid: 'действует', soon: 'истекает в ближайший месяц',
+      expired: 'просрочена', none: 'не требуется', unset: 'срок не заполнен' };
+    active.push(`поверка — ${names[state.verification] || state.verification}`);
+  }
+  if (state.company !== 'all') {
+    active.push(`владелец «${state.company === 'none' ? 'не привязан' : companyName(state.company)}»`);
+  }
+
+  const what = q ? `По запросу «${escapeHtml(q)}»` : 'Среди приборов';
+  const where = active.length ? ` c условиями: ${escapeHtml(active.join(', '))},` : '';
+
+  return `<div class="empty-state">
+      <div class="empty-title">Ничего не нашлось</div>
+      <div class="empty-text">${what}${where} совпадений нет.
+        Всего в базе ${state.instruments.length} приборов.</div>
+      <div class="empty-actions">
+        ${q || active.length ? '<button class="secondary" type="button" data-empty-reset>Сбросить поиск и фильтры</button>' : ''}
+        <button class="secondary" type="button" data-empty-retired>Искать среди списанных</button>
+      </div>
+    </div>`;
+}
+
+function bindEmptyState() {
+  const reset = document.querySelector('[data-empty-reset]');
+  if (reset) reset.onclick = () => window.dispatchEvent(new Event('app:reset-filters'));
+  const retired = document.querySelector('[data-empty-retired]');
+  if (retired) retired.onclick = () => window.dispatchEvent(new Event('app:show-retired'));
 }
 
 export async function renderCard(id, goList) {
@@ -120,7 +282,6 @@ export async function renderCard(id, goList) {
     if (admin) {
       main += '<button class="primary" data-restore>Восстановить</button>';
       main += '<button class="secondary" data-edit>Редактировать</button>';
-      danger += '<button class="danger" data-delete>Удалить</button>';
     }
   } else if (item.status === 'free') {
     main += '<button class="primary" data-issue>Взять</button>';
@@ -143,70 +304,228 @@ export async function renderCard(id, goList) {
     }
   }
 
-  main += '<button class="secondary" data-qr>QR</button>';
-  if (item.has_document) {
-    main += `<button class="secondary" data-document>${escapeHtml(documentButtonLabel(item.check_type))}</button>`;
-  }
-  main += '<button class="secondary" data-copy>Копировать</button>';
-  main += '<button class="secondary" data-history>История</button>';
-
+  // QR, копирование, история и «Редактировать» переехали вниз карточки
+  // (блок card-minor), а документ поверки открывается из блока поверки
+  // и из ленты фотографий. В шапке остаются только действия с самим
+  // прибором — то, ради чего карточку и открывают.
   if (admin && item.status !== 'retired') {
-    main += '<button class="secondary" data-edit>Редактировать</button>';
     danger += '<button class="danger" data-retire>Списать</button>';
+    danger += '<button class="danger" data-delete>Удалить</button>';
+  } else if (admin && item.status === 'retired') {
+    // Списанный прибор списывать уже некуда, но удалить его можно.
     danger += '<button class="danger" data-delete>Удалить</button>';
   }
 
-  // ---------- Блок «кто держит» ----------
+  // ---------- Блок «где прибор сейчас» ----------
+  // Тот же вид, что у характеристик: подпись слева, значение справа,
+  // даты — по-человечески (11.11.2026, а не 2026-11-11).
+  const kv = (label, value) => (value
+    ? `<div class="card-kv"><span class="card-k">${escapeHtml(label)}</span><span class="card-v">${escapeHtml(value)}</span></div>`
+    : '');
+
   let holder = '';
   if (item.status === 'busy') {
-    holder = `<div class="issued">
-      ${field('Кто взял', item.taken_by_name)}
-      ${field('Место', item.taken_where)}
-      ${field('Доп. данные', item.taken_extra)}
-      ${field('Дата выдачи', item.taken_at)}
-      ${item.pending_transfer_to_name ? field('Ожидает подтверждения от', item.pending_transfer_to_name) : ''}
+    holder = `<div class="card-box holder">
+      <h4>Где прибор сейчас</h4>
+      ${kv('Взял', item.taken_by_name)}
+      ${kv('Место использования', item.taken_where)}
+      ${kv('Доп. данные', item.taken_extra)}
+      ${kv('Дата выдачи', fmtDate(item.taken_at))}
+      ${kv('Ожидает подтверждения от', item.pending_transfer_to_name)}
     </div>`;
   } else if (item.status === 'booked') {
-    holder = `<div class="issued booked">
-      ${field('Забронировал', item.booked_by_name)}
-      ${field('Место', item.booked_where)}
-      ${field('Дата бронирования', item.booked_for)}
-      ${field('Доп. информация', item.booked_extra)}
+    holder = `<div class="card-box holder">
+      <h4>Бронирование</h4>
+      ${kv('Забронировал', item.booked_by_name)}
+      ${kv('Место использования', item.booked_where)}
+      ${kv('Дата бронирования', fmtDate(item.booked_for))}
+      ${kv('Доп. информация', item.booked_extra)}
     </div>`;
   } else if (item.status === 'retired') {
-    holder = `<div class="issued retired">${field('Дата списания', item.retired_at)}</div>`;
+    holder = `<div class="card-box holder">
+      <h4>Списание</h4>
+      ${kv('Дата списания', fmtDate(item.retired_at))}
+    </div>`;
   }
+
+  const v = verificationInfo(item);
+  const vTone = v.tone ? ' v-' + v.tone : '';
+
+  // Незаполненные поля собираем в одну строку вместо столбца прочерков:
+  // одиннадцать «—» подряд не сообщают ничего, кроме того, что карточку не вели.
+  const missing = [
+    [!item.inventory_no, 'инвентарный номер'],
+    [!item.serial_number, 'серийный номер'],
+    [!item.model, 'модель'],
+    [!item.control_type, 'классификация'],
+    [!item.company_code, 'владелец'],
+    [!item.verification_date && item.check_type !== 'none', dateFieldLabel(item.check_type).toLowerCase()],
+    [!item.valid_until && item.check_type !== 'none', validUntilLabel(item.check_type).toLowerCase()],
+    [!item.comment, 'комментарий'],
+  ].filter(([empty]) => empty).map(([, name]) => name);
+
+  const facts = [
+    ['Инвентарный номер', item.inventory_no],
+    ['Модель', item.model],
+    ['Серийный номер', item.serial_number],
+    ['Классификация', item.control_type ? controlTypeFull(item.control_type) : ''],
+    ['Владелец', item.company_code ? companyName(item.company_code) : ''],
+    ['Метрологический контроль', checkTypeText(item.check_type)],
+    [dateFieldLabel(item.check_type), item.verification_date ? fmtDate(item.verification_date) : ''],
+    ['Комментарий', item.comment],
+  ].filter(([, value]) => value);
 
   screen.innerHTML = `
-    <article class="panel card">
-      ${item.has_photo ? '<div class="photo-box" id="photoBox">Загрузка фото...</div>' : ''}
-      <h1>${escapeHtml(item.name)}</h1>
-      <div class="card-grid">
-        ${field('Номер', displayNo(item))}
-        ${field('Серийный номер', item.serial_number)}
-        ${field('Модель', item.model)}
-        ${field('Тип метрологического контроля', checkTypeText(item.check_type))}
-        ${field('Классификация', controlTypeFull(item.control_type))}
-        ${field('Владелец', companyName(item.company_code))}
-        ${field(dateFieldLabel(item.check_type), item.verification_date)}
-        ${field(validUntilLabel(item.check_type), item.valid_until)}
+    <article class="card-screen">
+      <div class="card-gallery">
+        <div class="card-photo" id="cardPhoto">
+          ${item.has_photo ? 'Загрузка фото...' : 'Фотографии нет'}
+        </div>
+        ${item.has_photo || item.has_document ? `
+          <div class="card-strip">
+            ${item.has_photo ? '<button class="card-thumb is-on" type="button" data-show="photo">Прибор</button>' : ''}
+            ${item.has_document
+              ? `<button class="card-thumb" type="button" data-show="document">${escapeHtml(documentButtonLabel(item.check_type))}</button>`
+              : ''}
+          </div>` : ''}
+        <div class="card-qr">
+          <div class="card-qr-box" id="cardQrBox"></div>
+          <div class="card-qr-text">
+            <b>QR-код прибора</b>
+            ${escapeHtml(displayNo(item))} · наклеивается на корпус
+          </div>
+          <button class="secondary" type="button" data-qr>Скачать</button>
+        </div>
       </div>
-      ${item.comment ? field('Комментарий', item.comment) : ''}
-      ${holder}
-      <div class="actions">${main}</div>
-      <div class="actions">${danger}<span class="spacer"></span>
-        <button class="secondary" data-back>К списку</button></div>
+
+      <div class="card-main">
+        <div class="card-head">
+          <div class="card-head-text">
+            <h1>${escapeHtml(item.name)}</h1>
+            <div class="card-ids">
+              ${escapeHtml(displayNo(item))}${item.model ? ' · модель ' + escapeHtml(item.model) : ''}${item.serial_number ? ' · серийный номер ' + escapeHtml(item.serial_number) : ''}
+            </div>
+            <div class="card-state">${cardStateChips(item)}</div>
+          </div>
+          <div class="card-actions">${main}</div>
+        </div>
+
+        <div class="card-verif${vTone}">
+          ${v.date ? `<div class="card-verif-date">${escapeHtml(v.date)}</div>` : ''}
+          <div class="card-verif-text">
+            <b>${escapeHtml(verifHeadline(item, v))}</b>
+            ${item.verification_date ? 'Предыдущая — ' + escapeHtml(fmtDate(item.verification_date)) : 'Дата предыдущей не заполнена'}
+          </div>
+          ${item.has_document
+            ? `<button class="secondary" type="button" data-document>Открыть ${escapeHtml(documentButtonLabel(item.check_type).toLowerCase())}</button>`
+            : ''}
+        </div>
+
+        ${holder}
+
+        <div class="card-box">
+          <h4>Характеристики</h4>
+          ${facts.map(([label, value]) => `
+            <div class="card-kv">
+              <span class="card-k">${escapeHtml(label)}</span>
+              <span class="card-v">${escapeHtml(value)}</span>
+            </div>`).join('')}
+          ${missing.length
+            ? `<div class="card-missing">Не заполнено: <b>${escapeHtml(missing.join(', '))}</b>.${
+                admin ? ' Поправить можно в «Редактировать».' : ''}</div>`
+            : ''}
+        </div>
+
+        <div class="card-minor">
+          <button class="secondary" type="button" data-history>История прибора</button>
+          <button class="secondary" type="button" data-copy>Копировать данные</button>
+          ${admin && item.status !== 'retired' ? '<button class="secondary" type="button" data-edit>Редактировать</button>' : ''}
+          <button class="secondary" type="button" data-back>К списку</button>
+        </div>
+
+        ${danger ? `
+          <div class="card-danger">
+            <span class="card-danger-note">Действия администратора. Списание и удаление отменить нельзя.</span>
+            ${danger}
+          </div>` : ''}
+      </div>
     </article>`;
 
-  // Фото подгружаем отдельным запросом — оно не тормозит отрисовку карточки
+  // Фото подгружаем отдельным запросом — оно не тормозит отрисовку карточки.
   if (item.has_photo) {
     api.photoUrl(item.id).then((url) => {
-      const box = document.getElementById('photoBox');
+      const box = document.getElementById('cardPhoto');
       if (box && url) box.innerHTML = `<img src="${url}" alt="Фото прибора">`;
+      else if (box) box.textContent = 'Фото не открылось';
     });
   }
+  renderCardQr(item);
+  bindGallery(item);
 
   bindCardActions(item, goList);
+}
+
+
+/** Чипы состояния в шапке карточки: где прибор и чей он. */
+function cardStateChips(item) {
+  const chips = [];
+  if (item.status === 'busy') {
+    chips.push(`<span class="card-chip busy">На руках у ${escapeHtml(item.taken_by_name || 'сотрудника')}${
+      item.taken_at ? ' с ' + escapeHtml(fmtDate(item.taken_at)) : ''}</span>`);
+  } else if (item.status === 'booked') {
+    chips.push(`<span class="card-chip warn">Бронь: ${escapeHtml(item.booked_by_name || '')}${
+      item.booked_for ? ' на ' + escapeHtml(fmtDate(item.booked_for)) : ''}</span>`);
+  } else if (item.status === 'retired') {
+    chips.push(`<span class="card-chip">Списан${item.retired_at ? ' ' + escapeHtml(fmtDate(item.retired_at)) : ''}</span>`);
+  } else {
+    chips.push('<span class="card-chip free">Свободен</span>');
+  }
+  if (item.control_type) chips.push(`<span class="card-chip">${escapeHtml(controlTypeFull(item.control_type))}</span>`);
+  if (item.company_code) chips.push(`<span class="card-chip">${escapeHtml(companyName(item.company_code))}</span>`);
+  return chips.join('');
+}
+
+/** Заголовок блока поверки — словами, а не «есть/нет». */
+function verifHeadline(item, v) {
+  const what = checkTypeText(item.check_type).toLowerCase();
+  if (v.kind === 'none') return 'Метрологический контроль не требуется';
+  if (v.kind === 'unset') return `Срок действия (${what}) не заполнен`;
+  if (v.kind === 'expired') return `${checkTypeText(item.check_type)} просрочена: ${v.rest.replace('просрочена ', '')}`;
+  if (v.kind === 'soon') return `${checkTypeText(item.check_type)} заканчивается: ${v.rest}`;
+  return `${checkTypeText(item.check_type)} действует, ${v.rest}`;
+}
+
+/** Переключение «фото прибора ↔ скан документа» без ухода со страницы. */
+function bindGallery(item) {
+  const box = document.getElementById('cardPhoto');
+  document.querySelectorAll('[data-show]').forEach((btn) => {
+    btn.onclick = async () => {
+      document.querySelectorAll('[data-show]').forEach((b) => b.classList.toggle('is-on', b === btn));
+      box.textContent = 'Загрузка...';
+      if (btn.dataset.show === 'photo') {
+        const url = await api.photoUrl(item.id);
+        box.innerHTML = url ? `<img src="${url}" alt="Фото прибора">` : 'Фото не открылось';
+        return;
+      }
+      const doc = await api.documentUrl(item.id);
+      if (!doc) { box.textContent = 'Документ не открылся'; return; }
+      box.innerHTML = doc.contentType.startsWith('image/')
+        ? `<img src="${doc.url}" alt="Документ">`
+        : `<a class="card-doc-link" href="${doc.url}" target="_blank" rel="noopener">Открыть документ</a>`;
+    };
+  });
+}
+
+/** Маленький QR прямо в карточке — его печатают на наклейку. */
+function renderCardQr(item) {
+  const box = document.getElementById('cardQrBox');
+  if (!box || typeof QRCode === 'undefined') return;
+  box.innerHTML = '';
+  new QRCode(box, {
+    text: `${location.origin}${location.pathname}?id=${item.id}`,
+    width: 84, height: 84,
+    correctLevel: QRCode.CorrectLevel.M,
+  });
 }
 
 function bindCardActions(item, goList) {

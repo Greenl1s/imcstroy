@@ -10,7 +10,13 @@ export const state = {
   verification: 'all',
   condition: 'all',
   controlType: 'all',
-  massMode: false
+  company: 'all',
+  massMode: false,
+
+  // Сортировка. По умолчанию — по инвентарному номеру: так список
+  // читается как журнал, и конкретный прибор находится глазами.
+  sort: 'inventory_no',
+  sortDesc: false
 };
 
 /**

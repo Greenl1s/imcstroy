@@ -39,6 +39,69 @@ export function verificationState(item) {
   return date >= new Date() ? 'valid' : 'expired';
 }
 
+/**
+ * Всё про срок поверки одной функцией: дата, сколько дней осталось,
+ * как это назвать словами и каким цветом показать.
+ *
+ * Раньше в списке стояло «ЕСТЬ» или «НЕТ». Но важно не «есть ли поверка»,
+ * а когда она кончается: прибор с поверкой до послезавтра и прибор
+ * с поверкой до следующего года — это разные приборы.
+ *
+ * Разделяем два пустых случая, которые раньше выглядели одинаково:
+ *   «Не требуется»      — так задано в карточке (check_type = none);
+ *   «Срок не заполнен»  — просто забыли внести дату, это дыра в данных.
+ */
+export const VERIFICATION_SOON_DAYS = 30;
+
+/** Сколько дней от сегодня (по Москве) до даты. Вчера = −1, сегодня = 0. */
+export function daysUntil(dateText, from = today()) {
+  const a = Date.parse(`${String(dateText).slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${from}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((a - b) / 86400000);
+}
+
+/** 1 день / 2 дня / 5 дней — иначе получается «осталось 3 день». */
+export function plural(n, one, few, many) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return `${n} ${many}`;
+  if (last > 1 && last < 5) return `${n} ${few}`;
+  if (last === 1) return `${n} ${one}`;
+  return `${n} ${many}`;
+}
+
+/** Дата для человека: 2026-11-11 → 11.11.2026. Пустое остаётся пустым. */
+export function fmtDate(value) {
+  const s = String(value ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const [y, m, d] = s.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+export function verificationInfo(item) {
+  if (item?.check_type === 'none') {
+    return { kind: 'none', tone: '', date: '', rest: 'не требуется', days: null };
+  }
+  if (!item?.valid_until) {
+    return { kind: 'unset', tone: '', date: '', rest: 'срок не заполнен', days: null };
+  }
+  const days = daysUntil(item.valid_until);
+  const date = fmtDate(item.valid_until);
+  if (days === null) return { kind: 'unset', tone: '', date: '', rest: 'срок не заполнен', days: null };
+  if (days < 0) {
+    return { kind: 'expired', tone: 'bad', date, days,
+      rest: `просрочена ${plural(Math.abs(days), 'день', 'дня', 'дней')}` };
+  }
+  if (days === 0) return { kind: 'soon', tone: 'warn', date, days, rest: 'заканчивается сегодня' };
+  if (days <= VERIFICATION_SOON_DAYS) {
+    return { kind: 'soon', tone: 'warn', date, days,
+      rest: `осталось ${plural(days, 'день', 'дня', 'дней')}` };
+  }
+  return { kind: 'valid', tone: '', date, days,
+    rest: `осталось ${plural(days, 'день', 'дня', 'дней')}` };
+}
+
 export const verificationText = (item) =>
   ({ valid: 'Есть', expired: 'Нет', none: 'Не требуется' })[verificationState(item)];
 
