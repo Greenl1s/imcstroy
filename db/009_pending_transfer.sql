@@ -16,7 +16,17 @@ ALTER TABLE instruments
 -- Пересоздаём представление: сохраняем ВСЕ существующие колонки в том же
 -- порядке (иначе CREATE OR REPLACE VIEW откажется работать), новые поля —
 -- строго в конце. Заодно возвращаем booked_where, которого тут не хватало.
-CREATE OR REPLACE VIEW instruments_view AS
+-- ВНИМАНИЕ. В прежней версии этого файла представление ссылалось на
+-- колонку document_url. Её удаляет 002_add_document_photo.sql (ссылку на
+-- документ заменило фото документа), поэтому при развёртывании с нуля
+-- файл падал: такой колонки уже нет. Строка убрана.
+-- Пересоздаём представление целиком (DROP + CREATE), а не через
+-- CREATE OR REPLACE: тот требует, чтобы прежние колонки совпадали по
+-- именам и порядку, а на пустой базе к этому моменту представление уже
+-- другое (003_add_control_type добавил control_type в середину).
+-- Данных в представлении нет, пересоздать его ничего не стоит.
+DROP VIEW IF EXISTS instruments_view;
+CREATE VIEW instruments_view AS
  SELECT i.id,
     i.inventory_no,
     i.name,
@@ -25,7 +35,6 @@ CREATE OR REPLACE VIEW instruments_view AS
     i.check_type,
     i.verification_date,
     i.valid_until,
-    i.document_url,
     i.comment,
     i.status,
     i.taken_by,

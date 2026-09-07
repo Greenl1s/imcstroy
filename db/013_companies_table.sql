@@ -14,6 +14,10 @@ ALTER TABLE instruments ADD COLUMN IF NOT EXISTS company_code TEXT REFERENCES co
 
 -- Только добавляем колонки в конец — старые не трогаем, поэтому
 -- CREATE OR REPLACE VIEW проходит без необходимости удалять представление.
+-- ВНИМАНИЕ. В прежней версии этого файла представление ссылалось на
+-- колонку document_url. Её удаляет 002_add_document_photo.sql (ссылку на
+-- документ заменило фото документа), поэтому при развёртывании с нуля
+-- файл падал: такой колонки уже нет. Строка убрана.
 CREATE OR REPLACE VIEW instruments_view AS
  SELECT i.id,
     i.inventory_no,
@@ -23,7 +27,6 @@ CREATE OR REPLACE VIEW instruments_view AS
     i.check_type,
     i.verification_date,
     i.valid_until,
-    i.document_url,
     i.comment,
     i.status,
     i.taken_by,

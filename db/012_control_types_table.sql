@@ -45,6 +45,10 @@ DROP TYPE IF EXISTS control_type;
 
 -- Пересоздаём представление — структура ровно та же, что была,
 -- просто control_type теперь обычный текст, а не enum.
+-- ВНИМАНИЕ. В прежней версии этого файла представление ссылалось на
+-- колонку document_url. Её удаляет 002_add_document_photo.sql (ссылку на
+-- документ заменило фото документа), поэтому при развёртывании с нуля
+-- файл падал: такой колонки уже нет. Строка убрана.
 CREATE VIEW instruments_view AS
  SELECT i.id,
     i.inventory_no,
@@ -54,7 +58,6 @@ CREATE VIEW instruments_view AS
     i.check_type,
     i.verification_date,
     i.valid_until,
-    i.document_url,
     i.comment,
     i.status,
     i.taken_by,

@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS cases (
   archived_at TIMESTAMPTZ
 );
 
+-- Поля журнала регистрации. Они же добавляются файлом 013_journal_fields —
+-- продублированы здесь намеренно. Файлы выполняются по алфавиту, поэтому
+-- на ПУСТОЙ базе 013 идёт раньше 014, когда таблицы cases ещё нет. Обе
+-- команды идемпотентны, так что порядок больше не имеет значения.
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS organization TEXT;   -- "Структура" — какое юрлицо ведёт проект
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS party1 TEXT;         -- "Сторона 1"
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS party2 TEXT;         -- "Сторона 2"
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS judge_name TEXT;     -- "Судья"
+
 CREATE INDEX IF NOT EXISTS idx_cases_stage ON cases(stage);
 CREATE INDEX IF NOT EXISTS idx_cases_type ON cases(type);
 CREATE INDEX IF NOT EXISTS idx_cases_manager ON cases(manager_id);
