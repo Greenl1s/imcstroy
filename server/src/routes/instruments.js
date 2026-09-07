@@ -77,6 +77,32 @@ instruments.get('/:id/history', async (req, res) => {
   res.json(rows);
 });
 
+/**
+ * В какие комплекты входит этот прибор — для блока в карточке.
+ * Прибор может входить в сколько угодно комплектов сразу: физически
+ * он один, поэтому взятый в одном комплекте в остальных покажется
+ * занятым. Здесь просто список, без проверок.
+ */
+instruments.get('/:id/kits', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT k.id, k.name, kv.total
+         FROM kit_items ki
+         JOIN kits k       ON k.id = ki.kit_id
+         JOIN kits_view kv ON kv.id = k.id
+        WHERE ki.instrument_id = $1
+        ORDER BY lower(k.name)`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    // 42P01 = таблицы ещё нет: код обновили, миграцию 032 не применили.
+    // Карточка прибора из-за этого падать не должна — просто нет комплектов.
+    if (err.code === '42P01') return res.json([]);
+    throw err;
+  }
+});
+
 // ---------- Фото ----------
 
 /**
