@@ -21,7 +21,8 @@ const { organizations: organizationRoutes } = require("./organizations");
 const trash = require("./trash");
 const caseLifecycle = require("./caseLifecycle");
 const events = require("./events");
-const { columnForPath, requireColumnAccess, requireToolsAccess } = require("./permissions");
+const permissions = require("./permissions");
+const { columnForPath, requireColumnAccess, requireToolsAccess } = permissions;
 
 const app = express();
 
@@ -1076,17 +1077,35 @@ app.get("/internal/raw", (req, res) => {
 });
 
 // То же самое, но для ДРУГИХ наших сервисов (например, "Учёт приборов"),
-// которым нужно один раз "привязать" файл к своей записи и потом показывать
-// его сколько угодно раз, без входа пользователя в файловый менеджер.
-// Токен не истекает — в отличие от /internal/raw, который живёт только
-// на время одной сессии редактирования в OnlyOffice.
-app.get("/internal/linked-file", (req, res) => {
+// которым нужно показать файл, привязанный к их собственной записи —
+// фото прибора или скан документа поверки.
+//
+// Здесь проверяются ДВЕ вещи, и обе обязательны:
+//   1) подпись токена — что запрос действительно от нашего сервиса;
+//   2) права того ЧЕЛОВЕКА, чей id указан в токене, на этот путь.
+//
+// Раньше проверялась только подпись. Из-за этого любой вошедший в "Учёт
+// приборов" видел содержимое привязанного файла, даже если в ИСУ ему эту
+// папку не показывают: права на папки "Дел" обходились через соседний сайт.
+app.get("/internal/linked-file", async (req, res) => {
+  let payload;
   try {
-    fileLink.verifyFileLinkToken(req.query.token, req.query.path);
+    payload = fileLink.verifyFileLinkToken(req.query.token, req.query.path);
+  } catch (err) {
+    return res.status(403).json({ message: "Недействительный токен" });
+  }
+
+  try {
+    if (!(await permissions.canUserReadPath(payload.viewerId, req.query.path))) {
+      // Тот же ответ, что и при обычном отказе в доступе: наличие или
+      // отсутствие файла по чужому пути так не выяснить.
+      return res.status(403).json({ message: "Нет доступа к этому файлу" });
+    }
     const abs = filesLib.safeResolve(req.query.path);
     res.sendFile(abs);
   } catch (err) {
-    res.status(403).json({ message: "Недействительный токен" });
+    console.error("Не удалось отдать привязанный файл:", err);
+    res.status(403).json({ message: "Нет доступа к этому файлу" });
   }
 });
 

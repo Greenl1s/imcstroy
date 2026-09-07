@@ -1,4 +1,5 @@
 const folderAccess = require("./folderAccess");
+const db = require("./db");
 
 // Определяет, к какому "разделу" (колонке) относится путь.
 function columnForPath(relPath) {
@@ -71,4 +72,40 @@ function requireToolsAccess(req, res, next) {
   return res.status(403).json({ message: "Нет доступа к разделу «Инструменты»" });
 }
 
-module.exports = { columnForPath, requireColumnAccess, requireToolsAccess };
+/**
+ * Может ли ЭТОТ человек прочитать файл по этому пути.
+ *
+ * Те же правила, что и в requireColumnAccess без права записи, но не
+ * как middleware, а обычной проверкой: нужна там, где пользователь не
+ * приходит со своей cookie, а его id передан другим нашим сервисом
+ * (см. /internal/linked-file — привязанные фото и документы приборов
+ * в "Учёте приборов").
+ *
+ * Пользователя ищем в базе сами: доверять роли, присланной снаружи,
+ * нельзя — иначе проверка ничего не проверяет.
+ */
+async function canUserReadPath(userId, relPath) {
+  const { rows } = await db.query("SELECT id, role FROM users WHERE id = $1", [Number(userId)]);
+  if (!rows.length) return false;
+  const user = rows[0];
+  if (user.role === "admin") return true;
+
+  const col = columnForPath(relPath);
+  if (!col) return false;
+
+  const { rows: permRows } = await db.query(
+    "SELECT can_db, can_cases FROM fm_permissions WHERE user_id = $1", [user.id]
+  );
+  const perms = permRows[0] || { can_db: false, can_cases: false };
+
+  if (col === "db") return Boolean(perms.can_db);
+
+  if (col === "cases") {
+    if (!perms.can_cases) return false;
+    const rules = await folderAccess.getUserRules(user.id);
+    return folderAccess.canList(rules, relPath);
+  }
+  return false;
+}
+
+module.exports = { columnForPath, requireColumnAccess, requireToolsAccess, canUserReadPath };
