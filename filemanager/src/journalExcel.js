@@ -83,6 +83,24 @@ function buildSheet(workbook, sheetName, rows) {
 }
 
 /**
+ * Собирает книгу из готовых листов: [{ name, rows }].
+ *
+ * Вынесено отдельно, потому что книга нужна в двух местах: файл на диске,
+ * который пересобирается сам после каждого изменения, и выгрузка с экрана
+ * журнала. Раз колонки, заголовки и оформление одни и те же, то и код
+ * должен быть один — иначе выгрузка с экрана и файл в папке однажды
+ * разъедутся, и никто не поймёт, какой из них правильный.
+ */
+function buildWorkbook(sheets) {
+  const workbook = new ExcelJS.Workbook();
+  for (const { name, rows } of sheets) buildSheet(workbook, name, rows);
+  return workbook;
+}
+
+/** Разделение на листы — то же правило, что и в интерфейсе журнала. */
+const isArchive = (row) => row.is_cancelled || row.stage === "done";
+
+/**
  * Пересобирает журнал регистрации с нуля из текущего состояния базы —
  * вызывается после любого изменения проекта (создание, смена стадии,
  * отмена, редактирование), поэтому файл всегда отражает актуальные
@@ -97,12 +115,10 @@ async function regenerateJournal() {
     ORDER BY c.created_at ASC
   `);
 
-  const current = rows.filter((r) => !r.is_cancelled && r.stage !== "done");
-  const archive = rows.filter((r) => r.is_cancelled || r.stage === "done");
-
-  const workbook = new ExcelJS.Workbook();
-  buildSheet(workbook, "ТЕКУЩИЕ", current);
-  buildSheet(workbook, "АРХИВ", archive);
+  const workbook = buildWorkbook([
+    { name: "ТЕКУЩИЕ", rows: rows.filter((r) => !isArchive(r)) },
+    { name: "АРХИВ", rows: rows.filter(isArchive) },
+  ]);
 
   const dirAbs = files.absolutePathFor(JOURNAL_DIR);
   await require("fs").promises.mkdir(dirAbs, { recursive: true });
@@ -110,4 +126,7 @@ async function regenerateJournal() {
   await workbook.xlsx.writeFile(fileAbs);
 }
 
-module.exports = { regenerateJournal, JOURNAL_PATH, JOURNAL_DIR };
+module.exports = {
+  regenerateJournal, buildWorkbook, isArchive, HEADERS, COURT_GROUP_HEADERS,
+  JOURNAL_PATH, JOURNAL_DIR,
+};

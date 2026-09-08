@@ -408,6 +408,142 @@ cases.get("/registry", async (req, res) => {
   }
 });
 
+/* ---------------- Журнал регистрации ----------------
+   Тот же журнал, что лежит в «Дела / Журнал регистрации» файлом Excel,
+   только экраном: с фильтрами, поиском и правкой прямо в ячейке.
+
+   Синхронизировать его ни с чем не нужно — и это главное решение здесь.
+   Экран читает ту же таблицу cases, из которой собирается сам файл.
+   Значит экран, «Список дел», карточка проекта и Excel — четыре вида на
+   одни и те же данные, и разойтись им не с чем. Отдельного хранилища
+   «журнала» нет и заводить его нельзя: оно неизбежно отстало бы.
+
+   Правка идёт через обычный PATCH /api/cases/:id — тот же, которым
+   правят карточку. Поэтому изменение из журнала так же уходит в Planfix,
+   так же пересобирает файл и так же попадает в историю событием
+   case_edit. Второго события «изменил журнал» не заводим: одно изменение
+   не должно попадать в историю дважды. */
+
+/** Поля журнала. Порядок тот же, что в Excel, — так их и читают. */
+const JOURNAL_FIELDS = `
+  c.id, c.stage, c.is_cancelled, c.organization, c.name, c.type, c.expertise_type,
+  c.year, c.description, c.manager_id, c.experts, c.court_or_customer, c.case_number,
+  c.party1, c.party2, c.judge_name, c.folder_path, c.planfix_id, c.updated_at
+`;
+
+/**
+ * Оставляет только те проекты, которые человеку вообще видно, и
+ * помечает, где он может менять.
+ *
+ * Ровно та же логика, что в «Списке дел»: доступ к проекту — это доступ
+ * к его папке. Иначе журнал стал бы дырой в правах, через которую видно
+ * всё, что закрыто в файлах.
+ */
+async function visibleForUser(user, rows) {
+  if (user.role === "admin") return rows.map((r) => ({ ...r, can_write: true }));
+  if (!user.can_cases) return [];
+  const rules = await folderAccess.getUserRules(user.id);
+  return rows
+    .filter((r) => folderAccess.resolveAccess(rules, r.folder_path))
+    .map((r) => ({ ...r, can_write: folderAccess.resolveAccess(rules, r.folder_path) === "write" }));
+}
+
+async function journalRows(user) {
+  const { rows } = await db.query(
+    `SELECT ${JOURNAL_FIELDS}, u.username AS manager_name
+       FROM cases c
+       LEFT JOIN users u ON u.id = c.manager_id
+      WHERE c.deleted_at IS NULL
+      ORDER BY c.created_at ASC`
+  );
+  return visibleForUser(user, rows);
+}
+
+/**
+ * Весь журнал одним ответом.
+ *
+ * Пагинации нет намеренно: проектов десятки, а не десятки тысяч, и
+ * фильтровать полсотни строк в браузере быстрее, чем ходить за каждым
+ * отбором на сервер. Если журнал вырастет на порядок — здесь и появится
+ * постраничность, а интерфейс менять не придётся.
+ *
+ * Заодно отдаём готовые списки для фильтров: собирать их в браузере из
+ * тех же строк можно, но тогда в списке «Руководитель» не будет тех,
+ * у кого сейчас нет ни одного проекта, и человек решит, что их удалили.
+ */
+cases.get("/journal", async (req, res) => {
+  try {
+    const rows = await journalRows(req.user);
+    const { rows: managers } = await db.query(
+      "SELECT id, username FROM users ORDER BY lower(username)"
+    );
+    res.json({
+      rows,
+      managers,
+      organizations: uniqueSorted(rows.map((r) => r.organization)),
+      expertise_types: uniqueSorted(rows.map((r) => r.expertise_type)),
+      years: uniqueSorted(rows.map((r) => r.year)).sort((a, b) => String(b).localeCompare(String(a))),
+    });
+  } catch (err) {
+    console.error("Не удалось получить журнал регистрации:", err);
+    res.status(500).json({ message: "Не удалось получить журнал: " + err.message });
+  }
+});
+
+/** Непустые значения без повторов, по алфавиту — для выпадающих списков. */
+function uniqueSorted(values) {
+  return [...new Set(values.map((v) => (v == null ? "" : String(v).trim())).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/**
+ * Выгрузка в Excel.
+ *
+ * Без ids — весь журнал двумя листами, как файл в папке.
+ * С ids — одна выборка одним листом, в том порядке, в каком строки
+ * стоят на экране: человек отобрал фильтрами и отсортировал, и в файле
+ * должно быть ровно то же, иначе выгрузка не отвечает на вопрос,
+ * ради которого её делали.
+ *
+ * В обоих случаях выгружается только то, что человеку видно. Файл
+ * в папке этого не умеет — он один на всех; здесь же права соблюдаются.
+ */
+cases.post("/journal/export", async (req, res) => {
+  try {
+    const all = await journalRows(req.user);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : null;
+
+    let sheets;
+    let fileName;
+    if (ids && ids.length) {
+      const byId = new Map(all.map((r) => [r.id, r]));
+      const picked = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (!picked.length) return res.status(400).json({ message: "Нечего выгружать" });
+      sheets = [{ name: "ВЫБОРКА", rows: picked }];
+      fileName = "Журнал регистрации (выборка).xlsx";
+    } else {
+      sheets = [
+        { name: "ТЕКУЩИЕ", rows: all.filter((r) => !journalExcel.isArchive(r)) },
+        { name: "АРХИВ", rows: all.filter(journalExcel.isArchive) },
+      ];
+      fileName = "Журнал регистрации.xlsx";
+    }
+
+    const workbook = journalExcel.buildWorkbook(sheets);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    // Имя файла с кириллицей — только через filename*=UTF-8'': обычный
+    // filename= браузеры читают как latin1 и превращают его в кракозябры.
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition",
+      `attachment; filename="journal.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error("Не удалось выгрузить журнал:", err);
+    res.status(500).json({ message: "Не удалось выгрузить журнал: " + err.message });
+  }
+});
+
 /* ---------------- Задачи всех проектов (отдельная страница) ---------------- */
 
 const folderAccessLib = require("./folderAccess");
