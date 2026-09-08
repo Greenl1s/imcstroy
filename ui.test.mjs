@@ -348,6 +348,18 @@ check('и поле поиска очищено', (await page.inputValue('#search
    8. Карточка прибора.
    ============================================================ */
 
+// Файловый менеджер на стенде живёт в /tmp/fmdata — кладём туда файл
+// напрямую: привязка документа проверяет, что файл существует.
+const fsp = (await import('node:fs/promises'));
+const mkdirIn = (dir) => fsp.mkdir(dir, { recursive: true });
+const writeIn = (file, text) => fsp.writeFile(file, text);
+
+const expiredId = ((await api('/api/instruments', { token: adminToken })).data || [])
+  .find((i) => i.inventory_no === 'ИМС-0231')?.id;
+// Документ мог остаться от прошлого прогона — начинаем с чистого
+// состояния, иначе проверка «без документа» зависела бы от порядка.
+await api(`/api/instruments/${expiredId}/document`, { method: 'DELETE', token: adminToken });
+
 await page.click('.list .row:has-text("Дефектоскоп УД2В-П46") [data-open-id]');
 await page.waitForSelector('.card-screen', { timeout: 8000 });
 await sleep(800);
@@ -356,7 +368,8 @@ const card = await page.locator('.card-screen').innerText();
 check('в карточке сразу видно состояние прибора',
   /На руках у/.test(card), card.split('\n').slice(0, 6).join(' | '));
 check('поверка показана датой и остатком, а не «есть/нет»',
-  /26\.08\.2026/.test(card) && /просрочена/.test(card));
+  /26\.08\.2026/.test(card) && /просрочено на/i.test(card),
+  (card.match(/.*[Пп]росрочено.*/) || [''])[0]);
 check('просроченная поверка выделена цветом',
   await page.locator('.card-verif.v-bad').isVisible());
 check('есть блок «Где прибор сейчас» с местом использования',
@@ -366,14 +379,59 @@ check('незаполненные поля собраны в одну строк
   /Не заполнено:/.test(card), (card.match(/Не заполнено:.*/) || [''])[0]);
 check('прочерков в характеристиках нет',
   !/^—$/m.test(card));
+// Документа у этого прибора нет — полоса поверки остаётся обычным
+// блоком. Делать её похожей на кнопку, когда открывать нечего, значит
+// обещать то, чего не будет.
+check('без документа полоса поверки не нажимается',
+  (await page.locator('.card-verif').evaluate((e) => e.tagName)) === 'DIV' &&
+  /не приложен/.test(await page.locator('.card-verif').innerText()),
+  (await page.locator('.card-verif').innerText()).replace(/\n/g, ' | '));
+
+// А с документом вся полоса — кнопка: отдельная кнопка в её углу делила
+// надвое то, что для человека и так одно целое.
+{
+  const fmFile = '/База данных/Оборудование/Свидетельство-проверка.pdf';
+  await mkdirIn('/tmp/fmdata/База данных/Оборудование');
+  await writeIn(`/tmp/fmdata${fmFile}`, '%PDF-1.4');
+  const linked = await api(`/api/instruments/${expiredId}/document/link`, {
+    method: 'PUT', token: adminToken, body: { path: fmFile },
+  });
+  check('документ привязан к прибору', linked.status === 200, String(linked.status));
+
+  await page.reload();
+  await page.waitForSelector('.card-verif', { timeout: 10000 });
+  await sleep(700);
+  check('с документом вся полоса поверки становится кнопкой',
+    (await page.locator('.card-verif').evaluate((e) => e.tagName)) === 'BUTTON');
+  check('и на ней написано, что она делает',
+    await page.locator('.card-verif-go:has-text("Открыть")').isVisible());
+  check('отдельной кнопки «Открыть поверку» больше нет',
+    (await page.locator('.card-verif button').count()) === 0);
+}
+
+// Кнопки под карточкой должны быть заметны: раньше это были одинаковые
+// серые прямоугольники, и «Редактировать» терялось между ними.
+check('под карточкой три заметных действия со значками',
+  (await page.locator('.card-act').count()) === 3 &&
+  (await page.locator('.card-act svg').count()) === 3,
+  (await page.locator('.card-minor').innerText()).replace(/\n/g, ' | '));
+check('главное из них — «Редактировать» — выделено',
+  await page.locator('.card-act-main:has-text("Редактировать")').isVisible());
+check('«К списку» отсюда убрана — она теперь в шапке',
+  (await page.locator('.card-minor [data-back]').count()) === 0);
+
 check('«Списать» и «Удалить» отделены в свою рамку',
   (await page.locator('.card-danger button').count()) === 2);
 check('и рядом сказано, что отменить их нельзя',
   /отменить нельзя/.test(await page.locator('.card-danger').innerText()));
 
-await page.click('.card-minor [data-back]');
+// Выход из карточки — рядом с выходом в ИСУ, а не в хвосте списка
+// действий над прибором.
+check('«К списку» появилась в шапке', await page.locator('#backToListButton').isVisible());
+await page.click('#backToListButton');
 await sleep(700);
-check('«К списку» возвращает на список', (await rows().count()) > 0);
+check('и возвращает на список', (await rows().count()) > 0);
+check('на списке её уже нет', !(await page.locator('#backToListButton').isVisible()));
 
 /* ============================================================
    9. Телефон: фильтры в две колонки, действие во всю ширину.
