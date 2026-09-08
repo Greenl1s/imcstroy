@@ -623,10 +623,22 @@ function bindCardActions(item, goList) {
  * Когда пользователь кликает по файлу, окно шлёт нам сообщение и закрывается.
  * onPicked(path, name) вызывается ровно один раз с выбранным файлом.
  */
-function openFilemanagerPicker(onPicked) {
+/**
+ * Открывает окно выбора файла в файловом менеджере.
+ *
+ * startPath — папка, с которой окно откроется. Раньше выбор всегда
+ * начинался с корня, и до фотографии прибора надо было доходить руками
+ * через «Оборудование → классификация → прибор → Изображения». Теперь
+ * вызывающая сторона говорит, где искать, — она это знает.
+ *
+ * Если папки нет (прибор ещё не сохранён либо заведён до автоматизации),
+ * открываем «Оборудование»: всё равно ближе к цели, чем корень.
+ */
+function openFilemanagerPicker(onPicked, startPath) {
   const origin = encodeURIComponent(location.origin);
+  const path = startPath ? `&path=${encodeURIComponent(startPath)}` : '';
   const popup = window.open(
-    `${FILEMANAGER_ORIGIN}/?picker=1&origin=${origin}`,
+    `${FILEMANAGER_ORIGIN}/?picker=1&origin=${origin}${path}`,
     'filemanager-picker',
     'width=1100,height=720'
   );
@@ -699,18 +711,24 @@ export function showInstrumentForm(item = null) {
 
   const form = document.getElementById('instrumentForm');
 
+  // Папка прибора известна из карточки. Фото ищем в «Изображениях»,
+  // свидетельство — в «Поверке»: там они и лежат, если их клали через
+  // эту же форму или из файлового менеджера.
+  const EQUIPMENT_ROOT = '/База данных/Оборудование';
+  const folderFor = (sub) => (v.folder_path ? `${v.folder_path}/${sub}` : EQUIPMENT_ROOT);
+
   form.querySelector('[data-pick-photo]').onclick = () => {
     openFilemanagerPicker((path, name) => {
       pickedPhotoPath = path;
       form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
-    });
+    }, folderFor('Изображения'));
   };
 
   form.querySelector('[data-pick-document]').onclick = () => {
     openFilemanagerPicker((path, name) => {
       pickedDocumentPath = path;
       form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
-    });
+    }, folderFor('Поверка'));
   };
 
   // Загрузка с компьютера. Раньше файл можно было только выбрать из уже
