@@ -245,7 +245,7 @@ app.get("/api/equipment/describe", async (req, res) => {
   try {
     const p = String(req.query.path || "");
     if (!p.startsWith(equipment.EQUIPMENT_DIR)) return res.json(null);
-    if (p.replace(/\/+$/, "") === equipment.EQUIPMENT_DIR) await equipment.sync();
+    if (p.replace(/\/+$/, "") === equipment.EQUIPMENT_DIR) await equipment.sync({ baseUrl: QR_BASE });
     res.json(await equipment.describe(p));
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -278,11 +278,41 @@ app.post("/api/equipment/instruments", async (req, res) => {
        nullify(body.control_type), nullify(body.company_code),
        nullify(body.verification_date), nullify(body.valid_until), String(body.comment || "").trim()]
     );
-    await equipment.sync();
+    await equipment.sync({ baseUrl: QR_BASE });
     const { rows: fresh } = await db.query("SELECT * FROM instruments WHERE id = $1", [rows[0].id]);
     res.status(201).json({ instrument: fresh[0] });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ message: "Прибор с таким инвентарным номером уже есть" });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+const QR_BASE = "http://localhost:3999/instruments/";
+
+app.get("/api/equipment/qr-archive", async (req, res) => {
+  try {
+    await equipment.sync({ baseUrl: QR_BASE });
+    await equipment.rebuildQr(QR_BASE);
+    const items = await equipment.qrFiles();
+    if (!items.length) return res.status(404).json({ message: "QR-кодов пока нет" });
+    const { ZipArchive } = require("/home/claude/fm/node_modules/archiver");
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="qr.zip"`);
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    archive.on("error", () => res.destroy());
+    archive.pipe(res);
+    for (const item of items) archive.file(safeResolve(item.path), { name: item.name });
+    await archive.finalize();
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.post("/api/equipment/qr-rebuild", async (req, res) => {
+  try {
+    await equipment.sync({ baseUrl: QR_BASE });
+    res.json({ count: await equipment.rebuildQr(QR_BASE) });
+  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });

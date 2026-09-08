@@ -119,6 +119,9 @@ const TEST_NO = "ТЕСТ-9001";
   check("снимки легли в «Изображения»",
     exists(`${folder}/Изображения/Общий вид.jpg`) && exists(`${folder}/Изображения/Шильдик.jpg`));
   check("свидетельство легло в «Поверку»", exists(`${folder}/Поверка/Свидетельство.pdf`));
+  // QR лежит у своего прибора и появляется сам, а не после того, как
+  // кто-то вспомнил нажать «выгрузить».
+  check("QR-код появился в папке прибора сам", exists(`${folder}/QR-код.png`));
   check("первый снимок стал фотографией карточки",
     String(made.photo_link_path || "").endsWith("Изображения/Общий вид.jpg"), made.photo_link_path);
   check("а второй — нет: перебивать выбранное нельзя",
@@ -147,6 +150,7 @@ const TEST_NO = "ТЕСТ-9001";
   const newFolder = "Геодезическое оборудование/ТЕСТ-9001 — Толщиномер ТЕСТ";
   check("вместе с ней переехали изображения",
     exists(`${newFolder}/Изображения/Общий вид.jpg`));
+  check("и QR-код переехал вместе с прибором", exists(`${newFolder}/QR-код.png`));
   check("и документ поверки", exists(`${newFolder}/Поверка/Свидетельство.pdf`));
   check("на старом месте папки не осталось", !exists(folder));
 
@@ -173,11 +177,29 @@ const TEST_NO = "ТЕСТ-9001";
   check("переименование прибора переименовывает папку",
     exists("Геодезическое оборудование/ТЕСТ-9001 — Толщиномер ТЕСТ-2") && !exists(newFolder));
 
-  /* --- 7. Дубликат номера --- */
+  /* --- 6b. Наклейки с QR одним архивом --- */
   await page.goto(U + "/", { waitUntil: "networkidle" });
   await sleep(600);
   await page.click('.col[data-col="db"] .row-item:has-text("Оборудование")');
-  await sleep(1800);
+  await sleep(2000);
+  check("кнопка «Наклейки с QR» есть в корне", await page.isVisible("#qrArchiveBtn"));
+
+  const zip = await page.evaluate(async (u) => {
+    const res = await fetch(u + "/api/equipment/qr-archive", { credentials: "same-origin" });
+    return { ok: res.ok, bytes: [...new Uint8Array(await res.arrayBuffer())] };
+  }, U);
+  check("архив собрался", zip.ok && zip.bytes.length > 500, String(zip.bytes.length));
+
+  const AdmZip = require("/home/claude/fm/node_modules/adm-zip");
+  const names = new AdmZip(Buffer.from(zip.bytes)).getEntries().map((e) => e.entryName);
+  check("в архиве по файлу на прибор, названы понятно",
+    names.length > 1 && names.every((n) => n.endsWith(".png")) && names.some((n) => /^ТЕСТ-9001 — /.test(n)),
+    JSON.stringify(names.slice(0, 3)));
+  // Наклейка нужна на рабочий прибор: списанный на неё не клеят.
+  const retiredInArchive = names.some((n) => /Списан/.test(n));
+  check("списанные в архив не попадают", !retiredInArchive);
+
+  /* --- 7. Дубликат номера --- */
   await page.click("#addInstrumentBtn");
   await sleep(600);
   await page.fill('#instrumentForm [name="inventory_no"]', TEST_NO);
