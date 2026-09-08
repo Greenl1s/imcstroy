@@ -38,6 +38,10 @@
         <div class="topbar-title">
           <h1>Учёт оборудования</h1>
           <button id="backToIsuButton" class="primary" type="button">← В ИСУ</button>
+          <!-- Видна только когда открыта карточка прибора: это выход
+               из карточки, и место ему рядом с другим выходом, а не
+               в хвосте списка действий над самим прибором. -->
+          <button id="backToListButton" class="primary hidden" type="button">← К списку</button>
         </div>
         <div class="topbar-actions">
           <span id="currentUserBadge" class="user-name"></span>

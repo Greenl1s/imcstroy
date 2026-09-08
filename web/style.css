@@ -371,7 +371,31 @@ body.dark-theme .badge.palette-9 { background: #1a2140; color: #8fa0e0; }
 .card-verif-date { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .card-verif-text { font-size: 13px; color: var(--muted); }
 .card-verif-text b { display: block; font-size: 14px; color: var(--text); }
-.card-verif button { margin-left: auto; }
+
+/* Вся полоса поверки — кнопка, а не кнопка в её углу. Так у человека
+   один предмет вместо двух: «поверка» — щёлкнул — открылся документ.
+   Кнопке-элементу нужен сброс браузерного оформления: она остаётся
+   полосой, а не превращается в серый прямоугольник. */
+.card-verif-open {
+  width: 100%; text-align: left; font: inherit; cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+.card-verif-open:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+.card-verif-open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.card-verif-go {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--primary); white-space: nowrap;
+}
+.card-verif-go svg {
+  width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform var(--transition);
+}
+.card-verif-open:hover .card-verif-go svg { transform: translateX(3px); }
+.card-verif-open.v-warn:hover { border-color: var(--warning); }
+.card-verif-open.v-bad:hover { border-color: var(--danger); }
+/* Документа нет — нажимать не на что, и делать вид, что есть, нечестно. */
+.card-verif-none { margin-left: auto; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .card-verif.v-warn { background: var(--issued-bg); border-color: var(--issued-line); }
 .card-verif.v-warn .card-verif-date { color: var(--warning); }
 .card-verif.v-bad { background: #fae7e4; border-color: #ecc3bd; }
@@ -399,7 +423,30 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
   font-size: 12.5px; color: var(--muted);
 }
 .card-missing b { color: var(--text); font-weight: 600; }
+/* Раньше это были неприметные серые кнопки, и «Редактировать»
+   терялось между ними. Теперь у каждой значок и заметная рамка,
+   а у главной — акцентный цвет. */
 .card-minor { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
+.card-act {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 40px; padding: 9px 15px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); color: var(--text);
+  font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.card-act svg {
+  width: 17px; height: 17px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.card-act:hover { border-color: var(--primary); color: var(--primary); background: var(--badge-bg); }
+.card-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Главное из трёх — правка: за ней приходят чаще всего. */
+.card-act-main {
+  border-color: var(--primary); color: var(--primary); font-weight: 600;
+}
+.card-act-main:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 .card-danger {
   margin-top: 11px; border: 1px dashed #dcbcb6; border-radius: var(--radius);
   padding: 11px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
