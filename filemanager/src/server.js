@@ -17,6 +17,7 @@ const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
 const expertsLib = require("./experts");
+const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
 const trash = require("./trash");
@@ -360,6 +361,172 @@ app.delete("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, re
   } catch (err) {
     console.error("Не удалось удалить пользователя:", err);
     res.status(500).json({ message: "Не удалось удалить пользователя" });
+  }
+});
+
+/* ---------------- Оборудование ----------------
+   Папка «База данных / Оборудование» — отражение приборов из «Учёта».
+   Обе системы ходят в одну базу, поэтому здесь читается и пишется та же
+   таблица instruments: заведённый отсюда прибор появляется в «Учёте»
+   мгновенно, а не «когда-нибудь подтянется».
+
+   Права те же, что на саму папку: оборудование лежит в колонке
+   «База данных», значит доступ к нему — это can_db. */
+
+function requireEquipmentAccess(req, res) {
+  if (req.user.role !== "admin" && !req.user.can_db) {
+    res.status(403).json({ message: "Нет доступа к этому разделу" });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Что за папка открыта и что о ней знает «Учёт».
+ *
+ * Один запрос на открытие папки: интерфейсу нужно решить, показывать ли
+ * кнопку «Добавить прибор», полосу прибора или полосу про постороннее.
+ * Заодно здесь же происходит сверка раскладки — так папки приходят
+ * в порядок ровно тогда, когда на них смотрят, и отдельный фоновый
+ * процесс для этого не нужен.
+ */
+app.get("/api/equipment/describe", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const path = String(req.query.path || "");
+    if (!path.startsWith(equipment.EQUIPMENT_DIR)) return res.json(null);
+
+    // Сверку делаем только в корне: заходя в конкретную папку прибора,
+    // человек ждёт, что она откроется, а не что сейчас переедет полсотни
+    // соседних.
+    if (path.replace(/\/+$/, "") === equipment.EQUIPMENT_DIR) {
+      await equipment.sync();
+    }
+    res.json(await equipment.describe(path));
+  } catch (err) {
+    console.error("Оборудование: не удалось описать папку:", err);
+    res.status(500).json({ message: "Не удалось прочитать раздел оборудования" });
+  }
+});
+
+/** Классификации — для выпадающего списка в форме. Из «Учёта», как есть. */
+app.get("/api/equipment/control-types", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const types = await equipment.loadControlTypes();
+    res.json({ types: [...types.values()] });
+  } catch (err) {
+    res.json({ types: [] });
+  }
+});
+
+/** Владельцы (компании) — тоже из «Учёта». */
+app.get("/api/equipment/companies", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const { rows } = await db.query("SELECT code, name FROM companies ORDER BY position, code");
+    res.json({ companies: rows });
+  } catch (err) {
+    res.json({ companies: [] });
+  }
+});
+
+/**
+ * Завести прибор из файлового менеджера.
+ *
+ * Поля ровно те же, что в форме «Учёта», — это должна быть одна и та же
+ * форма, а не похожая. Пишем в ту же таблицу, поэтому никакой отдельной
+ * «синхронизации» не нужно.
+ *
+ * Сразу после создания раскладываем папку: человек нажал «Сохранить»
+ * и должен увидеть папку прибора на месте, а не через сверку когда-нибудь.
+ */
+app.post("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const body = req.body || {};
+    const name = String(body.name || "").trim();
+    if (!name) return res.status(400).json({ message: "Укажите название прибора" });
+
+    const nullify = (v) => {
+      const t = String(v ?? "").trim();
+      return t === "" ? null : t;
+    };
+    const CHECK_TYPES = ["verification", "calibration", "none"];
+    const check_type = CHECK_TYPES.includes(body.check_type) ? body.check_type : "verification";
+
+    const { rows } = await db.query(
+      `INSERT INTO instruments
+         (inventory_no, name, serial_number, model, check_type, control_type,
+          company_code, verification_date, valid_until, comment)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        nullify(body.inventory_no), name, nullify(body.serial_number), nullify(body.model),
+        check_type, nullify(body.control_type), nullify(body.company_code),
+        nullify(body.verification_date), nullify(body.valid_until),
+        String(body.comment || "").trim(),
+      ]
+    );
+    const instrument = rows[0];
+
+    // История «Учёта» — тем же журналом, что и при заведении из «Учёта»:
+    // иначе приборы, заведённые отсюда, появлялись бы из ниоткуда.
+    await db.query(
+      `INSERT INTO history (instrument_id, instrument_name, action, actor_id, actor_name, note)
+       VALUES ($1, $2, 'create', $3, $4, $5)`,
+      [instrument.id, instrument.name, req.user.id, req.user.username,
+       `Добавлен из файлового менеджера (${req.user.username})`]
+    ).catch((err) => console.error("Оборудование: не удалось записать историю:", err.message));
+
+    await equipment.sync();
+    const { rows: fresh } = await db.query("SELECT * FROM instruments WHERE id = $1", [instrument.id]);
+    events.log(req.user, "upload", { path: fresh[0].folder_path || equipment.EQUIPMENT_DIR, name: instrument.name });
+    res.status(201).json({ instrument: fresh[0] });
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ message: "Прибор с таким инвентарным номером уже есть" });
+    }
+    if (err.code === "42P01") {
+      return res.status(503).json({ message: "Раздел «Учёт оборудования» ещё не развёрнут в этой базе" });
+    }
+    console.error("Оборудование: не удалось завести прибор:", err);
+    res.status(500).json({ message: "Не удалось завести прибор: " + err.message });
+  }
+});
+
+/**
+ * Куда класть файл, загруженный с компьютера.
+ *
+ * Сам файл идёт обычной загрузкой /api/upload — сюда браузер только
+ * спрашивает адрес папки. Так у оборудования не появляется своего
+ * приёма файлов со своими ограничениями размера и своей проверкой прав.
+ */
+app.get("/api/equipment/upload-dir", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const dir = await equipment.uploadDirFor(Number(req.query.id), req.query.kind);
+    res.json({ path: dir });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+/**
+ * Отметить загруженный файл фотографией прибора (или документом поверки).
+ *
+ * Только если своего ещё нет: выбранное вручную не должно перебиваться
+ * тем, что кто-то докинул в папку ещё один снимок.
+ */
+app.post("/api/equipment/adopt-file", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    const adopted = await equipment.adoptFirstImage(
+      Number(req.body?.id), String(req.body?.path || ""), req.body?.kind
+    );
+    res.json({ adopted });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
