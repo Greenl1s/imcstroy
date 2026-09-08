@@ -376,7 +376,7 @@ let pendingDeepLink = (() => {
 // "tasks" здесь обязателен: страница задач сама пишет ?section=tasks в
 // адрес, и без этого перезагрузка (или ссылка, отправленная коллеге)
 // возвращала бы на файлы.
-const SECTIONS = ["files", "recent", "trash", "history", "tasks", "case", "registry"];
+const SECTIONS = ["files", "recent", "trash", "history", "tasks", "case", "registry", "journal"];
 let pendingSection = (() => {
   if (PICKER_MODE) return null;
   const name = pickerParams.get("section");
@@ -914,6 +914,7 @@ function showSection(name, pushHistory) {
   if (name === "history") loadHistory();
   if (name === "tasks") loadTasksPage();
   if (name === "registry") loadRegistry();
+  if (name === "journal") loadJournal();
   // Карточку не грузим здесь: её открывает openCaseCard, потому что ей
   // нужен ещё и номер проекта, а showSection знает только имя раздела.
 
@@ -4415,6 +4416,509 @@ bind(document.getElementById("registryType"), "change", (e) => {
   registryType = e.target.value;
   renderRegistryList();
 });
+
+/* ---------- Журнал регистрации ----------
+   Тот же журнал, что лежит файлом в «Дела / Журнал регистрации», только
+   экраном: две вкладки — два листа файла, фильтры, все 14 колонок с
+   прокруткой вбок и правка прямо в ячейке.
+
+   Синхронизировать здесь нечего, и это главное. Экран читает ту же
+   таблицу проектов, из которой собирается сам файл, а правка идёт через
+   тот же PATCH /api/cases/:id, которым правят карточку. Значит журнал,
+   «Список дел», карточка и Excel — четыре вида на одни и те же данные.
+   Отдельного хранилища «журнала» нет и заводить его нельзя: оно
+   неизбежно отстало бы от карточек.
+
+   Данные тянем один раз на весь экран и фильтруем в браузере: проектов
+   десятки, и ходить на сервер за каждым отбором значило бы делать
+   медленнее то, ради чего экран и затевался — не открывать Excel. */
+
+let journalData = null;      // ответ сервера целиком
+let journalTab = "current";  // «Текущие» / «Архив» — это листы файла
+let journalRowsShown = [];   // что сейчас на экране: из этого идёт выгрузка выборки
+
+const journalFilters = {
+  q: "", stage: "any", outcome: "any", type: "any",
+  org: "any", expType: "any", year: "any", manager: "any",
+};
+
+/**
+ * Колонки — ровно те же и в том же порядке, что в Excel.
+ *
+ * edit говорит, как поле правится: text — свободный текст, select —
+ * выбор из списка (стадия, тип и руководитель живут значениями, а не
+ * произвольной строкой), null — не правится вовсе.
+ *
+ * Стадии здесь нет намеренно: её смена двигает папку на диске и карточку
+ * в Planfix, для этого есть отдельное действие с подтверждением. Правка
+ * в ячейке — для учётных полей, а не для переездов.
+ */
+const JOURNAL_COLUMNS = [
+  { key: "stage",             title: "Стадия",                 edit: null,   sticky: 1, width: 116 },
+  { key: "name",              title: "Условное наименование",  edit: null,   sticky: 2, width: 230 },
+  { key: "organization",      title: "Структура",              edit: "text", width: 200 },
+  { key: "type",              title: "Тип проекта",            edit: "type", width: 190 },
+  { key: "expertise_type",    title: "Тип экспертизы",         edit: "text", width: 180 },
+  { key: "year",              title: "Год",                    edit: "text", width: 76 },
+  { key: "description",       title: "Описание",               edit: "text", width: 240 },
+  { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150 },
+  { key: "experts",           title: "Специалисты / Эксперты", edit: "text", width: 200 },
+  { key: "court_or_customer", title: "Заказчик",               edit: "text", width: 230 },
+  { key: "case_number",       title: "№ дела или договора",    edit: "text", width: 160 },
+  { key: "party1",            title: "Сторона 1",              edit: "text", width: 170, court: true },
+  { key: "party2",            title: "Сторона 2",              edit: "text", width: 170, court: true },
+  { key: "judge_name",        title: "Судья",                  edit: "text", width: 150, court: true },
+];
+
+/** Подпись пустого поля — своя у каждой колонки, чтобы читалось как речь. */
+const JOURNAL_EMPTY = {
+  organization: "не указана", expertise_type: "не указан", year: "—",
+  description: "не заполнено", manager_id: "не назначен", experts: "не заполнено",
+  court_or_customer: "не заполнен", case_number: "—",
+  party1: "—", party2: "—", judge_name: "—", type: "без типа",
+};
+
+const journalIsArchive = (row) => row.is_cancelled || row.stage === "done";
+
+async function loadJournal(force = false) {
+  const box = document.getElementById("journalTableBox");
+  if (journalData && !force) return renderJournal();
+  box.innerHTML = '<div class="empty-hint" style="padding:24px;">Загрузка…</div>';
+  try {
+    journalData = await apiFetch("/api/cases/journal");
+  } catch (err) {
+    box.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить журнал: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  fillJournalOptions();
+  renderJournal();
+}
+
+/** Списки фильтров заполняем из ответа сервера, а не из видимых строк. */
+function fillJournalOptions() {
+  const fill = (id, values, format = (v) => v) => {
+    const select = document.getElementById(id);
+    const keep = select.value;
+    select.innerHTML = '<option value="any">Все</option>' +
+      values.map((v) => `<option value="${escapeHtml(String(v.value ?? v))}">${escapeHtml(format(v.label ?? v))}</option>`).join("");
+    select.value = [...select.options].some((o) => o.value === keep) ? keep : "any";
+  };
+  fill("jrOrg", journalData.organizations || []);
+  fill("jrExpType", journalData.expertise_types || []);
+  fill("jrYear", journalData.years || []);
+  fill("jrManager", (journalData.managers || []).map((m) => ({ value: m.id, label: m.username })));
+}
+
+function journalFiltered() {
+  const rows = (journalData?.rows || []).filter((r) =>
+    journalTab === "archive" ? journalIsArchive(r) : !journalIsArchive(r));
+
+  const q = journalFilters.q.trim().toLowerCase();
+  return rows.filter((r) => {
+    if (journalTab === "current" && journalFilters.stage !== "any" && r.stage !== journalFilters.stage) return false;
+    if (journalTab === "archive" && journalFilters.outcome !== "any") {
+      const kind = r.is_cancelled ? "cancelled" : "done";
+      if (kind !== journalFilters.outcome) return false;
+    }
+    if (journalFilters.type !== "any") {
+      const type = r.type || "none";
+      if (type !== journalFilters.type) return false;
+    }
+    if (journalFilters.org !== "any" && String(r.organization || "") !== journalFilters.org) return false;
+    if (journalFilters.expType !== "any" && String(r.expertise_type || "") !== journalFilters.expType) return false;
+    if (journalFilters.year !== "any" && String(r.year || "") !== journalFilters.year) return false;
+    if (journalFilters.manager !== "any" && String(r.manager_id || "") !== journalFilters.manager) return false;
+
+    if (!q) return true;
+    // Поиск идёт по тем же полям, по которым человек ищет глазами.
+    return [r.name, r.court_or_customer, r.case_number, r.experts,
+            r.organization, r.description, r.party1, r.party2, r.judge_name]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+  });
+}
+
+function journalStageCell(row) {
+  if (row.is_cancelled) return '<span class="stage-badge stage-cancelled">Отменён</span>';
+  const cls = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" }[row.stage];
+  return `<span class="stage-badge ${cls}">${STAGE_LABEL[row.stage] || row.stage}</span>`;
+}
+
+/** Значение поля так, как его читает человек. */
+function journalValue(row, key) {
+  if (key === "type") {
+    return row.type === "expertise" ? "Экспертизы"
+      : row.type === "research" ? "Независимые исследования" : "";
+  }
+  if (key === "manager_id") return row.manager_name || "";
+  return row[key] == null ? "" : String(row[key]);
+}
+
+function renderJournal() {
+  if (!journalData) return;
+  const all = journalData.rows || [];
+  document.getElementById("jrCountCurrent").textContent = all.filter((r) => !journalIsArchive(r)).length;
+  document.getElementById("jrCountArchive").textContent = all.filter(journalIsArchive).length;
+
+  // В архиве стадия у всех одна из двух — фильтр стадии там бесполезен,
+  // вместо него «чем кончилось».
+  document.getElementById("jrStageWrap").classList.toggle("hidden", journalTab === "archive");
+  document.getElementById("jrOutcomeWrap").classList.toggle("hidden", journalTab !== "archive");
+
+  journalRowsShown = journalFiltered();
+  renderJournalApplied();
+
+  const box = document.getElementById("journalTableBox");
+  if (!journalRowsShown.length) {
+    box.innerHTML = `<div class="empty-hint" style="padding:28px;">${
+      journalHasFilters() ? "Под эти условия ничего не подходит" : "В журнале пока пусто"
+    }</div>`;
+    renderJournalFoot();
+    return;
+  }
+
+  const head = JOURNAL_COLUMNS.map((c) => {
+    if (c.court) return "";
+    const st = c.sticky ? ` jr-sticky jr-sticky${c.sticky}` : "";
+    return `<th class="${st.trim()}" rowspan="2" style="min-width:${c.width}px">${escapeHtml(c.title)}</th>`;
+  }).join("");
+  const courtCols = JOURNAL_COLUMNS.filter((c) => c.court);
+
+  const body = journalRowsShown.map((row) => `
+    <tr data-jr-row="${escapeHtml(row.id)}">
+      ${JOURNAL_COLUMNS.map((c) => journalCellHtml(row, c)).join("")}
+    </tr>`).join("");
+
+  box.innerHTML = `
+    <table class="jr-table">
+      <thead>
+        <tr>
+          ${head}
+          <th colspan="${courtCols.length}" class="jr-group">Поля судебных экспертиз</th>
+        </tr>
+        <tr>
+          ${courtCols.map((c) => `<th class="jr-group" style="min-width:${c.width}px">${escapeHtml(c.title)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+
+  wireJournalCells(box);
+  renderJournalFoot();
+}
+
+function journalCellHtml(row, col) {
+  const sticky = col.sticky ? ` jr-sticky jr-sticky${col.sticky}` : "";
+  if (col.key === "stage") {
+    return `<td class="jr-cell${sticky}">${journalStageCell(row)}</td>`;
+  }
+  if (col.key === "name") {
+    return `<td class="jr-cell${sticky}"><a href="/?section=case&id=${escapeHtml(row.id)}"
+              class="jr-name" data-jr-open="${escapeHtml(row.id)}">${escapeHtml(row.name)}</a></td>`;
+  }
+
+  const value = journalValue(row, col.key);
+  // Правку показываем только там, где она действительно возможна:
+  // архив не трогаем, и без права записи на папку дела тоже.
+  const editable = col.edit && row.can_write && !journalIsArchive(row);
+  const cls = ["jr-cell", editable ? "jr-editable" : "", value ? "" : "jr-empty"].filter(Boolean).join(" ");
+  const text = value || JOURNAL_EMPTY[col.key] || "—";
+  // data-jr-key-label читает CSS: на телефоне строка разворачивается
+  // карточкой, и подпись поля берётся отсюда, а не из шапки таблицы —
+  // шапки там нет.
+  return `<td class="${cls}" data-jr-key="${col.key}" data-jr-key-label="${escapeHtml(col.title)}"${editable ? ' tabindex="0"' : ""}
+             title="${escapeHtml(value || "")}">${escapeHtml(text)}</td>`;
+}
+
+function renderJournalFoot() {
+  const total = (journalData?.rows || []).filter((r) =>
+    journalTab === "archive" ? journalIsArchive(r) : !journalIsArchive(r)).length;
+  const shown = journalRowsShown.length;
+  document.getElementById("journalFoot").innerHTML = `
+    <span>${shown === total ? `Строк: ${total}` : `Показано ${shown} из ${total}`}</span>
+    <span class="jr-foot-hint">Таблица прокручивается вбок — там поля судебных экспертиз${
+      journalTab === "archive" ? "" : ". Двойной щелчок по ячейке — правка"}</span>`;
+}
+
+function journalHasFilters() {
+  return journalFilters.q.trim() !== "" ||
+    ["stage", "outcome", "type", "org", "expType", "year", "manager"]
+      .some((k) => journalFilters[k] !== "any");
+}
+
+/** Что именно сейчас отобрано — списком, чтобы это было видно, а не помнилось. */
+function renderJournalApplied() {
+  const node = document.getElementById("journalApplied");
+  const items = [];
+  const label = (id, value) => {
+    const select = document.getElementById(id);
+    const option = select && [...select.options].find((o) => o.value === value);
+    return option ? option.textContent : value;
+  };
+  if (journalFilters.q.trim()) items.push(["q", "Поиск", journalFilters.q.trim()]);
+  if (journalTab === "current" && journalFilters.stage !== "any") items.push(["stage", "Стадия", label("jrStage", journalFilters.stage)]);
+  if (journalTab === "archive" && journalFilters.outcome !== "any") items.push(["outcome", "Чем кончилось", label("jrOutcome", journalFilters.outcome)]);
+  if (journalFilters.type !== "any") items.push(["type", "Тип", label("jrType", journalFilters.type)]);
+  if (journalFilters.org !== "any") items.push(["org", "Структура", journalFilters.org]);
+  if (journalFilters.expType !== "any") items.push(["expType", "Тип экспертизы", journalFilters.expType]);
+  if (journalFilters.year !== "any") items.push(["year", "Год", journalFilters.year]);
+  if (journalFilters.manager !== "any") items.push(["manager", "Руководитель", label("jrManager", journalFilters.manager)]);
+
+  if (!items.length) return (node.innerHTML = "");
+  node.innerHTML = items.map(([key, title, value]) =>
+    `<span class="jr-pill"><b>${escapeHtml(title)}:</b> ${escapeHtml(value)}
+      <button type="button" data-jr-drop="${key}" aria-label="Убрать условие">✕</button></span>`).join("") +
+    '<button type="button" class="jr-reset" id="jrResetBtn">Сбросить всё</button>';
+
+  node.querySelectorAll("[data-jr-drop]").forEach((btn) => {
+    btn.addEventListener("click", () => setJournalFilter(btn.dataset.jrDrop, btn.dataset.jrDrop === "q" ? "" : "any"));
+  });
+  bind(document.getElementById("jrResetBtn"), "click", resetJournalFilters);
+}
+
+const JOURNAL_FILTER_INPUTS = {
+  q: "jrSearch", stage: "jrStage", outcome: "jrOutcome", type: "jrType",
+  org: "jrOrg", expType: "jrExpType", year: "jrYear", manager: "jrManager",
+};
+
+function setJournalFilter(key, value) {
+  journalFilters[key] = value;
+  const input = document.getElementById(JOURNAL_FILTER_INPUTS[key]);
+  if (input) input.value = value;
+  renderJournal();
+}
+
+function resetJournalFilters() {
+  for (const key of Object.keys(journalFilters)) {
+    journalFilters[key] = key === "q" ? "" : "any";
+    const input = document.getElementById(JOURNAL_FILTER_INPUTS[key]);
+    if (input) input.value = journalFilters[key];
+  }
+  renderJournal();
+}
+
+/* ---------- Правка прямо в ячейке ---------- */
+
+let journalEditing = null; // чтобы не открыть две ячейки сразу
+
+function wireJournalCells(box) {
+  box.querySelectorAll("[data-jr-open]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      openCaseCard(link.dataset.jrOpen, true);
+    });
+  });
+  box.querySelectorAll("td.jr-editable").forEach((cell) => {
+    cell.addEventListener("dblclick", () => startJournalEdit(cell));
+    // С клавиатуры — Enter: иначе до правки не добраться без мыши.
+    cell.addEventListener("keydown", (e) => {
+      // Только с самой ячейки: Enter внутри уже открытого поля ввода
+      // всплывает сюда же, и без этой проверки сохранение тут же
+      // открывало бы правку заново — со старым значением, которое потом
+      // затирало бы только что сохранённое.
+      if (e.target !== cell) return;
+      if (e.key === "Enter" && !journalEditing) { e.preventDefault(); startJournalEdit(cell); }
+    });
+  });
+}
+
+/** Узкий экран — это телефон: там правка выключена (см. стили). */
+const journalNarrow = () => window.matchMedia("(max-width: 900px)").matches;
+
+function startJournalEdit(cell) {
+  if (journalEditing || journalNarrow()) return;
+  const id = Number(cell.closest("tr").dataset.jrRow);
+  const key = cell.dataset.jrKey;
+  const row = (journalData.rows || []).find((r) => r.id === id);
+  const column = JOURNAL_COLUMNS.find((c) => c.key === key);
+  if (!row || !column) return;
+
+  journalEditing = { cell, id, key, before: cell.innerHTML, className: cell.className };
+  cell.classList.add("jr-editing");
+
+  cell.innerHTML = column.edit === "text"
+    ? `<input class="jr-input" value="${escapeHtml(row[key] == null ? "" : String(row[key]))}">`
+    : `<select class="jr-input">${journalEditOptions(column.edit, row)}</select>`;
+
+  const input = cell.querySelector(".jr-input");
+  input.focus();
+  if (input.select) input.select();
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Enter") commitJournalEdit(input.value);
+    else cancelJournalEdit();
+  });
+  // Уход мышью в другое место — то же, что Enter: человек считает,
+  // что уже сохранил. Молча терять правку нельзя.
+  input.addEventListener("blur", () => {
+    if (journalEditing && journalEditing.cell === cell) commitJournalEdit(input.value);
+  });
+}
+
+function journalEditOptions(kind, row) {
+  if (kind === "type") {
+    return [["", "Без типа"], ["expertise", "Экспертизы"], ["research", "Независимые исследования"]]
+      .map(([v, t]) => `<option value="${v}"${String(row.type || "") === v ? " selected" : ""}>${t}</option>`).join("");
+  }
+  if (kind === "manager") {
+    return `<option value="">не назначен</option>` + (journalData.managers || [])
+      .map((m) => `<option value="${m.id}"${String(row.manager_id || "") === String(m.id) ? " selected" : ""}>${escapeHtml(m.username)}</option>`)
+      .join("");
+  }
+  return "";
+}
+
+function cancelJournalEdit() {
+  if (!journalEditing) return;
+  const { cell, before, className } = journalEditing;
+  journalEditing = null;
+  cell.className = className;
+  cell.innerHTML = before;
+}
+
+/**
+ * Сохранение идёт сразу, отдельной кнопки нет.
+ *
+ * Ячейка подсвечивается зелёным, только когда сервер ответил, — иначе
+ * человек поверил бы браузеру, а изменение осталось бы в нём. При отказе
+ * возвращаем как было и показываем причину: молча откатывать хуже, чем
+ * не сохранить.
+ */
+async function commitJournalEdit(rawValue) {
+  if (!journalEditing) return;
+  const { cell, id, key, before, className } = journalEditing;
+  const row = (journalData.rows || []).find((r) => r.id === id);
+  journalEditing = null;
+
+  const value = String(rawValue ?? "").trim();
+  const wasValue = row[key] == null ? "" : String(row[key]);
+  if (value === wasValue) {
+    cell.className = className;
+    cell.innerHTML = before;
+    return;
+  }
+
+  cell.className = className + " jr-saving";
+  cell.textContent = value || "…";
+
+  try {
+    const saved = await apiFetch(`/api/cases/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ [key]: value === "" ? null : value }),
+    });
+    // Перечитываем строку из ответа сервера, а не из того, что набрали:
+    // сервер мог значение привести (например, номер дела) — и на экране
+    // должно быть то, что действительно записалось.
+    Object.assign(row, saved);
+    if (key === "manager_id") {
+      const manager = (journalData.managers || []).find((m) => String(m.id) === value);
+      row.manager_name = manager ? manager.username : null;
+    }
+    const column = JOURNAL_COLUMNS.find((c) => c.key === key);
+    const shown = journalValue(row, key);
+    cell.className = ["jr-cell", "jr-editable", shown ? "" : "jr-empty", "jr-saved"].filter(Boolean).join(" ") +
+      (column.sticky ? ` jr-sticky jr-sticky${column.sticky}` : "");
+    cell.textContent = shown || JOURNAL_EMPTY[key] || "—";
+    cell.title = shown;
+    setTimeout(() => cell.classList.remove("jr-saved"), 1400);
+    // Списки фильтров могли пополниться новым значением.
+    if (["organization", "expertise_type", "year"].includes(key)) refreshJournalOptionLists();
+  } catch (err) {
+    cell.className = className;
+    cell.innerHTML = before;
+    showToast("Не удалось сохранить: " + err.message);
+  }
+}
+
+/** Пересобирает списки фильтров из текущих строк — после правки. */
+function refreshJournalOptionLists() {
+  const uniq = (values) => [...new Set(values.map((v) => (v == null ? "" : String(v).trim())).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ru"));
+  const rows = journalData.rows || [];
+  journalData.organizations = uniq(rows.map((r) => r.organization));
+  journalData.expertise_types = uniq(rows.map((r) => r.expertise_type));
+  journalData.years = uniq(rows.map((r) => r.year)).sort((a, b) => String(b).localeCompare(String(a)));
+  fillJournalOptions();
+}
+
+/* ---------- Выгрузка ---------- */
+
+/**
+ * Скачивание идёт через blob, а не обычной ссылкой: запрос нужен POST
+ * (в него уходит список строк) и с проверкой входа, а простая ссылка
+ * ни того, ни другого не умеет.
+ */
+async function downloadJournal(ids, button) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Готовим файл…";
+  try {
+    const res = await fetch("/api/cases/journal/export", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ids ? { ids } : {}),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Ошибка ${res.status}`);
+    }
+    const name = ids ? "Журнал регистрации (выборка).xlsx" : "Журнал регистрации.xlsx";
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Отпускаем память не сразу: часть браузеров не успевает начать
+    // скачивание, если ссылку отозвать в тот же миг.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast(ids ? `Выгружено строк: ${ids.length}` : "Журнал выгружен");
+  } catch (err) {
+    showToast("Не удалось выгрузить: " + err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+/* ---------- Привязка элементов ---------- */
+
+document.querySelectorAll("[data-jr-tab]").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    journalTab = tab.dataset.jrTab;
+    document.querySelectorAll("[data-jr-tab]").forEach((t) => t.classList.toggle("active", t === tab));
+    // Стадия и «чем кончилось» относятся к разным вкладкам — при
+    // переключении сбрасываем обе, иначе список молча оказался бы пуст.
+    journalFilters.stage = "any";
+    journalFilters.outcome = "any";
+    document.getElementById("jrStage").value = "any";
+    document.getElementById("jrOutcome").value = "any";
+    renderJournal();
+  });
+});
+
+bind(document.getElementById("jrSearch"), "input", debounce((e) => {
+  journalFilters.q = e.target.value;
+  renderJournal();
+}, 250));
+
+for (const [key, id] of Object.entries(JOURNAL_FILTER_INPUTS)) {
+  if (key === "q") continue;
+  bind(document.getElementById(id), "change", (e) => {
+    journalFilters[key] = e.target.value;
+    renderJournal();
+  });
+}
+
+bind(document.getElementById("journalExportSelBtn"), "click", (e) => {
+  if (!journalRowsShown.length) return showToast("Нечего выгружать — под эти условия ничего не подходит");
+  downloadJournal(journalRowsShown.map((r) => r.id), e.currentTarget);
+});
+bind(document.getElementById("journalExportAllBtn"), "click", (e) => downloadJournal(null, e.currentTarget));
 
 /* ---------- Карточка проекта ----------
    Всё о проекте на одном экране и без папок: стадия, реквизиты, задачи и

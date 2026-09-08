@@ -2125,3 +2125,146 @@ button.tick:hover { border-color: var(--success); background: var(--success-bg);
 /* Кнопка «Открыть в Planfix» — это ссылка (чтобы работало открытие в новой
    вкладке средним щелчком), но выглядеть должна как соседние кнопки. */
 a.upload-btn { text-decoration: none; }
+
+
+/* ============================================================
+   Журнал регистрации
+   Тот же журнал, что в Excel: две вкладки — два листа, 14 колонок
+   с прокруткой вбок, правка прямо в ячейке.
+   ============================================================ */
+
+.jr-head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Вкладки — это листы файла, поэтому и выглядят как закладки, а не как
+   кнопки-фильтры: переключение между ними меняет набор строк целиком. */
+.jr-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong); margin: 14px 0 0; }
+.jr-tab {
+  padding: 8px 15px; border: 0; background: transparent; font-family: inherit;
+  font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.jr-tab:hover { color: var(--text-secondary); }
+.jr-tab.active { color: var(--accent-on-tint); border-bottom-color: var(--accent); }
+.jr-tab i {
+  font-style: normal; font-weight: 500; font-size: 11.5px; margin-left: 7px;
+  background: var(--bg-subtle); color: var(--text-muted); border-radius: 20px; padding: 1px 8px;
+}
+.jr-tab.active i { background: var(--accent-bg); color: var(--accent-on-tint); }
+
+.jr-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin: 12px 0 10px; }
+.jr-f { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600;
+  letter-spacing: .03em; text-transform: uppercase; color: var(--text-muted); }
+.jr-f input, .jr-f select {
+  height: 32px; min-width: 150px; padding: 0 9px; font-family: inherit; font-size: 13px;
+  font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-primary);
+  background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+}
+.jr-f.jr-grow { flex: 1; min-width: 240px; }
+.jr-f.jr-grow input { width: 100%; }
+
+/* Что отобрано — списком, а не в памяти: фильтров восемь, и забыть про
+   включённый проще простого. */
+.jr-applied { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.jr-applied:empty { display: none; }
+.jr-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; background: var(--accent-bg); color: var(--accent-on-tint);
+  border-radius: 20px; padding: 2px 6px 2px 11px;
+}
+.jr-pill b { font-weight: 600; }
+.jr-pill button {
+  border: 0; background: transparent; color: inherit; opacity: .6;
+  font: inherit; font-size: 11px; line-height: 1; padding: 3px 5px; cursor: pointer; border-radius: 50%;
+}
+.jr-pill button:hover { opacity: 1; background: rgba(0,0,0,.07); }
+.jr-reset { border: 0; background: transparent; font: inherit; font-size: 12px;
+  color: var(--text-muted); text-decoration: underline; cursor: pointer; padding: 2px 4px; }
+
+/* Таблица. Прокрутка внутри своей коробки, а не всей страницей: иначе
+   при уходе вправо пропадает и боковая панель. */
+.jr-tablebox {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-card); overflow: auto; max-height: calc(100vh - 300px);
+}
+.jr-table { border-collapse: separate; border-spacing: 0; font-size: 13px; white-space: nowrap; }
+.jr-table th {
+  position: sticky; top: 0; z-index: 3; background: var(--accent-bg); color: var(--accent-on-tint);
+  font-weight: 600; font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase;
+  padding: 8px 10px; text-align: left;
+  border-bottom: 1px solid var(--border-strong); border-right: 1px solid var(--border);
+}
+.jr-table thead tr:nth-child(2) th { top: 33px; }
+.jr-table th.jr-group { background: #dceae2; text-align: center; }
+.jr-table td {
+  padding: 7px 10px; vertical-align: top; max-width: 300px;
+  overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+}
+.jr-table tbody tr:hover td { background: var(--bg-subtle); }
+
+/* Первые две колонки закреплены: без них при прокрутке вбок непонятно,
+   чья это строка, — а справа как раз стороны и судья. */
+.jr-sticky { position: sticky; z-index: 2; background: var(--bg-card); }
+.jr-sticky1 { left: 0; }
+.jr-sticky2 { left: 116px; font-weight: 600; border-right: 1px solid var(--border-strong); }
+.jr-table thead .jr-sticky { z-index: 4; background: var(--accent-bg); }
+.jr-table tbody tr:hover .jr-sticky { background: var(--bg-subtle); }
+
+.jr-name { color: var(--text-primary); text-decoration: none; }
+.jr-name:hover { color: var(--accent-on-tint); text-decoration: underline; }
+/* Незаполненное показываем словами, а не пустотой: сразу видно, где
+   в журнале дырки, и это половина его пользы. */
+.jr-empty { color: #a9aea5; font-style: italic; }
+
+.jr-editable { cursor: text; }
+.jr-editable:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.jr-editable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.jr-editing { padding: 3px 5px !important; background: var(--bg-card); }
+.jr-input {
+  width: 100%; min-width: 180px; font: inherit; font-size: 13px;
+  padding: 4px 7px; border: 2px solid var(--accent); border-radius: 6px;
+  background: #fff; color: var(--text-primary);
+}
+.jr-saving { opacity: .6; }
+/* Зелёным подсвечиваем только после ответа сервера — иначе человек
+   поверит браузеру, а изменение останется в нём. */
+.jr-saved { background: var(--success-bg) !important; transition: background .5s; }
+
+.jr-foot {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  margin-top: 10px; font-size: 12.5px; color: var(--text-muted);
+}
+.jr-foot-hint { margin-left: auto; }
+
+/* На телефоне таблица в 14 колонок нечитаема: строка разворачивается
+   карточкой — те же поля, но сверху вниз. Правка там выключена:
+   попасть пальцем в нужную ячейку и не задеть соседнюю невозможно. */
+@media (max-width: 900px) {
+  .jr-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .jr-f.jr-grow { grid-column: 1 / -1; }
+  .jr-f input, .jr-f select { min-width: 0; width: 100%; height: 40px; font-size: 15px; }
+  .jr-head-actions { width: 100%; }
+  .jr-head-actions button { flex: 1 1 auto; justify-content: center; min-height: 42px; }
+
+  .jr-tablebox { max-height: none; border: 0; background: transparent; overflow: visible; }
+  .jr-table, .jr-table tbody, .jr-table tr, .jr-table td { display: block; width: auto; }
+  .jr-table thead { display: none; }
+  .jr-table tr {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); margin-bottom: 8px; padding: 10px 12px;
+  }
+  .jr-table td {
+    border: 0; padding: 3px 0; max-width: none; white-space: normal;
+    display: grid; grid-template-columns: 132px 1fr; gap: 10px; align-items: baseline;
+  }
+  .jr-table td::before {
+    content: attr(data-jr-key-label); color: var(--text-muted); font-size: 12px;
+  }
+  /* Стадия и название — шапка карточки, без подписи слева. */
+  .jr-table td.jr-sticky { position: static; display: block; }
+  .jr-table td.jr-sticky2 { font-size: 15px; font-weight: 600; padding-bottom: 6px; }
+  .jr-table tbody tr:hover td, .jr-table tbody tr:hover .jr-sticky { background: transparent; }
+  .jr-editable { cursor: default; }
+  .jr-editable:hover { box-shadow: none; }
+  .jr-foot-hint { display: none; }
+}
