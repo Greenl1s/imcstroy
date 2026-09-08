@@ -94,6 +94,13 @@ async function seed() {
   const list = (await api('/api/instruments', { token })).data;
   const idOf = (no) => list.find((i) => i.inventory_no === no)?.id;
 
+  // Просроченный прибор нужен сразу нескольким проверкам, а одна из них
+  // (окно со сроками после нового документа) даты как раз и меняет —
+  // на то она и проверка. Возвращаем их на место при каждом запуске,
+  // иначе второй прогон падал бы на первом.
+  await api(`/api/instruments/${idOf('ИМС-0231')}`, { method: 'PATCH', token,
+    body: { verification_date: day(-400), valid_until: day(-12) } });
+
   // Состояния выставляем при каждом запуске, а не только при первом:
   // предыдущий прогон мог вернуть приборы, и тогда «на руках» стало бы
   // ноль, а проверка упала бы на пустом месте.
@@ -367,8 +374,12 @@ await sleep(800);
 const card = await page.locator('.card-screen').innerText();
 check('в карточке сразу видно состояние прибора',
   /На руках у/.test(card), card.split('\n').slice(0, 6).join(' | '));
+// Дату не вписываем числом: срок у прибора задаётся относительно
+// сегодняшнего дня, и жёстко записанное «26.08.2026» ломалось на
+// следующие сутки — падал не код, а календарь.
+const expiredDate = day(-12).split('-').reverse().join('.');
 check('поверка показана датой и остатком, а не «есть/нет»',
-  /26\.08\.2026/.test(card) && /просрочено на/i.test(card),
+  card.includes(expiredDate) && /просрочено на/i.test(card),
   (card.match(/.*[Пп]росрочено.*/) || [''])[0]);
 check('просроченная поверка выделена цветом',
   await page.locator('.card-verif.v-bad').isVisible());
@@ -432,6 +443,88 @@ await page.click('#backToListButton');
 await sleep(700);
 check('и возвращает на список', (await rows().count()) > 0);
 check('на списке её уже нет', !(await page.locator('#backToListButton').isVisible()));
+
+/* ============================================================
+   8б. Приложили новый документ поверки — сразу спрашиваем сроки.
+
+   Сроки написаны на самом свидетельстве. Раньше их надо было помнить
+   и вписывать в форме до того, как документ приложен; теперь документ
+   показывается, а под ним стоят обе даты.
+   ============================================================ */
+
+// Раскладку файлов по папкам делает ИСУ, а его на этом стенде рядом нет.
+// Подменяем только его ответы: проверяем окно со сроками, а не загрузку.
+await page.route('**/api/equipment/**', (route) => route.fulfill({
+  status: 200, contentType: 'application/json',
+  body: JSON.stringify({ path: '/База данных/Оборудование' }),
+}));
+await page.route('**/api/upload', (route) => route.fulfill({
+  status: 200, contentType: 'application/json', body: '{"ok":true}',
+}));
+
+/** Прикладывает файл к полю документа: setInputFiles в песочнице молчит. */
+const attachDocument = async (name) => {
+  await page.click('[data-edit]');
+  await page.waitForSelector('#instrumentForm');
+  await page.evaluate((fileName) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['%PDF-1.4'], fileName, { type: 'application/pdf' }));
+    const input = document.querySelector('[data-document-input]');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, name);
+  await page.click('#instrumentForm button[type="submit"]');
+};
+
+{
+  const before = (await api(`/api/instruments/${expiredId}`, { token: adminToken })).data;
+
+  await page.click('.list .row:has-text("Дефектоскоп УД2В-П46") [data-open-id]');
+  await page.waitForSelector('.card-verif', { timeout: 10000 });
+
+  await attachDocument('Свидетельство-2026.pdf');
+  let opened = true;
+  await page.waitForSelector('#verificationDatesForm', { timeout: 15000 }).catch(() => { opened = false; });
+  check('после нового документа открывается окно со сроками', opened);
+
+  check('в заголовке сказано, о чём речь',
+    /Новая поверка/.test(await page.locator('.modal-head h1').innerText()),
+    (await page.locator('.modal-head h1').innerText()));
+  // Документ — PDF, картинкой его не показать, поэтому даём открыть рядом.
+  check('документ можно открыть прямо отсюда',
+    await page.locator('[data-open-doc]').isVisible());
+  check('даты подставлены те, что сейчас у прибора',
+    (await page.locator('[name="verification_date"]').inputValue()) === (before.verification_date || '') &&
+    (await page.locator('[name="valid_until"]').inputValue()) === (before.valid_until || ''),
+    `${await page.locator('[name="verification_date"]').inputValue()} → ${await page.locator('[name="valid_until"]').inputValue()}`);
+
+  // Ничего не трогаем — даты должны остаться прежними.
+  await page.click('[data-keep-dates]');
+  await sleep(1200);
+  const kept = (await api(`/api/instruments/${expiredId}`, { token: adminToken })).data;
+  check('«Оставить как было» не меняет сроки',
+    kept.verification_date === before.verification_date && kept.valid_until === before.valid_until,
+    `${kept.verification_date} → ${kept.valid_until}`);
+  check('и возвращает к карточке прибора', await page.locator('.card-verif').isVisible());
+
+  // А теперь вписываем новые.
+  await attachDocument('Свидетельство-2027.pdf');
+  await page.waitForSelector('#verificationDatesForm', { timeout: 15000 });
+  await page.fill('[name="verification_date"]', '2026-03-05');
+  await page.fill('[name="valid_until"]', '2027-03-05');
+  await page.click('#verificationDatesForm button[type="submit"]');
+  await sleep(1500);
+
+  const saved = (await api(`/api/instruments/${expiredId}`, { token: adminToken })).data;
+  check('вписанные сроки сохраняются',
+    saved.verification_date === '2026-03-05' && saved.valid_until === '2027-03-05',
+    `${saved.verification_date} → ${saved.valid_until}`);
+  check('карточка сразу показывает новый срок',
+    /05\.03\.2027/.test(await page.locator('#cardScreen').innerText()));
+
+  await page.click('#backToListButton');
+  await sleep(700);
+}
 
 /* ============================================================
    9. Телефон: фильтры в две колонки, действие во всю ширину.
