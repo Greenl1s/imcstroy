@@ -572,6 +572,20 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
 .document-photo { max-width: 100%; max-height: 70vh; object-fit: contain; }
 .qr-caption { text-align: center; color: var(--muted); margin-top: 8px; font-family: var(--font-mono); font-size: 13px; }
 
+/* Окно «Новая поверка — сроки». Документ показывается ниже, чем обычное
+   превью (70vh), — иначе обе даты уезжают за нижний край, а они здесь
+   и есть смысл окна: документ нужен ровно затем, чтобы с него списать. */
+.verif-dates-preview { display: grid; place-items: center; padding: 4px 0 10px; }
+.verif-dates-preview img {
+  max-width: 100%; max-height: 38vh; object-fit: contain;
+  background: #fff; padding: 8px; border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.verif-dates-hint {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  color: var(--muted); font-size: 14px; margin: 0 0 12px;
+}
+
 /* Промежуточная точка. Когда кнопкам и фильтрам не хватает ширины,
    фильтры целиком переезжают на свою строку — и остаются выровненными
    по правому краю, а не сползают вбок, ломая решётку. */
