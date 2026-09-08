@@ -680,8 +680,6 @@ export function showInstrumentForm(item = null) {
           <span class="row-subtitle" data-photo-status></span>
         </div>
         <input type="file" accept="image/*" multiple hidden data-photo-input>
-        <span class="row-subtitle file-note">Загруженное с компьютера ляжет в папку прибора,
-          в «Изображения». Первый снимок станет фотографией карточки.</span>
       </div>
       <div class="form-field-group">
         <span class="row-subtitle">Фото документа поверки/калибровки</span>
@@ -691,7 +689,6 @@ export function showInstrumentForm(item = null) {
           <span class="row-subtitle" data-document-status></span>
         </div>
         <input type="file" multiple hidden data-document-input>
-        <span class="row-subtitle file-note">Ляжет в подпапку «Поверка» той же папки.</span>
       </div>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}

@@ -700,17 +700,50 @@ async function showRetired() {
 // ---------- Меню экспорта в Excel ----------
 
 
-/* ---------- Массовая выгрузка QR-кодов в ИСУ ---------- */
+/* ---------- Раскладка QR-кодов по папкам приборов ---------- */
 
-const QR_EXPORT_PATH = '/База данных/Оборудование/QR-код';
+/**
+ * Раньше эта кнопка рисовала QR-коды в браузере и складывала их плоским
+ * списком в общую папку «Оборудование/QR-код»: найти там нужный можно
+ * было только по имени, а имена приборов повторяются, и файлы молча
+ * затирали друг друга. Плюс перед каждой выгрузкой папка вычищалась —
+ * то есть всё, что туда положили руками, пропадало.
+ *
+ * Теперь QR-код лежит в папке своего прибора и появляется там сам.
+ * Кнопка осталась для одного случая: адрес сайта поменялся, и коды надо
+ * перерисовать. Рисует их сервер ИСУ — он один знает, где чья папка,
+ * и знает настоящий адрес сайта.
+ */
+async function exportAllQrCodes() {
+  if (!confirm(
+    'Перерисовать QR-коды всех приборов?\n\n' +
+    'Каждый код ляжет в папку своего прибора в ИСУ. ' +
+    'Ничего постороннего не удаляется.'
+  )) return;
 
-// Убирает символы, недопустимые в имени файла на большинстве ОС.
-function sanitizeFilename(name) {
-  return String(name).replace(/[\\/:*?"<>|]/g, '-').trim() || 'без_названия';
+  const base = window.FILEMANAGER_BASE || '';
+  try {
+    const res = await fetch(`${base}/api/equipment/qr-rebuild`, {
+      method: 'POST', credentials: 'include',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || `HTTP ${res.status}`);
+    }
+    const { count } = await res.json();
+    toast(`Готово: QR-кодов разложено по папкам — ${count}`);
+  } catch (err) {
+    toast('Не удалось разложить QR-коды: ' + err.message, true);
+  }
 }
 
-// Строит PNG того же QR-кода, что показывает кнопка "QR" на карточке
-// (тот же URL, та же библиотека) — просто в скрытом контейнере, без модалки.
+/**
+ * PNG того же QR-кода, что показывает карточка прибора.
+ *
+ * Нужен только для Word-листа с наклейками: там картинки вставляются
+ * в документ, а не кладутся файлами. Раскладку по папкам делает сервер
+ * ИСУ — он один знает, где чья папка.
+ */
 function renderQrPng(item) {
   return new Promise((resolve, reject) => {
     const container = document.createElement('div');
@@ -733,80 +766,6 @@ function renderQrPng(item) {
       }, 'image/png');
     }, 30);
   });
-}
-
-/**
- * Удаляет всё, что сейчас лежит в папке QR-кодов, перед новой выгрузкой —
- * иначе там годами копились бы QR-коды переименованных или удалённых
- * приборов. Если папки ещё вообще нет (самый первый запуск) — просто
- * ничего не делаем, удалять нечего.
- */
-async function clearQrFolder() {
-  let listing;
-  try {
-    const res = await fetch(`${FILEMANAGER_ORIGIN}/api/resources?path=${encodeURIComponent(QR_EXPORT_PATH)}`, {
-      credentials: 'include',
-    });
-    if (!res.ok) return; // папки ещё нет — нечего чистить
-    listing = await res.json();
-  } catch {
-    return; // ИСУ недоступна — не блокируем сам экспорт из-за этого
-  }
-
-  const entries = [...(listing.folders || []), ...(listing.files || [])];
-  await Promise.all(
-    entries.map((entry) => {
-      const fullPath = `${QR_EXPORT_PATH}/${entry.name}`;
-      return fetch(`${FILEMANAGER_ORIGIN}/api/resources?path=${encodeURIComponent(fullPath)}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      }).catch(() => {});
-    })
-  );
-}
-
-async function exportAllQrCodes() {
-  const items = state.instruments || [];
-  if (!items.length) return toast('Нет приборов для выгрузки', true);
-  if (!confirm(
-    `Выгрузить QR-коды всех приборов (${items.length}) в ИСУ?\n\n` +
-    'Всё, что сейчас лежит в «База данных/Оборудование/QR-код», будет удалено и заменено новыми файлами.'
-  )) return;
-
-  await clearQrFolder();
-
-  let success = 0;
-  const failed = [];
-
-  for (const item of items) {
-    try {
-      const blob = await renderQrPng(item);
-      const filename = `${sanitizeFilename(item.name)}.png`;
-      const form = new FormData();
-      form.append('path', QR_EXPORT_PATH);
-      form.append('file', blob, filename);
-
-      const res = await fetch(`${FILEMANAGER_ORIGIN}/api/upload`, {
-        method: 'POST',
-        credentials: 'include',
-        body: form,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `HTTP ${res.status}`);
-      }
-      success++;
-    } catch (err) {
-      failed.push({ name: item.name, message: err.message });
-    }
-  }
-
-  if (failed.length === 0) {
-    toast(`Готово: ${success} QR-код(ов) выгружено в ИСУ`);
-  } else {
-    const details = failed.map((f) => `${f.name} (${f.message})`).join('; ');
-    toast(`Выгружено: ${success}. Не удалось: ${failed.length} — ${details}`, true);
-  }
 }
 
 /**
