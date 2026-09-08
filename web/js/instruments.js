@@ -810,6 +810,12 @@ export function showInstrumentForm(item = null) {
     const button = form.querySelector('button[type="submit"]');
     const data = formData(form);
 
+    // Приложили ли новый документ поверки — неважно, с БД или с компьютера.
+    // Если да, после сохранения покажем его и спросим сроки: сроки берутся
+    // с самого документа, а он в этот момент уже перед глазами.
+    const documentAdded = Boolean(pickedDocumentPath) ||
+      form.querySelector('[data-document-input]').files.length > 0;
+
     const result = await run(async () => {
       const saved = isEdit
         ? await api.updateInstrument(item.id, data)
@@ -831,6 +837,9 @@ export function showInstrumentForm(item = null) {
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
 
     if (result === null) return;
+    if (documentAdded) {
+      await askVerificationDates({ ...result, check_type: data.check_type || result.check_type });
+    }
     closeModal();
     await refresh();
     // Открываем карточку сохранённого прибора без перезагрузки страницы
@@ -1224,6 +1233,89 @@ function showQr(item) {
     link.download = `qr-${item.id}.png`;
     link.click();
   };
+}
+
+/**
+ * Приложили новый документ поверки — показываем его и спрашиваем сроки.
+ *
+ * Сроки написаны на самом свидетельстве, и переписывать их по памяти,
+ * закрыв документ, — лишний повод ошибиться. Поэтому документ остаётся
+ * перед глазами, а под ним стоят обе даты, уже заполненные тем, что
+ * сейчас в карточке. Не тронули — останется как было; поправили —
+ * сохранится поправленное.
+ *
+ * Всегда завершается: и «Сохранить сроки», и «Оставить как было», и
+ * крестик закрытия одинаково возвращают управление форме, чтобы она
+ * могла открыть карточку прибора.
+ */
+async function askVerificationDates(item) {
+  // «Новая поверка», «Новая калибровка», «Новый документ» — род разный,
+  // поэтому подпись собирается целиком, а не приклеиванием слова.
+  const title = item.check_type === 'calibration' ? 'Новая калибровка — сроки'
+    : item.check_type === 'verification' ? 'Новая поверка — сроки'
+    : 'Новый документ — сроки';
+  openModal(title, '<p class="qr-caption">Загрузка документа…</p>');
+
+  const result = await api.documentUrl(item.id);
+  const isImage = Boolean(result) && (result.contentType || '').startsWith('image/');
+
+  // Документ мог не открыться (или это PDF, который в модалке не покажешь) —
+  // спросить сроки всё равно надо, просто без картинки.
+  const preview = isImage
+    ? `<div class="verif-dates-preview"><img src="${result.url}" alt="Документ поверки"></div>`
+    : `<p class="verif-dates-hint">${result
+        ? 'Файл нельзя показать прямо здесь — откройте его в соседней вкладке.'
+        : 'Документ не удалось загрузить, но сроки можно вписать и так.'}
+       ${result ? '<button type="button" class="secondary" data-open-doc>Открыть документ</button>' : ''}</p>`;
+
+  openModal(title, `
+    <form id="verificationDatesForm">
+      ${preview}
+      <p class="verif-dates-hint">Сверьте сроки с документом. Оставите как есть — даты не изменятся.</p>
+      <div class="form-grid">
+        ${input('verification_date', dateFieldLabel(item.check_type), item.verification_date || '', 'date')}
+        ${input('valid_until', validUntilLabel(item.check_type), item.valid_until || '', 'date')}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-keep-dates>Оставить как было</button>
+        <button class="primary" type="submit">Сохранить сроки</button>
+      </div>
+    </form>`);
+
+  const modal = document.getElementById('modal');
+  const form = document.getElementById('verificationDatesForm');
+
+  const openDoc = form.querySelector('[data-open-doc]');
+  if (openDoc) openDoc.onclick = () => window.open(result.url, '_blank');
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+
+    // Закрыли крестиком или Esc — это тоже ответ «оставить как было».
+    modal.addEventListener('close', finish, { once: true });
+    form.querySelector('[data-keep-dates]').onclick = finish;
+
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const dates = {
+        verification_date: form.querySelector('[name="verification_date"]').value || null,
+        valid_until: form.querySelector('[name="valid_until"]').value || null
+      };
+
+      // Ничего не поменяли — незачем и запрос слать.
+      if (dates.verification_date === (item.verification_date || null) &&
+          dates.valid_until === (item.valid_until || null)) {
+        return finish();
+      }
+
+      const saved = await run(() => api.updateInstrument(item.id, dates),
+        { button, success: 'Сроки сохранены' });
+      if (saved === null) return;
+      finish();
+    };
+  });
 }
 
 /**
