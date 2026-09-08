@@ -199,6 +199,30 @@ const TEST_NO = "ТЕСТ-9001";
   const retiredInArchive = names.some((n) => /Списан/.test(n));
   check("списанные в архив не попадают", !retiredInArchive);
 
+  /* --- 6c. Выбор файла открывается сразу в папке прибора --- */
+  // «Учёт» открывает окно выбора и говорит, где искать: раньше оно
+  // всегда начиналось с корня, и до фотографии надо было доходить
+  // руками через четыре уровня.
+  const picker = await browser.newPage({ viewport: { width: 1100, height: 720 } });
+  // Путь берём из базы заново: прибор к этому моменту уже переехал
+  // и переименовался, а made — снимок на момент создания.
+  const { rows: now } = await db.query("SELECT folder_path FROM instruments WHERE id = $1", [made.id]);
+  const imagesDir = `${now[0].folder_path}/Изображения`;
+  await picker.goto(`${U}/?picker=1&origin=${encodeURIComponent("http://localhost:4400")}&path=${encodeURIComponent(imagesDir)}`,
+    { waitUntil: "networkidle" });
+  await sleep(1500);
+  check("окно выбора открылось сразу в «Изображениях» прибора",
+    (await picker.textContent("#folderTitle")).trim() === "Изображения",
+    (await picker.textContent("#folderTitle")).trim());
+  check("и путь ведёт именно к этому прибору",
+    (await picker.textContent("#breadcrumbs")).includes("ТЕСТ-9001"),
+    (await picker.textContent("#breadcrumbs")).replace(/\s+/g, " ").trim());
+  check("режим выбора при этом остался",
+    (await picker.content()).includes("Режим выбора файла"));
+  check("и нужный файл сразу виден",
+    await picker.isVisible('#folderList .file-row:has-text("Общий вид.jpg")'));
+  await picker.close();
+
   /* --- 7. Дубликат номера --- */
   await page.click("#addInstrumentBtn");
   await sleep(600);
