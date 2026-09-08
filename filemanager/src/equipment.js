@@ -1,6 +1,7 @@
 const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
+const QRCode = require("qrcode");
 const db = require("./db");
 const files = require("./files");
 
@@ -37,6 +38,21 @@ const DOCS_DIRNAME = "Поверка";
 
 /** Служебные подпапки прибора — заводятся сразу, чтобы не гадать, куда класть. */
 const INSTRUMENT_SUBDIRS = [IMAGES_DIRNAME, DOCS_DIRNAME];
+
+/**
+ * QR-код прибора лежит файлом в его же папке.
+ *
+ * Отдельной подпапки не заводим: это один файл, а папка ради одного
+ * файла только добавляет щелчок. Раньше все QR сваливались в общую
+ * «Оборудование/QR-код» плоским списком — найти там нужный можно было
+ * только по имени, а имена повторяются.
+ *
+ * Рисуем на сервере, а не в браузере: тогда QR просто ЕСТЬ у каждого
+ * прибора, а не появляется после того, как кто-то вспомнил нажать
+ * «выгрузить». Заодно ИСУ не приходится тянуть внешнюю библиотеку —
+ * он специально обходится без внешних загрузок.
+ */
+const QR_FILENAME = "QR-код.png";
 
 /**
  * Имя папки прибора: «ИМС-0303 — Толщиномер УТ-911».
@@ -124,8 +140,8 @@ async function loadInstruments() {
  * «Оборудование». Дешёвая: сравнивает строки, а трогает диск только
  * там, где действительно разошлось.
  */
-async function sync() {
-  const report = { created: [], moved: [], skipped: [] };
+async function sync(options = {}) {
+  const report = { created: [], moved: [], skipped: [], qr: 0 };
 
   let instruments;
   let typesByCode;
@@ -153,7 +169,12 @@ async function sync() {
     const target = expectedFolder(instrument, typesByCode);
     const current = instrument.folder_path;
 
-    if (current === target && (await files.pathExists(target))) continue;
+    if (current === target && (await files.pathExists(target))) {
+      // Папка на месте — но QR мог не появиться (прибор завели до этой
+      // возможности) или устареть после переезда. Дешёвая проверка.
+      if (await ensureQr(instrument, target, options.baseUrl)) report.qr += 1;
+      continue;
+    }
 
     try {
       if (current && current !== target && (await files.pathExists(current))) {
@@ -164,6 +185,7 @@ async function sync() {
         report.created.push(target);
       }
       for (const sub of INSTRUMENT_SUBDIRS) await files.ensureDir(`${target}/${sub}`);
+      await ensureQr(instrument, target, options.baseUrl);
       if (current !== target) {
         await db.query("UPDATE instruments SET folder_path = $1 WHERE id = $2", [target, instrument.id]);
       }
@@ -176,6 +198,76 @@ async function sync() {
   }
 
   return report;
+}
+
+/**
+ * Рисует QR-код прибора, если его ещё нет.
+ *
+ * Возвращает true, если файл был создан. Существующий не перерисовываем:
+ * содержимое кода зависит только от номера прибора, а он не меняется, —
+ * значит и перерисовывать нечего. Обновить принудительно можно через
+ * rebuildQr (кнопка выгрузки).
+ *
+ * Адрес в коде тот же, что открывает карточку в «Учёте»: отсканировал
+ * наклейку на корпусе — попал в карточку этого прибора.
+ */
+async function ensureQr(instrument, folder, baseUrl) {
+  const rel = `${folder}/${QR_FILENAME}`;
+  if (await files.pathExists(rel)) return false;
+  await writeQr(instrument, rel, baseUrl);
+  return true;
+}
+
+async function writeQr(instrument, relPath, baseUrl) {
+  const base = (baseUrl || process.env.INSTRUMENTS_PUBLIC_URL || "/instruments/").replace(/\/+$/, "");
+  const url = `${base}/?id=${instrument.id}`;
+  const png = await QRCode.toBuffer(url, {
+    type: "png", width: 320, margin: 2, errorCorrectionLevel: "M",
+  });
+  await fsp.writeFile(files.safeResolve(relPath), png);
+}
+
+/**
+ * Перерисовывает QR у всех приборов — на случай, если поменялся адрес
+ * сайта. Отдельно от sync: обычная сверка не должна каждый раз
+ * переписывать сотни файлов ради ничего не изменившегося кода.
+ */
+async function rebuildQr(baseUrl) {
+  const typesByCode = await loadControlTypes();
+  const instruments = await loadInstruments();
+  let done = 0;
+  for (const instrument of instruments) {
+    const folder = instrument.folder_path || expectedFolder(instrument, typesByCode);
+    try {
+      await files.ensureDir(folder);
+      await writeQr(instrument, `${folder}/${QR_FILENAME}`, baseUrl);
+      done += 1;
+    } catch (err) {
+      console.error("Оборудование: не удалось нарисовать QR для", instrument.id, err.message);
+    }
+  }
+  return done;
+}
+
+/**
+ * Пути всех QR-файлов — для выгрузки одним архивом.
+ *
+ * Отдаём вместе с именем прибора: в архиве файл должен называться так,
+ * чтобы его можно было найти, а не «QR-код (17).png».
+ */
+async function qrFiles() {
+  const typesByCode = await loadControlTypes();
+  const instruments = await loadInstruments();
+  const out = [];
+  for (const instrument of instruments) {
+    if (instrument.status === "retired") continue; // наклейки нужны на рабочие приборы
+    const folder = instrument.folder_path || expectedFolder(instrument, typesByCode);
+    const rel = `${folder}/${QR_FILENAME}`;
+    if (await files.pathExists(rel)) {
+      out.push({ path: rel, name: `${instrumentFolderName(instrument)}.png` });
+    }
+  }
+  return out;
 }
 
 /**
@@ -336,7 +428,8 @@ async function adoptFirstImage(instrumentId, relFilePath, kind) {
 }
 
 module.exports = {
-  EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME,
+  EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
   sync, describe, uploadDirFor, adoptFirstImage, loadControlTypes,
+  ensureQr, rebuildQr, qrFiles,
 };

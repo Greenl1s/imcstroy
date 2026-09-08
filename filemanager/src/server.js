@@ -400,7 +400,7 @@ app.get("/api/equipment/describe", auth.requireAuth, async (req, res) => {
     // человек ждёт, что она откроется, а не что сейчас переедет полсотни
     // соседних.
     if (path.replace(/\/+$/, "") === equipment.EQUIPMENT_DIR) {
-      await equipment.sync();
+      await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
     }
     res.json(await equipment.describe(path));
   } catch (err) {
@@ -479,7 +479,7 @@ app.post("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
        `Добавлен из файлового менеджера (${req.user.username})`]
     ).catch((err) => console.error("Оборудование: не удалось записать историю:", err.message));
 
-    await equipment.sync();
+    await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
     const { rows: fresh } = await db.query("SELECT * FROM instruments WHERE id = $1", [instrument.id]);
     events.log(req.user, "upload", { path: fresh[0].folder_path || equipment.EQUIPMENT_DIR, name: instrument.name });
     res.status(201).json({ instrument: fresh[0] });
@@ -492,6 +492,79 @@ app.post("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
     }
     console.error("Оборудование: не удалось завести прибор:", err);
     res.status(500).json({ message: "Не удалось завести прибор: " + err.message });
+  }
+});
+
+/**
+ * Адрес «Учёта» для QR-кода — из самого запроса.
+ *
+ * Отсканировал наклейку — попал в карточку прибора на том же сайте,
+ * с которого её напечатали. Прописывать домен в настройках не нужно:
+ * при переезде сайта коды перерисуются сами, по новому адресу.
+ * INSTRUMENTS_PUBLIC_URL остаётся на случай, когда сервер стоит за
+ * чем-то, что не сообщает настоящий адрес.
+ */
+function instrumentsBaseUrl(req) {
+  if (process.env.INSTRUMENTS_PUBLIC_URL) return process.env.INSTRUMENTS_PUBLIC_URL;
+  const host = req.get("x-forwarded-host") || req.get("host");
+  if (!host) return "/instruments/";
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  return `${proto}://${host}/instruments/`;
+}
+
+/**
+ * Наклейки с QR — все коды одним архивом.
+ *
+ * Перед сборкой перерисовываем: адрес сайта мог поменяться, а печатать
+ * наклейку с кодом, ведущим в никуда, — худшее, что тут может случиться.
+ * Списанные приборы в архив не идут: наклейки нужны на рабочие.
+ */
+app.get("/api/equipment/qr-archive", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
+    await equipment.rebuildQr(instrumentsBaseUrl(req));
+
+    const items = await equipment.qrFiles();
+    if (!items.length) return res.status(404).json({ message: "QR-кодов пока нет" });
+
+    const fileName = "Наклейки с QR.zip";
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition",
+      `attachment; filename="qr.zip"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    archive.on("error", (err) => {
+      console.error("Оборудование: не удалось собрать архив QR:", err);
+      res.destroy();
+    });
+    archive.pipe(res);
+    // Плоский архив, имя файла = имя папки прибора: распаковал и сразу
+    // видно, какая наклейка на какой прибор.
+    for (const item of items) archive.file(filesLib.safeResolve(item.path), { name: item.name });
+    await archive.finalize();
+  } catch (err) {
+    console.error("Оборудование: не удалось выдать QR:", err);
+    res.status(500).json({ message: "Не удалось собрать архив: " + err.message });
+  }
+});
+
+/**
+ * Перерисовать QR у всех приборов и разложить по их папкам.
+ *
+ * Этим же адресом пользуется кнопка «Выгрузить все QR-коды» в «Учёте»:
+ * раньше она складывала всё плоским списком в одну общую папку, теперь
+ * каждый код лежит у своего прибора.
+ */
+app.post("/api/equipment/qr-rebuild", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAccess(req, res)) return;
+    await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
+    const count = await equipment.rebuildQr(instrumentsBaseUrl(req));
+    res.json({ count });
+  } catch (err) {
+    console.error("Оборудование: не удалось разложить QR:", err);
+    res.status(500).json({ message: "Не удалось разложить QR-коды: " + err.message });
   }
 });
 
