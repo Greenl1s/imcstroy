@@ -974,6 +974,10 @@ async function updateEquipment(path) {
   equipmentHere = null;
   banner.classList.add("hidden");
   if (button) button.classList.toggle("hidden", !inEquipment);
+  // Архив наклеек — только в корне: он про все приборы сразу, и
+  // предлагать его, стоя в папке одного прибора, было бы странно.
+  const qrButton = document.getElementById("qrArchiveBtn");
+  if (qrButton) qrButton.classList.toggle("hidden", path !== EQUIPMENT_PATH);
   if (!inEquipment) return;
 
   try {
@@ -1079,6 +1083,44 @@ const fmtEqDate = (value) => {
   const [y, m, d] = s.split("-");
   return `${d}.${m}.${y}`;
 };
+
+/**
+ * Наклейки с QR — все коды одним архивом.
+ *
+ * У каждого прибора QR лежит в его собственной папке и появляется сам.
+ * Эта кнопка нужна для другого: распечатать наклейки пачкой. Сервер
+ * перед сборкой перерисовывает коды по текущему адресу сайта — печатать
+ * наклейку с кодом, ведущим в никуда, хуже, чем не печатать вовсе.
+ */
+bind(document.getElementById("qrArchiveBtn"), "click", async (e) => {
+  const button = e.currentTarget;
+  const label = button.querySelector("span").textContent;
+  button.disabled = true;
+  button.querySelector("span").textContent = "Собираем…";
+  try {
+    const res = await fetch("/api/equipment/qr-archive", { credentials: "same-origin" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Ошибка ${res.status}`);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Наклейки с QR.zip";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Отпускаем память не сразу: часть браузеров не успевает начать
+    // скачивание, если ссылку отозвать в тот же миг.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast("Наклейки собраны");
+  } catch (err) {
+    showToast("Не удалось собрать наклейки: " + err.message);
+  } finally {
+    button.disabled = false;
+    button.querySelector("span").textContent = label;
+  }
+});
 
 /* ---------- Форма «Добавить прибор» ---------- */
 
