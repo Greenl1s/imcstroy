@@ -91,7 +91,10 @@ export function verificationInfo(item) {
   if (days === null) return { kind: 'unset', tone: '', date: '', rest: 'срок не заполнен', days: null };
   if (days < 0) {
     return { kind: 'expired', tone: 'bad', date, days,
-      rest: `просрочена ${plural(Math.abs(days), 'день', 'дня', 'дней')}` };
+      // «Просрочено на 29 дней», а не «просрочена 29 дней»: подлежащее
+      // здесь не поверка, а сам факт — так фраза читается сама по себе,
+      // без опоры на заголовок колонки.
+      rest: `Просрочено на ${plural(Math.abs(days), 'день', 'дня', 'дней')}` };
   }
   if (days === 0) return { kind: 'soon', tone: 'warn', date, days, rest: 'заканчивается сегодня' };
   if (days <= VERIFICATION_SOON_DAYS) {

@@ -410,16 +410,32 @@ export async function renderCard(id, goList) {
           <div class="card-actions">${main}</div>
         </div>
 
-        <div class="card-verif${vTone}">
-          ${v.date ? `<div class="card-verif-date">${escapeHtml(v.date)}</div>` : ''}
-          <div class="card-verif-text">
+        <!-- Вся полоса открывает документ, а не кнопка в её углу:
+             отдельная кнопка занимала место и делила надвое то, что для
+             человека и так одно целое — «поверка». Если документа нет,
+             полоса остаётся обычным блоком: нажимать не на что, и делать
+             вид, что есть, нечестно. -->
+        ${item.has_document ? `
+        <button type="button" class="card-verif card-verif-open${vTone}" data-document
+                title="Открыть ${escapeHtml(documentButtonLabel(item.check_type).toLowerCase())}">
+          ${v.date ? `<span class="card-verif-date">${escapeHtml(v.date)}</span>` : ''}
+          <span class="card-verif-text">
             <b>${escapeHtml(verifHeadline(item, v))}</b>
             ${item.verification_date ? 'Предыдущая — ' + escapeHtml(fmtDate(item.verification_date)) : 'Дата предыдущей не заполнена'}
-          </div>
-          ${item.has_document
-            ? `<button class="secondary" type="button" data-document>Открыть ${escapeHtml(documentButtonLabel(item.check_type).toLowerCase())}</button>`
-            : ''}
-        </div>
+          </span>
+          <span class="card-verif-go">Открыть
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </span>
+        </button>` : `
+        <div class="card-verif${vTone}">
+          ${v.date ? `<span class="card-verif-date">${escapeHtml(v.date)}</span>` : ''}
+          <span class="card-verif-text">
+            <b>${escapeHtml(verifHeadline(item, v))}</b>
+            ${item.verification_date ? 'Предыдущая — ' + escapeHtml(fmtDate(item.verification_date)) : 'Дата предыдущей не заполнена'}
+          </span>
+          <span class="card-verif-none">${escapeHtml(documentButtonLabel(item.check_type))} не приложен${
+            item.check_type === 'calibration' ? 'а' : ''}</span>
+        </div>`}
 
         ${holder}
 
@@ -441,11 +457,25 @@ export async function renderCard(id, goList) {
              не видно вообще. -->
         <div class="card-box hidden" id="cardKits"></div>
 
+        <!-- Раньше это были неприметные серые кнопки в одну строку
+             с «К списку», и «Редактировать» терялось среди них. Теперь
+             у каждой значок и заметная рамка, а «К списку» отсюда ушла
+             наверх, к «В ИСУ»: это не действие с прибором, а выход
+             из карточки, и место ему рядом с другим выходом. -->
         <div class="card-minor">
-          <button class="secondary" type="button" data-history>История прибора</button>
-          <button class="secondary" type="button" data-copy>Копировать данные</button>
-          ${admin && item.status !== 'retired' ? '<button class="secondary" type="button" data-edit>Редактировать</button>' : ''}
-          <button class="secondary" type="button" data-back>К списку</button>
+          <button class="card-act" type="button" data-history>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            История прибора
+          </button>
+          <button class="card-act" type="button" data-copy>
+            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>
+            Копировать данные
+          </button>
+          ${admin && item.status !== 'retired' ? `
+          <button class="card-act card-act-main" type="button" data-edit>
+            <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>
+            Редактировать
+          </button>` : ''}
         </div>
 
         ${danger ? `
@@ -526,7 +556,9 @@ function verifHeadline(item, v) {
   const what = checkTypeText(item.check_type).toLowerCase();
   if (v.kind === 'none') return 'Метрологический контроль не требуется';
   if (v.kind === 'unset') return `Срок действия (${what}) не заполнен`;
-  if (v.kind === 'expired') return `${checkTypeText(item.check_type)} просрочена: ${v.rest.replace('просрочена ', '')}`;
+  // v.rest уже читается как самостоятельная фраза («Просрочено на 29 дней»),
+  // поэтому здесь только уточняем, что именно просрочено.
+  if (v.kind === 'expired') return `${checkTypeText(item.check_type)}: ${v.rest.toLowerCase()}`;
   if (v.kind === 'soon') return `${checkTypeText(item.check_type)} заканчивается: ${v.rest}`;
   return `${checkTypeText(item.check_type)} действует, ${v.rest}`;
 }

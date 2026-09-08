@@ -53,6 +53,9 @@ function bindEvents() {
     };
   }
 
+  const backToListButton = document.getElementById('backToListButton');
+  if (backToListButton) backToListButton.onclick = () => goList();
+
   document.getElementById('pendingTransfersBtn').onclick = () => showPendingTransfersModal();
 
   document.getElementById('logoutButton').onclick = async () => {
@@ -376,6 +379,12 @@ function renderRoute() {
   const params = new URLSearchParams(location.search);
   const id = params.get('id');
   const kitId = params.get('kit');
+
+  // «К списку» живёт в шапке рядом с «В ИСУ» — это выход из карточки,
+  // а не действие над прибором. Показываем её ровно там, откуда есть
+  // куда выходить.
+  const backToList = document.getElementById('backToListButton');
+  if (backToList) backToList.classList.toggle('hidden', !id && !kitId);
 
   if (kitId) {
     showScreen('kitsScreen');
