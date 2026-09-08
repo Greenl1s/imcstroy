@@ -676,15 +676,22 @@ export function showInstrumentForm(item = null) {
         <span class="row-subtitle">Фото прибора</span>
         <div class="actions" style="margin-top:4px;">
           <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
+          <button type="button" class="secondary" data-upload-photo>С компьютера</button>
           <span class="row-subtitle" data-photo-status></span>
         </div>
+        <input type="file" accept="image/*" multiple hidden data-photo-input>
+        <span class="row-subtitle file-note">Загруженное с компьютера ляжет в папку прибора,
+          в «Изображения». Первый снимок станет фотографией карточки.</span>
       </div>
       <div class="form-field-group">
         <span class="row-subtitle">Фото документа поверки/калибровки</span>
         <div class="actions" style="margin-top:4px;">
           <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
+          <button type="button" class="secondary" data-upload-document>С компьютера</button>
           <span class="row-subtitle" data-document-status></span>
         </div>
+        <input type="file" multiple hidden data-document-input>
+        <span class="row-subtitle file-note">Ляжет в подпапку «Поверка» той же папки.</span>
       </div>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
@@ -708,6 +715,24 @@ export function showInstrumentForm(item = null) {
       form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
     });
   };
+
+  // Загрузка с компьютера. Раньше файл можно было только выбрать из уже
+  // лежащего в файловом менеджере — то есть сначала положить его туда
+  // руками, а потом найти. Теперь можно приложить прямо здесь, и файл
+  // сам ляжет в папку прибора: снимки в «Изображения», свидетельства
+  // в «Поверку». Раскладывает их ИСУ — он один знает, где чья папка.
+  for (const kind of ['photo', 'document']) {
+    const input = form.querySelector(`[data-${kind}-input]`);
+    form.querySelector(`[data-upload-${kind}]`).onclick = () => input.click();
+    input.onchange = () => {
+      const n = input.files.length;
+      form.querySelector(`[data-${kind}-status]`).textContent = n
+        ? `С компьютера: ${n === 1 ? input.files[0].name : `${n} файла(ов)`}`
+        : '';
+      // Выбрали файл с компьютера — значит выбранное «с БД» уже неактуально.
+      if (n) { if (kind === 'photo') pickedPhotoPath = null; else pickedDocumentPath = null; }
+    };
+  }
 
   const removePhoto = form.querySelector('[data-remove-photo]');
   if (removePhoto) {
@@ -750,6 +775,11 @@ export function showInstrumentForm(item = null) {
         await api.linkDocument(saved.id, pickedDocumentPath);
       }
 
+      // Файлы с компьютера кладём после сохранения: до него у прибора
+      // нет номера, а значит и папки, в которую их класть.
+      await uploadToInstrumentFolder(saved.id, form.querySelector('[data-photo-input]').files, 'photo');
+      await uploadToInstrumentFolder(saved.id, form.querySelector('[data-document-input]').files, 'document');
+
       return saved;
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
 
@@ -760,6 +790,50 @@ export function showInstrumentForm(item = null) {
     history.pushState(null, '', `?id=${result.id}`);
     window.dispatchEvent(new Event('app:refresh-route'));
   };
+}
+
+/**
+ * Кладёт выбранные с компьютера файлы в папку прибора.
+ *
+ * Идёт напрямую в ИСУ по относительным адресам: оба сервиса живут на
+ * одном домене (files.<домен>), общий вход действует на обоих, и своего
+ * приёма файлов «Учёту» заводить не надо — используется тот же
+ * /api/upload, что и везде в файловом менеджере.
+ *
+ * Первый файл становится фотографией карточки (или документом), но
+ * только если своего у прибора ещё нет: докинутый в папку снимок не
+ * должен перебивать выбранный вручную.
+ *
+ * Если ИСУ недоступен — говорим об этом, но сам прибор уже сохранён:
+ * терять карточку из-за неудачной загрузки картинки нельзя.
+ */
+async function uploadToInstrumentFolder(instrumentId, fileList, kind) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+
+  const base = window.FILEMANAGER_BASE || '';
+  const dirRes = await fetch(`${base}/api/equipment/upload-dir?id=${instrumentId}&kind=${kind}`,
+    { credentials: 'include' });
+  if (!dirRes.ok) throw new Error('Файловый менеджер не принял файлы — прибор сохранён без них');
+  const { path: dir } = await dirRes.json();
+
+  let first = true;
+  for (const file of files) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('path', dir);
+    form.append('relativePath', file.name);
+    const res = await fetch(`${base}/api/upload`, { method: 'POST', credentials: 'include', body: form });
+    if (!res.ok) throw new Error(`Не удалось загрузить «${file.name}»`);
+    if (first) {
+      await fetch(`${base}/api/equipment/adopt-file`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: instrumentId, path: `${dir}/${file.name}`, kind }),
+      }).catch(() => {});
+      first = false;
+    }
+  }
 }
 
 function showTakeForm(item) {
