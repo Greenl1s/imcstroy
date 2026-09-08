@@ -942,6 +942,238 @@ document.querySelectorAll(".side-item[data-section]").forEach((btn) => {
   });
 });
 
+/* ---------- Оборудование ----------
+   Папка «База данных / Оборудование» — отражение приборов из «Учёта».
+   Классификация — папка, прибор — папка внутри неё, фотографии —
+   в подпапке «Изображения», свидетельства — в «Поверке».
+
+   Синхронизировать нечего: обе системы ходят в одну базу, и прибор,
+   заведённый здесь, появляется в «Учёте» сразу. Раскладку папок держит
+   сервер (src/equipment.js) — здесь только показ и форма. */
+
+const EQUIPMENT_PATH = DB_PATH + "/Оборудование";
+const INSTRUMENTS_APP_URL = "/instruments/";
+
+let equipmentHere = null;   // что сервер сказал про открытую папку
+let equipmentTypes = [];    // классификации, они же папки
+let equipmentCompanies = [];
+
+/**
+ * Открыли папку — спрашиваем сервер, что это за место.
+ *
+ * Решение принимает он: только сервер знает и базу, и диск. Заодно в
+ * корне он приводит раскладку в порядок, поэтому отдельный фоновый
+ * процесс сверки не нужен — папки становятся на места тогда, когда
+ * на них смотрят.
+ */
+async function updateEquipment(path) {
+  const banner = document.getElementById("equipmentBanner");
+  const button = document.getElementById("addInstrumentBtn");
+  const inEquipment = path === EQUIPMENT_PATH || path.startsWith(EQUIPMENT_PATH + "/");
+
+  equipmentHere = null;
+  banner.classList.add("hidden");
+  if (button) button.classList.toggle("hidden", !inEquipment);
+  if (!inEquipment) return;
+
+  try {
+    equipmentHere = await apiFetch(`/api/equipment/describe?path=${encodeURIComponent(path)}`);
+  } catch {
+    return; // раздела «Учёт» может не быть в этой базе — молча живём дальше
+  }
+  if (!equipmentHere) return;
+  renderEquipmentBanner(equipmentHere);
+  // Раскладка могла измениться (сверка в корне) — перечитываем список.
+  if (equipmentHere.kind === "root" && currentPath === path) renderFolderAfterSync(path);
+}
+
+/** После сверки список папок мог поменяться — перечитываем его один раз. */
+let equipmentSyncedFor = null;
+function renderFolderAfterSync(path) {
+  if (equipmentSyncedFor === path) return;
+  equipmentSyncedFor = path;
+  renderFolder(path);
+}
+
+function renderEquipmentBanner(info) {
+  const banner = document.getElementById("equipmentBanner");
+  if (info.kind === "instrument") {
+    banner.innerHTML = instrumentStripHtml(info.instrument);
+    banner.className = "eq-banner";
+  } else if (info.kind === "root" && info.strangers && info.strangers.length) {
+    // Разовая история: до автоматизации в папке уже что-то лежало.
+    // Ничего не двигаем и не удаляем — только говорим, что оно есть.
+    if (localStorage.getItem("eqStrangersHidden") === "1") return;
+    const dirs = info.strangers.filter((x) => x.isDir).length;
+    const rest = info.strangers.length - dirs;
+    banner.innerHTML = `
+      <span class="eq-strong">Здесь лежит ${[
+        dirs ? plural(dirs, "папка", "папки", "папок") : "",
+        rest ? plural(rest, "файл", "файла", "файлов") : "",
+      ].filter(Boolean).join(" и ")}, не относящихся к приборам</span>
+      <span class="eq-fact">${info.strangers.slice(0, 3).map((x) => `«${escapeHtml(x.name)}»`).join(", ")}${
+        info.strangers.length > 3 ? " и другое" : ""}. Их никто не трогал.</span>
+      <span class="eq-spacer"></span>
+      <button type="button" class="eq-btn" id="eqHideStrangers">Больше не показывать</button>`;
+    banner.className = "eq-banner eq-warn";
+    bind(document.getElementById("eqHideStrangers"), "click", () => {
+      localStorage.setItem("eqStrangersHidden", "1");
+      banner.classList.add("hidden");
+    });
+  } else {
+    banner.classList.add("hidden");
+    return;
+  }
+  banner.classList.remove("hidden");
+
+  const card = document.getElementById("eqOpenCard");
+  if (card) {
+    card.onclick = () => {
+      location.href = `${INSTRUMENTS_APP_URL}?id=${encodeURIComponent(info.instrument.id)}`;
+    };
+  }
+}
+
+const EQ_STATUS = { free: "Свободен", busy: "Занят", booked: "Забронирован", retired: "Списан" };
+
+/** Полоса прибора: где он, чем помечен, до какого числа поверка. */
+function instrumentStripHtml(item) {
+  const where = item.status === "busy"
+    ? `${EQ_STATUS.busy}${item.taken_by_name ? " — у " + escapeHtml(item.taken_by_name) : ""}${
+        item.taken_at ? " с " + escapeHtml(fmtEqDate(item.taken_at)) : ""}`
+    : EQ_STATUS[item.status] || item.status;
+  const tone = { free: "ok", busy: "busy", booked: "busy", retired: "muted" }[item.status] || "muted";
+
+  return `
+    <span class="eq-badge eq-${tone}">${where}</span>
+    ${item.taken_where ? `<span class="eq-fact">${escapeHtml(item.taken_where)}</span>` : ""}
+    ${item.control_type_short
+      ? `<span class="eq-badge eq-plain" title="${escapeHtml(item.control_type_name || "")}">${escapeHtml(item.control_type_short)}</span>`
+      : `<span class="eq-badge eq-plain">классификация не указана</span>`}
+    ${eqVerificationHtml(item)}
+    ${item.serial_number ? `<span class="eq-fact">с/н ${escapeHtml(item.serial_number)}</span>` : ""}
+    <span class="eq-spacer"></span>
+    <button type="button" class="eq-btn eq-accent" id="eqOpenCard">Карточка в «Учёте» →</button>`;
+}
+
+/** Срок поверки словами: важно не «есть ли», а когда кончается. */
+function eqVerificationHtml(item) {
+  if (item.check_type === "none") return '<span class="eq-fact">контроль не требуется</span>';
+  if (!item.valid_until) return '<span class="eq-badge eq-warn-b">срок поверки не заполнен</span>';
+  const days = Math.round(
+    (Date.parse(String(item.valid_until).slice(0, 10) + "T00:00:00Z") -
+     Date.parse(new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10) + "T00:00:00Z")) / 86400000
+  );
+  if (days < 0) {
+    return `<span class="eq-badge eq-bad">поверка просрочена ${plural(Math.abs(days), "день", "дня", "дней")}</span>`;
+  }
+  if (days <= 30) {
+    return `<span class="eq-badge eq-warn-b">поверка кончается через ${plural(days, "день", "дня", "дней")}</span>`;
+  }
+  return `<span class="eq-fact">поверка до ${escapeHtml(fmtEqDate(item.valid_until))}</span>`;
+}
+
+const fmtEqDate = (value) => {
+  const s = String(value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const [y, m, d] = s.split("-");
+  return `${d}.${m}.${y}`;
+};
+
+/* ---------- Форма «Добавить прибор» ---------- */
+
+bind(document.getElementById("addInstrumentBtn"), "click", () => openInstrumentForm());
+bind(document.getElementById("instrumentCloseBtn"), "click", () => {
+  document.getElementById("instrumentOverlay").classList.add("hidden");
+});
+
+async function openInstrumentForm() {
+  const form = document.getElementById("instrumentForm");
+  form.reset();
+  document.getElementById("instrumentError").textContent = "";
+  document.getElementById("instrumentOverlay").classList.remove("hidden");
+
+  if (!equipmentTypes.length) {
+    try {
+      equipmentTypes = (await apiFetch("/api/equipment/control-types")).types || [];
+      equipmentCompanies = (await apiFetch("/api/equipment/companies")).companies || [];
+    } catch { /* пусто — значит выбирать не из чего */ }
+  }
+  const typeSelect = document.getElementById("instrumentControlType");
+  typeSelect.innerHTML = '<option value="">Не указано</option>' + equipmentTypes
+    .map((t) => `<option value="${escapeHtml(t.code)}">${escapeHtml(t.full_name)} (${escapeHtml(t.short_name)})</option>`)
+    .join("");
+  document.getElementById("instrumentCompany").innerHTML = '<option value="">Не привязан</option>' +
+    equipmentCompanies.map((c) => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.name)}</option>`).join("");
+
+  // Стоим внутри папки классификации — подставляем её: человек уже
+  // сказал, куда кладёт прибор, спрашивать второй раз незачем.
+  const hint = document.getElementById("instrumentTypeHint");
+  hint.textContent = "";
+  if (equipmentHere && equipmentHere.kind === "classification") {
+    const match = equipmentTypes.find((t) => t.full_name === equipmentHere.name);
+    if (match) {
+      typeSelect.value = match.code;
+      hint.textContent = "Подставлена по папке, в которой вы стоите. Можно поменять — прибор попадёт в другую папку.";
+    }
+  }
+  form.querySelector('[name="name"]').focus();
+}
+
+bind(document.getElementById("instrumentForm"), "submit", async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const button = document.getElementById("instrumentSubmitBtn");
+  const error = document.getElementById("instrumentError");
+  const data = Object.fromEntries(new FormData(form).entries());
+  const photos = Array.from(document.getElementById("instrumentPhotos").files || []);
+  const docs = Array.from(document.getElementById("instrumentDocs").files || []);
+
+  error.textContent = "";
+  if (!String(data.name || "").trim()) return (error.textContent = "Укажите название прибора");
+
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = "Сохраняем…";
+  try {
+    const { instrument } = await apiFetch("/api/equipment/instruments", {
+      method: "POST", body: JSON.stringify(data),
+    });
+    // Файлы идут той же загрузкой, что и всё остальное в системе.
+    // Первый снимок становится фотографией карточки — но только если
+    // своей у прибора ещё нет.
+    await uploadInstrumentFiles(instrument.id, photos, "photo");
+    await uploadInstrumentFiles(instrument.id, docs, "document");
+
+    document.getElementById("instrumentOverlay").classList.add("hidden");
+    showToast(`Прибор «${instrument.name}» добавлен`);
+    equipmentSyncedFor = null;
+    if (currentPath.startsWith(EQUIPMENT_PATH)) renderFolder(currentPath);
+  } catch (err) {
+    error.textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+});
+
+async function uploadInstrumentFiles(instrumentId, fileList, kind) {
+  if (!fileList.length) return;
+  const { path: dir } = await apiFetch(
+    `/api/equipment/upload-dir?id=${instrumentId}&kind=${encodeURIComponent(kind)}`);
+  let first = true;
+  for (const file of fileList) {
+    await uploadOneFile(file, dir, file.name);
+    if (first) {
+      await apiFetch("/api/equipment/adopt-file", {
+        method: "POST",
+        body: JSON.stringify({ id: instrumentId, path: `${dir}/${file.name}`, kind }),
+      }).catch(() => {});
+      first = false;
+    }
+  }
+}
+
 /* ---------- Эксперты ----------
    Справочник экспертов лежит в файлах: /База данных/Эксперты/<Имя>/,
    внутри «Сведения.docx» (из него ГП берёт абзацы описания) и подпапка
@@ -5407,6 +5639,7 @@ async function renderFolder(path) {
   els.folderList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   updateCaseBanner(path);
   updateExpertButton(path);
+  updateEquipment(path);
   try {
     // В корне стадии список делится по типу проекта — значит типы нужны
     // до отрисовки, иначе группы «прыгнут» уже после показа.

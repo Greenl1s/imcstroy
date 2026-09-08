@@ -188,9 +188,16 @@
         </button>
       </div>
       <div id="caseBanner" class="case-banner hidden"></div>
+      <!-- Полоса оборудования: в корне — что лежит постороннего,
+           в папке прибора — что о нём знает «Учёт». -->
+      <div id="equipmentBanner" class="eq-banner hidden"></div>
       <div class="folder-actions" id="folderActions">
         <!-- Видна только в «База данных/Эксперты»: в остальных папках
              заводить экспертов бессмысленно. -->
+        <button class="create-btn hidden" id="addInstrumentBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Добавить прибор</span>
+        </button>
         <button class="create-btn hidden" id="addExpertBtn" type="button">
           <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
           <span>Добавить эксперта</span>
@@ -715,6 +722,55 @@
         Ваш браузер не поддерживает сохранение папки напрямую — доступен только ZIP
       </p>
     </div>
+  </div>
+</div>
+
+<div id="instrumentOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:620px;">
+    <div class="modal-header">
+      <span>Добавить прибор</span>
+      <button class="back-btn" id="instrumentCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="instrumentForm" style="display:flex; flex-direction:column; gap:12px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <label>Инвентарный номер (необязательно)<input type="text" name="inventory_no" maxlength="60"></label>
+      <label>Название<input type="text" name="name" required maxlength="200"></label>
+      <label>Серийный номер<input type="text" name="serial_number" maxlength="120"></label>
+      <label>Модель<input type="text" name="model" maxlength="120"></label>
+      <label>Тип метрологического контроля
+        <select name="check_type">
+          <option value="verification">Поверка</option>
+          <option value="calibration">Калибровка</option>
+          <option value="none">Не требуется</option>
+        </select>
+      </label>
+      <label>Классификация
+        <select name="control_type" id="instrumentControlType"><option value="">Не указано</option></select>
+        <span class="field-hint" id="instrumentTypeHint"></span>
+      </label>
+      <label>Владелец
+        <select name="company_code" id="instrumentCompany"><option value="">Не привязан</option></select>
+      </label>
+      <label>Дата поверки/калибровки<input type="date" name="verification_date"></label>
+      <label>Действительно до<input type="date" name="valid_until"></label>
+      <label>Комментарий<input type="text" name="comment" maxlength="500"></label>
+
+      <label>Фото прибора
+        <input type="file" id="instrumentPhotos" accept="image/*" multiple>
+        <span class="field-hint">Лягут в подпапку «Изображения». Первое станет фотографией карточки в «Учёте».</span>
+      </label>
+      <label>Фото документа поверки/калибровки
+        <input type="file" id="instrumentDocs" multiple>
+        <span class="field-hint">Лягут в подпапку «Поверка».</span>
+      </label>
+
+      <p class="error-text" id="instrumentError"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="instrumentSubmitBtn">Сохранить</button>
+      </div>
+    </form>
   </div>
 </div>
 
