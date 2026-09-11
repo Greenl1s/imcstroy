@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Календарь</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script>
+    // Адрес API. Оба соседних сервиса живут на files.<домен>, календарь
+    // стоит там же под /calendar — Caddy срезает префикс перед тем, как
+    // передать запрос бэкенду. На стенде адрес подменяется на локальный.
+    window.API_BASE = window.API_BASE || '/calendar/api/calendar';
+    // Куда возвращаться из календаря: корень files.<домен> — это ИСУ.
+    window.ISU_URL = window.ISU_URL || '/';
+  </script>
+</head>
+<body>
+  <!-- Вход общий с ИСУ и «Учётом»: своей формы входа у календаря нет.
+       Если cookie нет или она протухла — отправляем туда, где входят. -->
+  <section id="gate" class="gate hidden">
+    <div>
+      <h1>Календарь</h1>
+      <p id="gateText">Чтобы открыть календарь, войдите в ИСУ — вход общий для всех трёх систем.</p>
+      <button class="primary" type="button" onclick="location.href = window.ISU_URL">Перейти ко входу</button>
+    </div>
+  </section>
+
+  <main id="shell" class="shell hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1>Календарь</h1>
+        <div class="nav-group">
+          <button class="ghost" id="todayBtn" type="button">Сегодня</button>
+          <button class="ghost icon-btn" id="prevBtn" type="button" aria-label="Назад">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <button class="ghost icon-btn" id="nextBtn" type="button" aria-label="Вперёд">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="period" id="period"></div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="segmented" id="viewSwitch">
+          <button type="button" data-view="month" class="on">Месяц</button>
+          <button type="button" data-view="week">Неделя</button>
+          <button type="button" data-view="day">День</button>
+        </div>
+        <span class="user-name" id="userBadge"></span>
+        <button class="ghost" id="themeBtn" type="button">Тёмная</button>
+        <button class="ghost" id="isuBtn" type="button">← В ИСУ</button>
+        <button class="primary" id="addBtn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Новое дело
+        </button>
+      </div>
+    </header>
+
+    <!-- Единственное напоминание: то, что на сегодня, видно сразу при входе. -->
+    <section class="today-bar" id="todayBar"></section>
+
+    <section class="board-row">
+      <div class="board" id="board"></div>
+      <aside class="day-panel hidden" id="dayPanel"></aside>
+    </section>
+  </main>
+
+  <dialog id="modal"></dialog>
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
