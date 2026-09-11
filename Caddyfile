@@ -31,6 +31,21 @@ files.{$SITE_ADDRESS} {
         encode gzip
 
         redir /instruments /instruments/ permanent
+        redir /calendar /calendar/ permanent
+
+        # Календарь: тот же приём, что у «Учёта» — Caddy срезает
+        # префикс, и сам сервис о нём ничего не знает.
+        handle /calendar/api/* {
+                uri strip_prefix /calendar
+                reverse_proxy calendar:3000
+        }
+
+        handle /calendar/* {
+                uri strip_prefix /calendar
+                root * /srv/calendar
+                try_files {path} /index.html
+                file_server
+        }
 
         handle /instruments/api/* {
                 uri strip_prefix /instruments
