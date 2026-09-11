@@ -46,6 +46,27 @@ services:
     expose:
       - "3000"
 
+  # Календарь. Третий сервис на той же базе и том же входе: своих
+  # пользователей и своего пароля у него нет — он проверяет ту же
+  # cookie sso_token тем же JWT_SECRET, что api и filemanager.
+  calendar:
+    build: ./calendar
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      SSO_COOKIE_DOMAIN: ${SSO_COOKIE_DOMAIN}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      # Рабочие часы в сетке недели и дня. Меняются здесь, а не в коде.
+      WORK_START_MIN: ${CALENDAR_WORK_START:-480}
+      WORK_END_MIN: ${CALENDAR_WORK_END:-1140}
+      PORT: 3000
+    expose:
+      - "3000"
+
   # Собственный файловый менеджер — вместо FileBrowser Quantum.
   # Своя авторизация, просмотр/загрузка/удаление файлов, открытие
   # Word/Excel/PowerPoint через OnlyOffice, PDF — прямо в браузере.
@@ -119,6 +140,7 @@ services:
     depends_on:
       - api
       - filemanager
+      - calendar
       - onlyoffice
     ports:
       - "80:80"
@@ -128,6 +150,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web:/srv/web:ro
+      - ./web-calendar:/srv/calendar:ro
       - caddy-data:/data
       - caddy-config:/config
 
