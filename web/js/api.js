@@ -131,6 +131,7 @@ export const api = {
   createKit: (data) => request('/kits', { method: 'POST', body: data }),
   updateKit: (id, data) => request(`/kits/${id}`, { method: 'PATCH', body: data }),
   deleteKit: (id) => request(`/kits/${id}`, { method: 'DELETE' }),
+  copyKit: (id) => request(`/kits/${id}/copy`, { method: 'POST', body: {} }),
   addKitItems: (id, ids) => request(`/kits/${id}/items`, { method: 'POST', body: { ids } }),
   // Убрать прибор из состава НАСОВСЕМ — не путать со снятой галочкой
   // на экране проверки перед выездом, та действует только на один выезд.

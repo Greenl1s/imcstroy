@@ -152,6 +152,7 @@ export async function renderKitCard(id, goKits) {
         </div>
         <span class="spacer"></span>
         <button class="secondary" type="button" data-kit-rename>Переименовать</button>
+        <button class="secondary" type="button" data-kit-copy>Дублировать</button>
         <button class="danger" type="button" data-kit-delete>Удалить комплект</button>
       </div>
 
@@ -254,6 +255,18 @@ function bindKitCard(node, kit, goKits) {
 
   const del = node.querySelector('[data-kit-delete]');
   if (del) del.onclick = () => confirmDeleteKit(kit, goKits);
+
+  // Копия открывается сразу: обычно её и делают затем, чтобы тут же
+  // поправить состав под следующий выезд.
+  const copy = node.querySelector('[data-kit-copy]');
+  if (copy) copy.onclick = async (event) => {
+    const made = await run(() => api.copyKit(kit.id), {
+      button: event.currentTarget, success: 'Копия готова',
+    });
+    if (made === null) return;
+    history.pushState(null, '', `?kit=${made.id}`);
+    window.dispatchEvent(new Event('app:refresh-route'));
+  };
 
   node.querySelectorAll('[data-kit-add]').forEach((b) => {
     b.onclick = () => showAddItemsForm(kit);

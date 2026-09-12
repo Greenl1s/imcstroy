@@ -938,4 +938,39 @@ function bindMenu() {
     dropdown.classList.add('hidden');
     exportAllQrCodes();
   };
+  document.getElementById('downloadQrButton').onclick = () => {
+    dropdown.classList.add('hidden');
+    downloadAllQrCodes();
+  };
+}
+
+/**
+ * Скачивает все QR-коды одним архивом.
+ *
+ * Архив собирает ИСУ — он и так хранит коды в папках приборов и умеет
+ * отдавать их плоским списком с человеческими именами файлов. Своего
+ * сборщика «Учёту» заводить незачем: получились бы две разные кучи
+ * наклеек, которые однажды разошлись бы.
+ */
+async function downloadAllQrCodes() {
+  toast('Собираю архив с QR-кодами...');
+  try {
+    const base = window.FILEMANAGER_BASE || '';
+    const res = await fetch(`${base}/api/equipment/qr-archive`, { credentials: 'include' });
+    if (!res.ok) {
+      const message = res.status === 404
+        ? 'QR-кодов пока нет — сначала выгрузите их в папки приборов'
+        : 'Файловый менеджер не отдал архив';
+      return toast(message, true);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'Наклейки с QR.zip';
+    link.click();
+    URL.revokeObjectURL(url);
+    toast('Архив скачан');
+  } catch {
+    toast('Не удалось скачать архив', true);
+  }
 }

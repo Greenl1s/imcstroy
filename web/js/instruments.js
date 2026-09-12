@@ -381,13 +381,10 @@ export async function renderCard(id, goList) {
         <div class="card-photo" id="cardPhoto">
           ${item.has_photo ? 'Загрузка фото...' : 'Фотографии нет'}
         </div>
-        ${item.has_photo || item.has_document ? `
-          <div class="card-strip">
-            ${item.has_photo ? '<button class="card-thumb is-on" type="button" data-show="photo">Прибор</button>' : ''}
-            ${item.has_document
-              ? `<button class="card-thumb" type="button" data-show="document">${escapeHtml(documentButtonLabel(item.check_type))}</button>`
-              : ''}
-          </div>` : ''}
+<!-- Переключателя «Прибор / Поверка» здесь больше нет: в этом месте
+             карточки показывается только сам прибор. Документ смотрится
+             по строке поверки ниже — там он и открывается целиком, а не
+             вписанным в маленькую рамку. -->
         <div class="card-qr">
           <div class="card-qr-box" id="cardQrBox"></div>
           <div class="card-qr-text">
@@ -563,25 +560,69 @@ function verifHeadline(item, v) {
   return `${checkTypeText(item.check_type)} действует, ${v.rest}`;
 }
 
-/** Переключение «фото прибора ↔ скан документа» без ухода со страницы. */
+/** Фото прибора в карточке открывается на весь экран по щелчку. */
 function bindGallery(item) {
   const box = document.getElementById('cardPhoto');
-  document.querySelectorAll('[data-show]').forEach((btn) => {
-    btn.onclick = async () => {
-      document.querySelectorAll('[data-show]').forEach((b) => b.classList.toggle('is-on', b === btn));
-      box.textContent = 'Загрузка...';
-      if (btn.dataset.show === 'photo') {
-        const url = await api.photoUrl(item.id);
-        box.innerHTML = url ? `<img src="${url}" alt="Фото прибора">` : 'Фото не открылось';
-        return;
-      }
-      const doc = await api.documentUrl(item.id);
-      if (!doc) { box.textContent = 'Документ не открылся'; return; }
-      box.innerHTML = doc.contentType.startsWith('image/')
-        ? `<img src="${doc.url}" alt="Документ">`
-        : `<a class="card-doc-link" href="${doc.url}" target="_blank" rel="noopener">Открыть документ</a>`;
-    };
-  });
+  if (!box) return;
+  box.onclick = () => {
+    const img = box.querySelector('img');
+    if (img) showLightbox(img.src, item.name);
+  };
+}
+
+/**
+ * Картинка во весь экран.
+ *
+ * Нужна ровно затем, чтобы прочитать мелкий текст на свидетельстве:
+ * в рамке карточки или окна сроки видно, но не разобрать. Поэтому
+ * щелчок по картинке ещё и приближает её вдвое, а повторный —
+ * возвращает обратно.
+ */
+export function showLightbox(src, caption = '') {
+  // Именно <dialog> и showModal(): документ открывается поверх окна,
+  // которое само уже модальное. Обычный div с любым z-index оказался
+  // бы ПОД ним — модальные окна живут в собственном слое браузера.
+  const node = document.createElement('dialog');
+  node.className = 'lightbox';
+  node.innerHTML = `
+    <div class="lightbox-bar">
+      <span class="lightbox-caption">${escapeHtml(caption)}</span>
+      <span class="lightbox-hint">Щелчок по изображению — приблизить, Esc — закрыть</span>
+      <button class="lightbox-close" type="button" aria-label="Закрыть">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="lightbox-stage"><img src="${src}" alt="${escapeHtml(caption)}"></div>`;
+
+  const close = () => {
+    if (node.open) node.close();
+    node.remove();
+  };
+  // Esc у <dialog> работает сам, но закрытый диалог остаётся в дереве —
+  // убираем узел, чтобы они не копились.
+  node.addEventListener('close', () => node.remove());
+
+  node.querySelector('.lightbox-close').onclick = close;
+  // Щелчок мимо картинки закрывает — привычнее, чем искать крестик.
+  node.onclick = (e) => { if (e.target === node || e.target.classList.contains('lightbox-stage')) close(); };
+
+  const img = node.querySelector('img');
+  const stage = node.querySelector('.lightbox-stage');
+  img.onclick = (e) => {
+    e.stopPropagation();
+    const zoomed = stage.classList.toggle('is-zoomed');
+    if (zoomed) {
+      // Приближаем к тому месту, куда ткнули, а не к середине картинки.
+      const rect = img.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      stage.scrollLeft = x * stage.scrollWidth - stage.clientWidth / 2;
+      stage.scrollTop = y * stage.scrollHeight - stage.clientHeight / 2;
+    }
+  };
+
+  document.body.appendChild(node);
+  node.showModal();
 }
 
 /** Маленький QR прямо в карточке — его печатают на наклейку. */
@@ -1288,6 +1329,11 @@ async function askVerificationDates(item) {
   const openDoc = form.querySelector('[data-open-doc]');
   if (openDoc) openDoc.onclick = () => window.open(result.url, '_blank');
 
+  // Сроки написаны на свидетельстве мелко: в рамке окна их видно, но не
+  // прочитать. Щелчок по картинке открывает её во весь экран.
+  const shot = form.querySelector('.verif-dates-preview img');
+  if (shot) shot.onclick = () => showLightbox(shot.src, documentButtonLabel(item.check_type));
+
   return new Promise((resolve) => {
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
@@ -1351,6 +1397,9 @@ async function showDocument(item) {
   if (openBtn) {
     openBtn.onclick = () => window.open(url, '_blank');
   }
+
+  const shot = document.querySelector('.document-photo');
+  if (shot) shot.onclick = () => showLightbox(shot.src, `${title} · ${item.name}`);
 
   document.querySelector('[data-download-document]').onclick = () => {
     const link = document.createElement('a');
