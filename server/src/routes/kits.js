@@ -255,6 +255,56 @@ kits.delete('/:id/items/:instrumentId', async (req, res) => {
 });
 
 /**
+ * Копия комплекта.
+ *
+ * Нужна, когда следующий выезд похож на прошлый: проще взять готовый
+ * список и убрать лишнее, чем собирать всё заново. Приборы копируются
+ * как есть, даже занятые: комплект — это список того, что брать,
+ * а не бронь. Занятость проверяется в момент выдачи, там ей и место.
+ *
+ * Название у комплектов уникальное, поэтому к копии приписывается
+ * «(1)», а если такая уже есть — «(2)» и так далее.
+ */
+kits.post('/:id/copy', async (req, res) => {
+  const id = Number(req.params.id);
+  const source = await loadKit(id);
+
+  const { rows: taken } = await query('SELECT name FROM kits');
+  const names = new Set(taken.map((r) => r.name));
+
+  // «Выездной набор (1)» копируем как «Выездной набор (2)», а не
+  // «Выездной набор (1) (1)»: копия копии — всё ещё копия оригинала.
+  const base = source.name.replace(/\s*\(\d+\)\s*$/, '');
+  let name = '';
+  for (let n = 1; n <= 999; n++) {
+    const candidate = `${base} (${n})`.slice(0, 120);
+    if (!names.has(candidate)) { name = candidate; break; }
+  }
+  if (!name) return res.status(409).json({ error: 'Слишком много копий этого комплекта' });
+
+  const copy = await transaction(async (client) => {
+    const { rows } = await client.query(
+      'INSERT INTO kits (name, description, created_by) VALUES ($1, $2, $3) RETURNING *',
+      [name, source.description || '', req.user.id]
+    );
+    const { rows: items } = await client.query(
+      'SELECT instrument_id, position FROM kit_items WHERE kit_id = $1 ORDER BY position, instrument_id',
+      [id]
+    );
+    for (const item of items) {
+      await client.query(
+        'INSERT INTO kit_items (kit_id, instrument_id, position) VALUES ($1, $2, $3)',
+        [rows[0].id, item.instrument_id, item.position]
+      );
+    }
+    return rows[0];
+  });
+
+  const { rows } = await query('SELECT * FROM kits_view WHERE id = $1', [copy.id]);
+  res.status(201).json({ ...rows[0], items: await kitItems(copy.id) });
+});
+
+/**
  * Удалить комплект целиком. Приборы не трогаются вообще —
  * исчезает только запись о том, что они были собраны вместе.
  */
