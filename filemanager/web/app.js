@@ -64,8 +64,8 @@ const els = {
   projectForm: document.getElementById("projectForm"),
   projectFormError: document.getElementById("projectFormError"),
   uploadInput: document.getElementById("uploadInput"),
-  createDbBtn: document.getElementById("createDbBtn"),
-  createDbMenu: document.getElementById("createDbMenu"),
+  createSideBtn: document.getElementById("createSideBtn"),
+  createSideMenu: document.getElementById("createSideMenu"),
   createCasesBtn: document.getElementById("createCasesBtn"),
   planfixSyncBtn: document.getElementById("planfixSyncBtn"),
   createCasesMenu: document.getElementById("createCasesMenu"),
@@ -286,7 +286,12 @@ async function apiFetch(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || ("HTTP " + res.status));
+    const err = new Error(body.message || ("HTTP " + res.status));
+    // Код и тело ответа нужны вызывающему: по ним он отличает «нельзя»
+    // от «нельзя без подтверждения». Раньше наружу уходил только текст.
+    err.status = res.status;
+    err.data = body;
+    throw err;
   }
   return res.json();
 }
@@ -490,6 +495,18 @@ function applyPermissionsUI() {
   // Очистка истории — тоже админское и необратимое.
   const clearHistoryBtn = document.getElementById("historyClearBtn");
   if (clearHistoryBtn) clearHistoryBtn.classList.toggle("hidden", rootOnlyAdmin);
+  // В панели пункты «Новый проект» и «Гарантийное письмо» живут по тем же
+  // правилам, что и в колонке «Дела»: нет доступа к делам — нет и пунктов.
+  if (els.createSideMenu) {
+    els.createSideMenu.querySelectorAll(".side-create-case, #createSideSep")
+      .forEach((item) => item.classList.toggle("hidden", !p.can_cases));
+    els.createSideMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
+      .forEach((item) => item.classList.toggle("hidden", !p.can_db));
+  }
+  if (els.createSideBtn) {
+    // Ни дел, ни файлов — создавать нечего, кнопку прячем совсем.
+    els.createSideBtn.classList.toggle("hidden", !p.can_db && !p.can_cases);
+  }
   if (els.createCasesMenu) {
     els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
       .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
@@ -508,6 +525,15 @@ function applyPermissionsUI() {
 // Запускает подходящий начальный экран после входа/загрузки страницы.
 function enterAppForUser() {
   checkBuildMatch();
+
+  // Место на диске и счётчик корзины раньше запрашивались только при
+  // запуске страницы. Войти можно двумя путями — с уже живой сессией
+  // (тогда запуск и есть вход) и через форму входа, и во втором случае
+  // виджеты оставались пустыми до перезагрузки. Запрашиваем их здесь:
+  // это единственное место, через которое проходят оба пути.
+  loadDiskUsage();
+  refreshTrashBadge();
+
   const allowed = applyPermissionsUI();
 
   // Пришли по ссылке на конкретную папку — открываем сразу её.
@@ -1676,7 +1702,7 @@ async function deleteColumnSelected(key) {
   const paths = [...st.selected];
   try {
     const results = await Promise.allSettled(
-      paths.map((p) => apiFetch(`/api/resources?path=${encodeURIComponent(p)}`, { method: "DELETE" }))
+      paths.map((p) => deleteResource(p))
     );
     const failed = results.filter((r) => r.status === "rejected");
     exitColumnSelectMode(key);
@@ -1883,6 +1909,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeCreateMenus();
 });
 
+/** Открыта ли сейчас папка (а не две колонки «Главной»). */
+function isFolderViewOpen() {
+  return Boolean(els.folderView) && !els.folderView.classList.contains("hidden");
+}
+
 function wireCreateMenu(btn, menu, getTarget) {
   if (!btn || !menu) return;
   btn.addEventListener("click", (e) => {
@@ -1890,6 +1921,14 @@ function wireCreateMenu(btn, menu, getTarget) {
     const wasOpen = !menu.classList.contains("hidden");
     closeCreateMenus();
     if (wasOpen) return;
+    // Подпись «куда» пишется в момент открытия: путь мог поменяться
+    // с прошлого раза, а человек должен видеть, куда кладёт.
+    const where = menu.querySelector(".create-menu-where");
+    if (where) {
+      const { path } = getTarget();
+      const name = String(path || "").split("/").filter(Boolean).pop();
+      where.textContent = name ? `в папке «${name}»` : "в корне";
+    }
     menu.classList.remove("hidden");
     btn.setAttribute("aria-expanded", "true");
     openCreateMenus.push({ btn, menu });
@@ -1910,10 +1949,14 @@ function wireCreateMenu(btn, menu, getTarget) {
   });
 }
 
-wireCreateMenu(els.createDbBtn, els.createDbMenu, () => ({
-  path: DB_PATH,
-  refresh: () => loadColumnList("db"),
-}));
+// Кнопка в панели создаёт там, где человек сейчас находится: в открытой
+// папке, а если открыты колонки — в корне «База данных». Иначе пришлось
+// бы каждый раз гадать, куда именно ляжет новая папка.
+wireCreateMenu(els.createSideBtn, els.createSideMenu, () => (
+  isFolderViewOpen()
+    ? { path: currentPath, refresh: () => renderFolder(currentPath) }
+    : { path: DB_PATH, refresh: () => loadColumnList("db") }
+));
 wireCreateMenu(els.createCasesBtn, els.createCasesMenu, () => ({
   path: CASES_PATH,
   refresh: () => loadColumnList("cases"),
@@ -2407,6 +2450,42 @@ async function advanceCaseStage(kase, targetStage, btn) {
   }
 }
 
+/**
+ * Отмена проекта — такой же переход, как остальные, только папка уезжает
+ * в «Архив / Отменённые», а не в папку стадии, и нужна причина: без неё
+ * через полгода никто не вспомнит, почему проект остановили.
+ *
+ * Раньше это была отдельная кнопка на карточке. Теперь и отмена, и
+ * перевод по стадиям живут в одном месте — на бейдже стадии, — чтобы
+ * не приходилось помнить, где какое действие лежит.
+ */
+async function cancelCaseStage(kase, btn) {
+  const reason = prompt(
+    `Отменить проект «${kase.name}»?\n\n` +
+    "Папка уедет в «Архив / Отменённые», в Planfix проект станет отменённым.\n" +
+    "Напишите причину — она останется в истории проекта:"
+  );
+  if (reason === null) return false;
+  if (!reason.trim()) {
+    alert("Без причины отменить нельзя: именно она объясняет, что случилось.");
+    return false;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    await apiFetch(`/api/cases/${kase.id}/cancel`, {
+      method: "POST", body: JSON.stringify({ reason: reason.trim() }),
+    });
+    showToast(`«${kase.name}» отменён`);
+    return true;
+  } catch (err) {
+    alert("Не удалось отменить проект: " + err.message);
+    return false;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 const STAGE_ORDER = ["plan", "active", "control", "done"];
 
 function stageBadgeHtml(project) {
@@ -2451,6 +2530,10 @@ function stagePickerHtml(kase, { canWrite = true } = {}) {
         <button type="button" role="menuitem" data-stage-to="${st}">
           <span class="stage-dot stage-${st}"></span>${STAGE_LABEL[st]}
         </button>`).join("")}
+      <span class="stage-menu-sep"></span>
+      <button type="button" role="menuitem" class="stage-menu-cancel" data-stage-to="cancelled">
+        <span class="stage-dot stage-cancelled"></span>Отмена
+      </button>
     </span>
   </span>`;
 }
@@ -2485,7 +2568,11 @@ function wireStagePickers(root, findCase, onMoved) {
         const kase = findCase(wrap.dataset.stagePick);
         if (!kase) return;
         closeStageMenus();
-        if (!(await advanceCaseStage(kase, item.dataset.stageTo, item))) return;
+        const to = item.dataset.stageTo;
+        const ok = to === "cancelled"
+          ? await cancelCaseStage(kase, item)
+          : await advanceCaseStage(kase, to, item);
+        if (!ok) return;
         onMoved();
       });
     });
@@ -2535,10 +2622,9 @@ function renderCaseBanner(project) {
   // где проект, что горит и куда идти за подробностями.
   const overdue = Number(project.overdue_tasks || 0);
 
+  // Отдельной кнопки «Отменить проект» здесь больше нет: отмена — такой
+  // же переход, как и остальные, и живёт в том же меню на бейдже стадии.
   const rare = [`<button type="button" id="caseEditBtn">Редактировать</button>`];
-  if (!project.is_cancelled) {
-    rare.push(`<button type="button" class="danger" id="caseCancelBtn">Отменить проект</button>`);
-  }
 
   // Перенос стадии — это сам бейдж: щёлкнул по «ПЛАН», выбрал куда.
   // Отдельные «список стадий + кнопка Переместить» отсюда убраны: они
@@ -2591,26 +2677,6 @@ function renderCaseBanner(project) {
 
   bind(document.getElementById("caseEditBtn"), "click", () => openCaseEdit(project));
 
-  const cancelBtn = document.getElementById("caseCancelBtn");
-  if (cancelBtn) {
-    cancelBtn.addEventListener("click", async () => {
-      const reason = prompt("Причина отмены проекта:");
-      if (!reason || !reason.trim()) return;
-      cancelBtn.disabled = true;
-      try {
-        await apiFetch(`/api/cases/${project.id}/cancel`, {
-          method: "POST",
-          body: JSON.stringify({ reason: reason.trim() }),
-        });
-        goToColumns(true);
-        loadColumnList("cases");
-      } catch (err) {
-        alert("Не удалось отменить проект: " + err.message);
-      } finally {
-        cancelBtn.disabled = false;
-      }
-    });
-  }
 }
 
 /* ---------- Страница «Задачи» ----------
@@ -5253,13 +5319,20 @@ function renderCaseCard(data) {
 
   /* --- шапка: стадия, статус, тип, ссылка в картотеку --- */
   const typeLabel = caseTypeLabel(p.type, false);
+  // Бейдж стадии здесь — не просто подпись, а тот же орган управления,
+  // что в папке и в списке дел: щелчок открывает список, куда перевести.
   document.getElementById("caseCardBadges").innerHTML = `
-    ${stageBadgeHtml(p)}
+    ${stagePickerHtml(p, { canWrite })}
     <span class="case-chip">${escapeHtml(STATUS_LABEL[p.status] || p.status || "")}</span>
     <span class="case-chip muted">${escapeHtml(typeLabel)}</span>
     ${kadLinkHtml(p)}
     ${copyCaseBtnHtml(p.name, p.case_number)}`;
   wireCopyCaseButtons(document.getElementById("caseCardBadges"));
+  wireStagePickers(document.getElementById("caseCardBadges"), () => p, () => {
+    loadCaseCard();
+    loadColumnList("cases");
+    registryCases = null;
+  });
 
   /* --- кнопки --- */
   const actions = [`<button class="upload-btn" id="ccFolderBtn" type="button">Открыть папку</button>`];
@@ -5281,10 +5354,8 @@ function renderCaseCard(data) {
   document.getElementById("caseCardActions").innerHTML = actions.join("");
 
   /* --- тело --- */
-  // Стадию двигаем прямо здесь: карточка после переноса перечитывается на
-  // месте, поэтому из неё не выкидывает — в отличие от папки, путь которой
-  // после переезда перестаёт существовать.
-  const otherStages = ["plan", "active", "control", "done"].filter((x) => x !== p.stage);
+  // Стадия (и отмена) живут на бейдже в шапке карточки — здесь остаётся
+  // только статус. Двух мест для одного действия быть не должно.
   const statusBlock = canWrite && !p.is_cancelled ? `
     <div class="case-status-row">
       <span class="case-status-label">Статус</span>
@@ -5295,14 +5366,6 @@ function renderCaseCard(data) {
       </select>
       <span class="case-status-hint">меняется сразу</span>
 
-      <span class="case-status-sep"></span>
-
-      <span class="case-status-label">Стадия</span>
-      <select id="ccStage">
-        ${otherStages.map((x) => `<option value="${x}">${STAGE_LABEL[x]}</option>`).join("")}
-      </select>
-      <button type="button" class="reg-btn" id="ccStageBtn">Переместить</button>
-      <span class="case-status-hint">переносит папку дела и меняет карточку в Planfix</span>
     </div>` : "";
 
   const cancelled = p.is_cancelled ? `
@@ -5446,20 +5509,6 @@ function wireCaseCard(data) {
 
   // Статус меняем сразу, без кнопки «Сохранить»: это одно поле, и лишний
   // шаг тут только мешает. При отказе возвращаем прежнее значение.
-  // Перенос стадии — тем же общим кодом, что и в папке и в списке дел.
-  // После переноса перечитываем карточку на месте: человек остался там же,
-  // где был, и сразу видит новую стадию и новый путь папки.
-  const stageBtn = document.getElementById("ccStageBtn");
-  if (stageBtn) {
-    stageBtn.addEventListener("click", async () => {
-      const target = document.getElementById("ccStage").value;
-      if (!(await advanceCaseStage(p, target, stageBtn))) return;
-      await loadCaseCard();
-      loadColumnList("cases");
-      // Список дел мог остаться открытым в памяти — пусть перечитается.
-      registryCases = null;
-    });
-  }
 
   const status = document.getElementById("ccStatus");
   if (status) {
@@ -5990,7 +6039,7 @@ els.deleteSelectedBtn.addEventListener("click", async () => {
   const paths = [...selectedPaths];
   try {
     const results = await Promise.allSettled(
-      paths.map((p) => apiFetch(`/api/resources?path=${encodeURIComponent(p)}`, { method: "DELETE" }))
+      paths.map((p) => deleteResource(p))
     );
     const failed = results.filter((r) => r.status === "rejected");
     exitSelectMode(false);
@@ -6121,7 +6170,8 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
     } else if (action === "delete") {
       if (!confirm(`Удалить «${target.name}»? Объект уедет в корзину.`)) return;
       try {
-        const res = await apiFetch(`/api/resources?path=${encodeURIComponent(target.path)}`, { method: "DELETE" });
+        const res = await deleteResource(target.path);
+        if (res === null) return;
         refreshContext(target.context);
         refreshTrashBadge();
         reportClosedCases(res);
@@ -6131,6 +6181,31 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
     }
   });
 });
+
+
+/**
+ * Удаление с оглядкой на защищённые папки.
+ *
+ * Сервер сам решает, что защищено, и отвечает 409 с объяснением —
+ * тогда спрашиваем ещё раз и повторяем с подтверждением. Сотруднику
+ * сервер отвечает 403, и мы просто показываем, почему нельзя.
+ */
+async function deleteResource(path) {
+  try {
+    return await apiFetch(`/api/resources?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+  } catch (err) {
+    if (err.status === 409 && err.data && err.data.needsForce) {
+      const ok = confirm(
+        err.data.message + "\n\n" +
+        "Вы администратор, поэтому удалить всё-таки можно. Папка вернётся при следующей сверке, " +
+        "а её содержимое окажется в корзине.\n\nУдалить?"
+      );
+      if (!ok) return null;
+      return apiFetch(`/api/resources?path=${encodeURIComponent(path)}&force=1`, { method: "DELETE" });
+    }
+    throw err;
+  }
+}
 
 /* ---------- Окно "Куда переместить" ---------- */
 
@@ -6969,8 +7044,6 @@ async function loadDiskUsage() {
     showApp();
     history.replaceState({ view: "columns" }, "");
     enterAppForUser();
-    loadDiskUsage();
-    refreshTrashBadge();
   } catch (err) {
     showLogin();
   }

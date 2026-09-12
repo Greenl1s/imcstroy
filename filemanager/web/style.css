@@ -122,6 +122,12 @@
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-sm); box-shadow: 0 10px 30px rgba(20, 30, 25, .16);
 }
+/* Отмена стоит в том же меню, но отделена: это не следующая стадия,
+   а выход из работы над проектом. */
+.stage-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.stage-menu-cancel { color: var(--danger, #b3261e); }
+.stage-dot.stage-cancelled { background: var(--danger, #b3261e); }
+
 .stage-menu-head {
   padding: 4px 8px 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
   text-transform: uppercase; color: var(--text-muted);
@@ -457,12 +463,60 @@ button.primary:hover { background: #2569c9; }
 .side-item.active { background: rgba(255,255,255,.1); color: var(--rail-text-strong); font-weight: 600; }
 .side-item.active svg { stroke: var(--rail-accent); }
 
+/* Кнопка «Создать» в панели — главное действие, поэтому она одна
+   здесь заметная и стоит выше всех разделов. */
+.side-create-wrap { position: relative; margin-bottom: 10px; }
+.side-create {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; min-height: 42px; padding: 0 12px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--rail-accent); color: #10201a;
+  font-family: inherit; font-size: 14.5px; font-weight: 600;
+  cursor: pointer;
+  transition: filter .12s ease, transform .1s ease;
+}
+.side-create:hover { filter: brightness(1.08); }
+.side-create:active { transform: scale(.985); }
+.side-create svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.side-create-wrap .create-menu { right: auto; left: 0; min-width: 246px; }
+.create-menu-where {
+  padding: 4px 10px 6px; font-size: 12px; color: var(--text-muted);
+  border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+
+/* Разделители между смысловыми группами пунктов панели. */
+.side-sep { height: 1px; background: rgba(255,255,255,.12); margin: 8px 10px; }
+
 .side-badge {
   font-size: 12px; font-weight: 700;
   background: rgba(255,255,255,.14); color: var(--rail-text-strong);
   border-radius: 999px; padding: 1px 7px;
 }
-.side-item.active .side-badge { background: var(--accent); color: #fff; }
+.side-item.active /* Кнопка «Создать» в панели — главное действие, поэтому она одна
+   здесь заметная и стоит выше всех разделов. */
+.side-create-wrap { position: relative; margin-bottom: 10px; }
+.side-create {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; min-height: 42px; padding: 0 12px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--rail-accent); color: #10201a;
+  font-family: inherit; font-size: 14.5px; font-weight: 600;
+  cursor: pointer;
+  transition: filter .12s ease, transform .1s ease;
+}
+.side-create:hover { filter: brightness(1.08); }
+.side-create:active { transform: scale(.985); }
+.side-create svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.side-create-wrap .create-menu { right: auto; left: 0; min-width: 246px; }
+.create-menu-where {
+  padding: 4px 10px 6px; font-size: 12px; color: var(--text-muted);
+  border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+
+/* Разделители между смысловыми группами пунктов панели. */
+.side-sep { height: 1px; background: rgba(255,255,255,.12); margin: 8px 10px; }
+
+.side-badge { background: var(--accent); color: #fff; }
 
 .side-divider { height: 1px; background: rgba(255,255,255,.1); margin: 8px 4px; }
 
