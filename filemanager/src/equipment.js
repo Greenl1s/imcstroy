@@ -32,6 +32,9 @@ const files = require("./files");
 
 const EQUIPMENT_DIR = "/База данных/Оборудование";
 const RETIRED_DIRNAME = "Списанные";
+// Сюда уезжают папки приборов, которых больше нет в «Учёте»:
+// файлы целы, но видно, что прибор из системы удалён.
+const ARCHIVE_DIRNAME = "Архив";
 const NO_TYPE_DIRNAME = "Не указано";
 const IMAGES_DIRNAME = "Изображения";
 const DOCS_DIRNAME = "Поверка";
@@ -132,16 +135,17 @@ async function loadInstruments() {
 /**
  * Приводит папки в соответствие с базой.
  *
- * Возвращает отчёт: что завели, что перенесли. Ничего не удаляет —
- * удаление папки с фотографиями из-за расхождения в данных было бы
- * несоразмерной ценой за аккуратность.
+ * Возвращает отчёт: что завели, что перенесли, что убрали в архив.
+ * Папки с файлами не удаляются никогда — осиротевшая уезжает
+ * в «Архив». Удаление папки со свидетельствами из-за расхождения
+ * в данных было бы несоразмерной ценой за аккуратность.
  *
  * Вызывается после любого изменения прибора и при открытии папки
  * «Оборудование». Дешёвая: сравнивает строки, а трогает диск только
  * там, где действительно разошлось.
  */
 async function sync(options = {}) {
-  const report = { created: [], moved: [], skipped: [], qr: 0 };
+  const report = { created: [], moved: [], archived: [], skipped: [], qr: 0 };
 
   let instruments;
   let typesByCode;
@@ -197,7 +201,111 @@ async function sync(options = {}) {
     }
   }
 
+  await archiveOrphans(instruments, typesByCode, report);
+
   return report;
+}
+
+/**
+ * Папки, которым больше нечего соответствовать, уезжают в «Архив».
+ *
+ * Прибор удалили в «Учёте» — его папка со снимками и свидетельствами
+ * остаётся сиротой. Удалять её молча нельзя: там документы, которые
+ * никто больше не восстановит. Поэтому она переезжает в
+ * «Оборудование/Архив» — видно, что прибора нет, но файлы целы.
+ *
+ * Пустая папка классификации, которой больше нет в списке, туда же:
+ * это просто мусор. Непустую не трогаем — в ней что-то лежит, и это
+ * «что-то» положил человек.
+ */
+async function archiveOrphans(instruments, typesByCode, report) {
+  const expected = new Set(instruments.map((i) => expectedFolder(i, typesByCode)));
+  const liveTypes = new Set([
+    ...[...typesByCode.values()].map((t) => sanitizeSegment(t.full_name)),
+    RETIRED_DIRNAME, NO_TYPE_DIRNAME, ARCHIVE_DIRNAME,
+  ]);
+
+  let level1;
+  try { level1 = await files.listDir(EQUIPMENT_DIR); } catch { return; }
+
+  for (const type of level1.folders) {
+    if (type.name === ARCHIVE_DIRNAME) continue;
+    const typeDir = `${EQUIPMENT_DIR}/${type.name}`;
+
+    let inside;
+    try { inside = await files.listDir(typeDir); } catch { continue; }
+
+    for (const entry of inside.folders) {
+      const rel = `${typeDir}/${entry.name}`;
+      if (expected.has(rel)) continue;
+      // Трогаем только свои папки. Признак — QR-код внутри: его кладёт
+      // сверка и больше никто. Папку, которую человек завёл руками,
+      // модуль не двигает: это его правило с самого начала.
+      if (!(await files.pathExists(`${rel}/${QR_FILENAME}`))) continue;
+      try {
+        const to = await moveFolder(rel, `${EQUIPMENT_DIR}/${ARCHIVE_DIRNAME}/${entry.name}`);
+        report.archived.push({ from: rel, to });
+      } catch (err) {
+        console.error("Оборудование: не удалось убрать в архив", rel, err.message);
+      }
+    }
+
+    // Классификации больше нет, и внутри пусто — папке тут делать нечего.
+    // Непустую не трогаем: в ней что-то лежит, и это «что-то» положил
+    // человек, а не сверка.
+    if (!liveTypes.has(type.name)) {
+      let rest = { folders: [], files: [] };
+      try { rest = await files.listDir(typeDir); } catch { continue; }
+      if (!rest.folders.length && !rest.files.length) {
+        try {
+          await files.removeEntry(typeDir);
+          report.archived.push({ from: typeDir, to: null });
+        } catch (err) {
+          console.error("Оборудование: не удалось убрать пустую папку", typeDir, err.message);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Можно ли удалять эту папку из файлового менеджера.
+ *
+ * Папки оборудования — не обычные папки, а отражение базы: их заводит
+ * сверка, и удалённая вернётся на место при следующем открытии раздела.
+ * Поэтому удалять их отсюда бессмысленно, а последствия настоящие —
+ * вместе с папкой уезжают в корзину снимки и свидетельства.
+ *
+ * Возвращает причину отказа или null, если удалять можно.
+ * Файлы внутри не защищены: лишний снимок убрать — обычное дело.
+ */
+function deleteGuard(relPath) {
+  const clean = String(relPath || "").replace(/\/+$/, "");
+  if (clean !== EQUIPMENT_DIR && !clean.startsWith(EQUIPMENT_DIR + "/")) return null;
+
+  if (clean === EQUIPMENT_DIR) {
+    return "«Оборудование» — корень раздела приборов, его нельзя удалить.";
+  }
+
+  const rest = clean.slice(EQUIPMENT_DIR.length + 1).split("/");
+
+  // Архив держит папки уже удалённых приборов — их разбирают руками,
+  // и защищать там нечего.
+  if (rest[0] === ARCHIVE_DIRNAME) return null;
+
+  if (rest.length === 1) {
+    return `Папка «${rest[0]}» — это классификация из «Учёта оборудования». ` +
+      "Удалите классификацию там, и папка уйдёт сама.";
+  }
+  if (rest.length === 2) {
+    return `Папка «${rest[1]}» принадлежит прибору. ` +
+      "Удалите или спишите прибор в «Учёте оборудования» — папка уедет в архив вместе с файлами.";
+  }
+  if (rest.length === 3 && INSTRUMENT_SUBDIRS.includes(rest[2])) {
+    return `«${rest[2]}» — служебная папка прибора, в неё складываются файлы из формы. ` +
+      "Её можно очистить, но не удалить.";
+  }
+  return null;
 }
 
 /**
@@ -431,5 +539,5 @@ module.exports = {
   EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
   sync, describe, uploadDirFor, adoptFirstImage, loadControlTypes,
-  ensureQr, rebuildQr, qrFiles,
+  ensureQr, rebuildQr, qrFiles, deleteGuard,
 };

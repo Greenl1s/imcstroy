@@ -977,6 +977,20 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
 // вместе с записью (см. trash.js) — сами по себе они здесь больше не чистятся.
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
+    // Защита папок оборудования. Они — отражение «Учёта»: удалённая
+    // вернётся при следующей сверке, а снимки и свидетельства успеют
+    // уехать в корзину. Сотруднику отказываем совсем, администратору —
+    // только до явного подтверждения: бывает, что разобрать завал
+    // руками всё-таки нужно.
+    const guard = equipment.deleteGuard(req.query.path);
+    if (guard) {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ message: guard });
+      }
+      if (String(req.query.force || "") !== "1") {
+        return res.status(409).json({ message: guard, needsForce: true });
+      }
+    }
     await trash.moveToTrash(req.query.path, req.user.id);
     events.log(req.user, "delete", { path: req.query.path });
     // Удалили папку проекта — сам проект больше не должен предлагаться
