@@ -455,7 +455,16 @@ button.primary:hover { background: #2569c9; }
   border-radius: var(--radius-sm);
   font-size: 14px; font-weight: 500; color: var(--rail-text);
   cursor: pointer; text-align: left;
+  /* Ссылка тоже бывает пунктом панели (Яндекс Диск) — она не должна
+     отличаться от соседей подчёркиванием и чужим шрифтом. */
+  font-family: inherit; text-decoration: none;
   transition: background .12s ease, color .12s ease;
+}
+/* Стрелка «наружу» у пунктов, ведущих на другой сайт: тише текста,
+   на своё место в конце строки, и не растягивается. */
+.side-item .side-out {
+  width: 13px; height: 13px; flex: 0 0 13px;
+  opacity: .55; stroke-width: 2;
 }
 .side-item svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .side-item span:not(.side-badge) { flex: 1; }

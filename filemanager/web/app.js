@@ -299,6 +299,13 @@ async function apiFetch(path, options = {}) {
 function showLogin(errorMsg) {
   els.appScreen.classList.add("hidden");
   els.loginScreen.classList.remove("hidden");
+  // Без сети просить пароль бессмысленно: проверить его некому. Честно
+  // говорим, что случилось, вместо формы, которая всё равно не сработает.
+  if (!navigator.onLine) {
+    els.loginError.textContent =
+      "Нет связи с сервером. Войти сейчас не получится — пароль проверяет сервер.";
+    return;
+  }
   els.loginError.textContent = errorMsg || "";
 }
 
@@ -1412,7 +1419,9 @@ els.loginForm.addEventListener("submit", async (e) => {
     history.replaceState({ view: "columns" }, "");
     enterAppForUser();
   } catch (err) {
-    els.loginError.textContent = "Не удалось войти: проверьте логин и пароль";
+    els.loginError.textContent = navigator.onLine
+      ? "Не удалось войти: проверьте логин и пароль"
+      : "Нет связи с сервером. Войти сейчас не получится — пароль проверяет сервер.";
   }
 });
 

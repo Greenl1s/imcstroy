@@ -6,6 +6,18 @@
 <meta name="build" content="2026-08-31.7">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
+
+<!-- Приложение: установка на устройство, работа без сети, уведомления.
+     Один и тот же набор в трёх системах — адрес у них общий, значит и
+     приложение одно. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#232a28">
+<link rel="apple-touch-icon" href="/app/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ИМС">
+<meta name="mobile-web-app-capable" content="yes">
+<script src="/app/pwa.js" defer></script>
 </head>
 <body>
 
@@ -74,6 +86,23 @@
       <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.1-.7-.7-2.1z"/></svg>
       <span>Учёт оборудования</span>
     </button>
+
+    <!-- Яндекс Диск — чужой сайт со своим входом, поэтому настоящая
+         ссылка, а не кнопка: открывается в новой вкладке (уйти из ИСУ
+         посреди работы человек не просил), и с ней работают привычные
+         «открыть в новой вкладке» и средняя кнопка мыши. Стрелка на
+         конце честно предупреждает, что отсюда уходят наружу.
+
+         Адрес ведёт сразу в файлы (/client/disk), а не на витрину
+         Диска. Какой именно Диск откроется, решает не ссылка, а
+         учётка, под которой человек вошёл в браузере: подставить
+         нужную из ИСУ нельзя — это чужой вход. -->
+    <a class="side-item" id="yandexDiskBtn"
+       href="https://disk.yandex.ru/client/disk" target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .6-7.95 6 6 0 0 0-11.5-1.6A3.7 3.7 0 0 0 7 18z"/></svg>
+      <span>Яндекс Диск</span>
+      <svg class="side-out" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+    </a>
 
     <div class="side-sep"></div>
 
