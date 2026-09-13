@@ -253,7 +253,10 @@ async function boot() {
   } catch (err) {
     // Своего входа у календаря нет — отправляем туда, где он общий.
     document.getElementById('gate').classList.remove('hidden');
-    if (err.status && err.status !== 401) {
+    if (!navigator.onLine) {
+      document.getElementById('gateText').textContent =
+        'Нет связи с сервером. Календарь покажет последнее загруженное, как только связь вернётся.';
+    } else if (err.status && err.status !== 401) {
       document.getElementById('gateText').textContent = 'Календарь пока не отвечает. Попробуйте обновить страницу через минуту.';
     }
     return;
