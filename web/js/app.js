@@ -41,6 +41,14 @@ async function init() {
     // ни токена, ни действующей cookie — показываем экран входа
   }
   showAuth();
+
+  // Без сети просить пароль бессмысленно: проверить его некому. Честно
+  // говорим, что случилось, вместо формы, которая всё равно не сработает.
+  if (!navigator.onLine) {
+    const note = document.querySelector('#authView .auth-panel p');
+    if (note) note.textContent =
+      'Нет связи с сервером. Войти сейчас не получится — пароль проверяет сервер.';
+  }
 }
 
 function bindEvents() {

@@ -769,11 +769,33 @@ export function showInstrumentForm(item = null) {
       <div class="form-field-group">
         <span class="row-subtitle">Фото документа поверки/калибровки</span>
         <div class="actions" style="margin-top:4px;">
+          <!-- Съёмку ставим первой: на объекте свидетельство держат в
+               руках, а не ищут в папках. Кнопка появляется только там,
+               где камера есть, — показывает её код ниже. -->
+          <button type="button" class="primary hidden" data-shoot-document>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><circle cx="12" cy="12.5" r="3.5"/></svg>
+            Снять камерой
+          </button>
           <button type="button" class="secondary" data-pick-document>Выбрать с БД</button>
           <button type="button" class="secondary" data-upload-document>С компьютера</button>
           <span class="row-subtitle" data-document-status></span>
         </div>
+        <!-- capture говорит телефону открыть заднюю камеру сразу, минуя
+             выбор «камера или галерея». На компьютере он не действует,
+             но туда кнопка и не попадает. -->
         <input type="file" multiple hidden data-document-input>
+        <input type="file" accept="image/*" capture="environment" hidden data-camera-input>
+        <div class="shot-preview hidden" data-shot-preview>
+          <img alt="Снимок документа поверки" data-shot-image>
+          <div class="shot-preview-side">
+            <span class="row-subtitle" data-shot-name></span>
+            <span class="shot-hint">Проверьте, читаются ли даты. Снимок уйдёт в папку прибора, когда нажмёте «Сохранить».</span>
+            <div class="actions">
+              <button type="button" class="secondary" data-shoot-again>Переснять</button>
+              <button type="button" class="secondary" data-shot-drop>Убрать</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
         ${isEdit && v.has_photo ? '<button type="button" class="danger" data-remove-photo>Удалить фото</button>' : ''}
@@ -819,8 +841,99 @@ export function showInstrumentForm(item = null) {
         : '';
       // Выбрали файл с компьютера — значит выбранное «с БД» уже неактуально.
       if (n) { if (kind === 'photo') pickedPhotoPath = null; else pickedDocumentPath = null; }
+      // ...и снятое камерой тоже: документ у прибора один, и держать
+      // на экране снимок, который уже не пойдёт в дело, — обман.
+      if (n && kind === 'document') {
+        form.querySelector('[data-shot-preview]').classList.add('hidden');
+      }
     };
   }
+
+  /* ------------------------------------------------------------------
+     Снять свидетельство камерой.
+
+     На объекте документ держат в руках, а телефон уже в кармане: путь
+     «снял — проверил — сохранил» короче любого выбора файлов. Снимок
+     идёт ровно тем же путём, что и приложенный с компьютера файл:
+     ложится в папку «Поверка» этого прибора в ИСУ, становится его
+     документом, а сразу после сохранения открывается привычное окно
+     со сроками.
+
+     Подтверждение — это сам предпросмотр: снимок видно, и пока не
+     нажато «Сохранить», ничего никуда не ушло. Отдельного вопроса
+     «точно?» не задаём: он заставил бы вглядываться в мелкую картинку
+     дважды.
+     ------------------------------------------------------------------ */
+  const shootBtn = form.querySelector('[data-shoot-document]');
+  const cameraInput = form.querySelector('[data-camera-input]');
+  const shotBox = form.querySelector('[data-shot-preview]');
+  let shotUrl = '';
+
+  // Кнопку показываем, только если камера у устройства действительно
+  // есть: на настольном компьютере без вебкамеры она бы открыла обычный
+  // выбор файлов, то есть повторила бы соседнюю кнопку.
+  if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    navigator.mediaDevices.enumerateDevices()
+      .then((devices) => {
+        if (devices.some((d) => d.kind === 'videoinput')) shootBtn.classList.remove('hidden');
+      })
+      .catch(() => { /* не смогли спросить — кнопку не показываем */ });
+  }
+
+  const dropShot = () => {
+    if (shotUrl) { URL.revokeObjectURL(shotUrl); shotUrl = ''; }
+    cameraInput.value = '';
+    form.querySelector('[data-document-input]').files = new DataTransfer().files;
+    shotBox.classList.add('hidden');
+    form.querySelector('[data-document-status]').textContent = '';
+  };
+
+  shootBtn.onclick = () => cameraInput.click();
+  form.querySelector('[data-shoot-again]').onclick = () => cameraInput.click();
+  form.querySelector('[data-shot-drop]').onclick = dropShot;
+
+  cameraInput.onchange = () => {
+    const shot = cameraInput.files[0];
+    if (!shot) return;
+
+    // Телефоны называют снимки как придётся — от «image.jpg» до
+    // случайного набора цифр. Даём имя, по которому файл потом узнают
+    // в папке: что это и когда снято. Время в имени не украшение —
+    // без него второй снимок за день молча затёр бы первый.
+    const now = new Date();
+    const two = (n) => String(n).padStart(2, '0');
+    const kind = form.querySelector('[name="check_type"]')?.value;
+    const what = kind === 'calibration' ? 'Калибровка' : 'Поверка';
+    const ext = (shot.name.match(/\.[a-z0-9]+$/i) || ['.jpg'])[0].toLowerCase();
+    const name = `${what} ${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`
+      + ` ${two(now.getHours())}-${two(now.getMinutes())}${ext}`;
+
+    // Кладём снимок в то же поле, куда попадают файлы с компьютера:
+    // дальше форма не должна знать, откуда взялся документ.
+    const box = new DataTransfer();
+    box.items.add(new File([shot], name, { type: shot.type || 'image/jpeg' }));
+    form.querySelector('[data-document-input]').files = box.files;
+    pickedDocumentPath = null;
+
+    if (shotUrl) URL.revokeObjectURL(shotUrl);
+    shotUrl = URL.createObjectURL(shot);
+    form.querySelector('[data-shot-image]').src = shotUrl;
+    form.querySelector('[data-shot-name]').textContent = name;
+    shotBox.classList.remove('hidden');
+    form.querySelector('[data-document-status]').textContent = 'Снято камерой';
+  };
+
+  // Снимок мелкий, а проверять надо даты — даём рассмотреть его во весь
+  // экран тем же окном, что и документ в карточке.
+  form.querySelector('[data-shot-image]').onclick = () => {
+    if (shotUrl) showLightbox(shotUrl, 'Снимок документа поверки');
+  };
+
+  // Закрыли форму — отпускаем ссылку на снимок, иначе он висел бы
+  // в памяти до перезагрузки страницы.
+  document.getElementById('modal').addEventListener('close', () => {
+    if (shotUrl) URL.revokeObjectURL(shotUrl);
+  }, { once: true });
 
   const removePhoto = form.querySelector('[data-remove-photo]');
   if (removePhoto) {
@@ -856,6 +969,7 @@ export function showInstrumentForm(item = null) {
     // с самого документа, а он в этот момент уже перед глазами.
     const documentAdded = Boolean(pickedDocumentPath) ||
       form.querySelector('[data-document-input]').files.length > 0;
+    let uploadProblem = '';
 
     const result = await run(async () => {
       const saved = isEdit
@@ -871,13 +985,23 @@ export function showInstrumentForm(item = null) {
 
       // Файлы с компьютера кладём после сохранения: до него у прибора
       // нет номера, а значит и папки, в которую их класть.
-      await uploadToInstrumentFolder(saved.id, form.querySelector('[data-photo-input]').files, 'photo');
-      await uploadToInstrumentFolder(saved.id, form.querySelector('[data-document-input]').files, 'document');
+      //
+      // Неудача здесь не отменяет сохранения: прибор уже в базе, и
+      // ронять из-за картинки всю форму — значит заставить человека
+      // сохранять второй раз и завести двойника. Запоминаем, что не
+      // вышло, и скажем об этом отдельно.
+      try {
+        await uploadToInstrumentFolder(saved.id, form.querySelector('[data-photo-input]').files, 'photo');
+        await uploadToInstrumentFolder(saved.id, form.querySelector('[data-document-input]').files, 'document');
+      } catch (err) {
+        uploadProblem = err.message || 'Файлы не загрузились — прибор сохранён без них';
+      }
 
       return saved;
     }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
 
     if (result === null) return;
+    if (uploadProblem) toast(uploadProblem, true);
     if (documentAdded) {
       await askVerificationDates({ ...result, check_type: data.check_type || result.check_type });
     }
@@ -897,9 +1021,9 @@ export function showInstrumentForm(item = null) {
  * приёма файлов «Учёту» заводить не надо — используется тот же
  * /api/upload, что и везде в файловом менеджере.
  *
- * Первый файл становится фотографией карточки (или документом), но
- * только если своего у прибора ещё нет: докинутый в папку снимок не
- * должен перебивать выбранный вручную.
+ * Первый файл становится фотографией карточки (или её документом):
+ * приложили новое свидетельство — карточка показывает новое, а не
+ * прошлогоднее.
  *
  * Если ИСУ недоступен — говорим об этом, но сам прибор уже сохранён:
  * терять карточку из-за неудачной загрузки картинки нельзя.
