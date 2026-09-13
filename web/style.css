@@ -581,10 +581,48 @@ dialog::backdrop { background: rgba(16, 22, 29, 0.55); backdrop-filter: blur(2px
   background: #fff; padding: 8px; border-radius: var(--radius);
   border: 1px solid var(--border);
 }
+/* ---------- Сканер QR ----------
+   Кадр с камеры занимает почти всё окно: наводить проще, когда видно
+   много, а рамка подсказывает, куда целиться. */
+
 /* Картинка во весь экран. Единственная её задача — дать прочитать
    мелкий текст на свидетельстве, поэтому она не «красиво вписана»,
    а показана настолько крупно, насколько помещается, и приближается
    ещё вдвое по щелчку. */
+/* Предпросмотр снятого камерой документа. Снимок слева, что с ним
+   делать — справа; на телефоне складывается в столбец, потому что
+   в 390 точек два столбца превращаются в две узкие полосы. */
+.shot-preview {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.shot-preview img {
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  cursor: zoom-in;
+  background: #000;
+}
+.shot-preview-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.shot-hint { font-size: 13px; color: var(--muted); }
+@media (max-width: 560px) {
+  .shot-preview { flex-direction: column; }
+  .shot-preview img { width: 100%; height: 200px; }
+}
+
 dialog.lightbox {
   position: fixed; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0;
   width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh;
