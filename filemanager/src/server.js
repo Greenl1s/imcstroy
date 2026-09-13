@@ -60,6 +60,24 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 const WEB_ROOT = path.join(__dirname, "..", "web");
+
+/**
+ * Служебный работник приложения (sw.js).
+ *
+ * Две вещи, без которых он не заработает:
+ *   — его нельзя кэшировать, иначе браузер будет неделями держать
+ *     старую версию и обновления приложения не доедут;
+ *   — заголовок Service-Worker-Allowed разрешает ему управлять всем
+ *     адресом, включая /instruments/ и /calendar/, хотя сам файл
+ *     лежит в корне.
+ */
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Service-Worker-Allowed", "/");
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.sendFile(path.join(WEB_ROOT, "sw.js"));
+});
+
 app.use(express.static(WEB_ROOT));
 
 // Папка для временных файлов при загрузке. Создаём заранее явно —
@@ -588,13 +606,14 @@ app.get("/api/equipment/upload-dir", auth.requireAuth, async (req, res) => {
 /**
  * Отметить загруженный файл фотографией прибора (или документом поверки).
  *
- * Только если своего ещё нет: выбранное вручную не должно перебиваться
- * тем, что кто-то докинул в папку ещё один снимок.
+ * Сюда приходит ровно то, что человек сам приложил в форме прибора,
+ * поэтому прежняя ссылка заменяется: приложили новое свидетельство —
+ * карточка должна показывать новое.
  */
 app.post("/api/equipment/adopt-file", auth.requireAuth, async (req, res) => {
   try {
     if (!requireEquipmentAccess(req, res)) return;
-    const adopted = await equipment.adoptFirstImage(
+    const adopted = await equipment.adoptUploadedFile(
       Number(req.body?.id), String(req.body?.path || ""), req.body?.kind
     );
     res.json({ adopted });

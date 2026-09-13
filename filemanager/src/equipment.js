@@ -479,7 +479,10 @@ function decorate(row, typesByCode) {
 async function strangersIn(relPath, typesByCode) {
   const known = new Set([
     ...[...typesByCode.values()].map((t) => sanitizeSegment(t.full_name)),
-    NO_TYPE_DIRNAME, RETIRED_DIRNAME,
+    // «Архив» завела сама система — туда уезжают папки приборов,
+    // которых больше нет в «Учёте». Называть её посторонней значило бы
+    // предлагать человеку разобрать то, что разложили за него.
+    NO_TYPE_DIRNAME, RETIRED_DIRNAME, ARCHIVE_DIRNAME,
   ]);
   try {
     const { folders, files: fileList } = await files.listDir(relPath);
@@ -519,17 +522,22 @@ async function uploadDirFor(instrumentId, kind) {
 }
 
 /**
- * Первое изображение в папке становится фотографией прибора — если
- * фотографии ещё нет.
+ * Только что приложенный файл становится фотографией прибора или его
+ * свидетельством — ссылкой, а не копией в базе: один файл в одном
+ * месте, иначе две копии однажды разойдутся.
  *
- * Именно «если ещё нет»: выбранное вручную фото не должно перебиваться
- * тем, что кто-то докинул в папку ещё один снимок. Ссылкой, а не копией
- * в базе: один файл в одном месте, иначе две копии однажды разойдутся.
+ * Заменяет прежнюю ссылку, а не бережёт её. Раньше было наоборот —
+ * «только если своего ещё нет», чтобы докинутый в папку снимок не
+ * перебил выбранный вручную. Но в папку никто ничего не «докидывает»:
+ * сюда приходят ровно те файлы, которые человек сам приложил в форме
+ * прибора. И приложил он их не затем, чтобы карточка продолжала
+ * показывать прошлогоднее свидетельство: новая поверка — новый
+ * документ, иначе снял поверку камерой, а в карточке всё старое.
  */
-async function adoptFirstImage(instrumentId, relFilePath, kind) {
+async function adoptUploadedFile(instrumentId, relFilePath, kind) {
   const column = kind === "document" ? "document_link_path" : "photo_link_path";
   const { rowCount } = await db.query(
-    `UPDATE instruments SET ${column} = $1 WHERE id = $2 AND ${column} IS NULL`,
+    `UPDATE instruments SET ${column} = $1 WHERE id = $2`,
     [relFilePath, instrumentId]
   );
   return rowCount > 0;
@@ -538,6 +546,6 @@ async function adoptFirstImage(instrumentId, relFilePath, kind) {
 module.exports = {
   EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
-  sync, describe, uploadDirFor, adoptFirstImage, loadControlTypes,
+  sync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes,
   ensureQr, rebuildQr, qrFiles, deleteGuard,
 };
