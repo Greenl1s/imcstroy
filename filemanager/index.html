@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="build" content="2026-08-31.7">
+<title>ИСУ: Информационная система управления</title>
+<link rel="stylesheet" href="/style.css">
+
+<!-- Приложение: установка на устройство, работа без сети, уведомления.
+     Один и тот же набор в трёх системах — адрес у них общий, значит и
+     приложение одно. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#232a28">
+<link rel="apple-touch-icon" href="/app/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ИМС">
+<meta name="mobile-web-app-capable" content="yes">
+<script src="/app/pwa.js" defer></script>
+</head>
+<body>
+
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-panel">
+    <h1>Вход</h1>
+    <label>Логин
+      <input id="loginUsername" autocomplete="username" required>
+    </label>
+    <label>Пароль
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+    </label>
+    <button class="primary" type="submit">Войти</button>
+    <p id="loginError" class="error-text"></p>
+  </form>
+</div>
+
+<div id="appScreen" class="app-screen hidden">
+
+  <div class="sidebar">
+    <button class="side-profile" id="profileBtn" title="Профиль">
+      <span class="side-avatar" id="profileInitials">—</span>
+      <span class="side-profile-text">
+        <span class="side-profile-name" id="profileName">—</span>
+        <span class="side-profile-role" id="profileRole">—</span>
+      </span>
+    </button>
+
+    <!-- Создание живёт в панели, а не в заголовке колонки: создавать
+         обычно хотят «здесь», где бы это «здесь» ни было, и кнопка
+         должна быть на одном и том же месте. Цель — открытая папка,
+         а если открыты колонки — корень «База данных». -->
+    <div class="side-create-wrap">
+      <button class="side-create" id="createSideBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Создать</span>
+      </button>
+      <div class="create-menu hidden" id="createSideMenu" role="menu">
+        <span class="create-menu-where" id="createSideWhere"></span>
+        <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+        <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+        <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+        <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
+        <div class="create-menu-sep" id="createSideSep"></div>
+        <button type="button" data-create="project" class="side-create-case"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>Новый проект</button>
+        <button type="button" data-create="gp" class="side-create-case"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Гарантийное письмо</button>
+      </div>
+    </div>
+
+    <button class="side-item active" data-section="files" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>
+      <span>Главная</span>
+    </button>
+    <button class="side-item" data-section="registry" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 12h8M8 16h5"/></svg>
+      <span>Список дел</span>
+    </button>
+    <button class="side-item" data-section="journal" type="button">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M3 14h18"/></svg>
+      <span>Журнал регистрации</span>
+    </button>
+
+    <div class="side-sep"></div>
+
+    <button class="side-item" id="instrumentsBtn" type="button">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.1-.7-.7-2.1z"/></svg>
+      <span>Учёт оборудования</span>
+    </button>
+
+    <div class="side-sep"></div>
+
+    <button class="side-item" data-section="recent" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span>Последние</span>
+    </button>
+    <button class="side-item" data-section="history" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span>История</span>
+    </button>
+    <button class="side-item" data-section="trash" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+      <span>Корзина</span>
+      <span class="side-badge hidden" id="trashCount"></span>
+    </button>
+
+    <div class="side-bottom">
+      <div class="side-disk" id="diskUsageWidget" title="Загрузка…">
+        <div class="side-disk-top"><span>Место на диске</span><span id="diskUsageFree">…</span></div>
+        <div class="side-disk-track"><div class="side-disk-fill" id="diskUsageFill"></div></div>
+      </div>
+      <button class="side-item side-logout" id="logoutBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"/></svg>
+        <span>Выйти</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="section files-section" id="filesSection" data-view="files">
+
+  <div id="columnsView" class="columns-view">
+
+    <div class="col" data-col="db">
+      <div class="col-header">
+        <span>База данных<span class="col-count hidden" id="dbCount"></span></span>
+<!-- «Создать» переехало в левую панель: одна кнопка на всё,
+             как в облачных дисках. -->      </div>
+      <div class="col-toolbar" id="dbToolbar">
+        <input type="text" class="col-search-input" id="dbSearchInput" placeholder="Поиск...">
+        <select class="col-sort-select" id="dbSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
+      </div>
+      <div class="selection-bar hidden" id="dbSelectionBar" style="margin-bottom:10px;">
+        <span id="dbSelectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="dbDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="dbMoveSelectedBtn" type="button">Переместить</button>
+          <button class="back-btn" id="dbDeleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="dbCancelSelectBtn" type="button">Отмена</button>
+        </div>
+      </div>
+      <div class="col-body" id="dbList"></div>
+    </div>
+
+    <div class="col" data-col="cases">
+      <div class="col-header">
+        <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
+        <div class="col-head-actions">
+        <button class="upload-btn" id="casesTasksBtn" type="button" title="Все задачи по проектам">
+          <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1.2 1.2L7.5 5"/><path d="m4 12 1.2 1.2L7.5 11"/><path d="m4 18 1.2 1.2L7.5 17"/></svg>
+          Задачи<span class="col-count hidden" id="casesTasksCount"></span>
+        </button>
+        <button class="icon-btn hidden" id="planfixSyncBtn" type="button" title="Сверить с Planfix">
+          <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
+        </button>
+        <div class="create-wrap">
+          <button class="create-btn" id="createCasesBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="create-menu hidden" id="createCasesMenu" role="menu">
+            <button type="button" data-create="project"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/><path d="M13 3v5h5"/><path d="M9 14l2 2 4-4"/></svg>Новый проект</button>
+            <button type="button" data-create="gp"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 6 8 6 8-6"/></svg>Гарантийное письмо</button>
+            <div class="create-menu-sep"></div>
+            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+            <div class="create-menu-sep"></div>
+            <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
+          </div>
+        </div>
+        </div>
+      </div>
+      <div class="col-toolbar" id="casesToolbar">
+        <input type="text" class="col-search-input" id="casesSearchInput" placeholder="Поиск...">
+        <select class="col-sort-select" id="casesSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
+      </div>
+      <div class="selection-bar hidden" id="casesSelectionBar" style="margin-bottom:10px;">
+        <span id="casesSelectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="casesDownloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="casesDeleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="casesCancelSelectBtn" type="button">Отмена</button>
+        </div>
+      </div>
+      <div class="col-body" id="casesList"></div>
+    </div>
+
+  </div>
+
+  <div id="folderView" class="folder-view hidden">
+    <div class="folder-header">
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="folder-title-row" id="folderTitleRow">
+        <button class="folder-up-btn hidden" id="backBtn" type="button" title="На уровень выше" aria-label="На уровень выше">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <h1 class="folder-title" id="folderTitle"></h1>
+        <!-- Из глубокой вложенности возвращаться наверх по одной папке
+             долго — эта кнопка возвращает сразу к колонкам. -->
+        <button class="home-btn" id="folderHomeBtn" type="button" title="На главную">
+          <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
+          <span>На главную</span>
+        </button>
+      </div>
+      <div id="caseBanner" class="case-banner hidden"></div>
+      <!-- Полоса оборудования: в корне — что лежит постороннего,
+           в папке прибора — что о нём знает «Учёт». -->
+      <div id="equipmentBanner" class="eq-banner hidden"></div>
+      <div class="folder-actions" id="folderActions">
+        <!-- Видна только в «База данных/Эксперты»: в остальных папках
+             заводить экспертов бессмысленно. -->
+        <button class="create-btn hidden" id="addInstrumentBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Добавить прибор</span>
+        </button>
+        <button class="upload-btn hidden" id="qrArchiveBtn" type="button"
+                title="Скачать QR-коды всех приборов одним архивом — их печатают на наклейки">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M17 20h4M14 20h1"/></svg>
+          <span>Наклейки с QR</span>
+        </button>
+        <button class="create-btn hidden" id="addExpertBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+          <span>Добавить эксперта</span>
+        </button>
+        <div class="create-wrap">
+          <button class="create-btn" id="createFolderViewBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="create-menu hidden" id="createFolderViewMenu" role="menu">
+            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
+            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
+            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
+          </div>
+        </div>
+        <button class="upload-btn" id="uploadTriggerBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Загрузить
+        </button>
+        <button class="upload-btn" id="downloadFolderBtn" type="button" title="Скачать эту папку целиком">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Скачать папку
+        </button>
+        <input type="file" id="uploadInput" multiple hidden>
+        <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
+      </div>
+      <div class="selection-bar hidden" id="selectionBar">
+        <span id="selectionCount">Выбрано: 0</span>
+        <div class="selection-actions">
+          <button class="back-btn" id="downloadSelectedBtn" type="button">Скачать</button>
+          <button class="back-btn" id="moveSelectedBtn" type="button">Переместить</button>
+          <button class="back-btn" id="deleteSelectedBtn" type="button">Удалить</button>
+          <button class="back-btn" id="cancelSelectBtn" type="button">Отмена</button>
+        </div>
+      </div>
+      <div class="folder-toolbar" id="folderToolbar">
+        <input type="text" id="folderSearchInput" placeholder="Поиск по этой папке и вложенным...">
+        <select id="folderSortSelect">
+          <option value="name-asc">Имя А-Я</option>
+          <option value="name-desc">Имя Я-А</option>
+          <option value="date-desc">Сначала новые</option>
+          <option value="date-asc">Сначала старые</option>
+          <option value="size-asc">Размер ↑</option>
+          <option value="size-desc">Размер ↓</option>
+        </select>
+      </div>
+    </div>
+    <div class="folder-body" id="folderList"></div>
+  </div>
+
+  </div><!-- /filesSection -->
+
+  <div class="folder-view section hidden" id="recentSection" data-view="recent">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Последние</h1>
+        <p class="page-sub">Файлы, которые недавно добавили или изменили</p>
+      </div>
+      <div class="seg" id="recentFilter">
+        <button class="seg-btn active" data-column="" type="button">Все</button>
+        <button class="seg-btn" data-column="db" type="button">База данных</button>
+        <button class="seg-btn" data-column="cases" type="button">Дела</button>
+      </div>
+    </div>
+    <div class="folder-body" id="recentList"></div>
+  </div>
+
+  <div class="folder-view section hidden" id="trashSection" data-view="trash">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Корзина</h1>
+        <p class="page-sub" id="trashSubtitle">Удалённое хранится 30 дней, потом стирается само</p>
+      </div>
+      <div class="folder-actions">
+        <button class="upload-btn" id="trashRefreshBtn" type="button">Обновить</button>
+        <button class="upload-btn danger-btn" id="trashEmptyBtn" type="button">Очистить корзину</button>
+      </div>
+    </div>
+    <div class="folder-body" id="trashList"></div>
+  </div>
+
+  <div class="folder-view section hidden" id="tasksSection" data-view="tasks">
+    <div class="page-head">
+      <div class="folder-title-row">
+        <button class="folder-up-btn" id="tasksBackBtn" type="button" title="Назад" aria-label="Назад">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h1 class="folder-title">Задачи</h1>
+          <p class="page-sub" id="tasksSummary">Задачи по проектам из Planfix</p>
+        </div>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <button class="create-btn" type="button" id="tasksNewBtn" style="height:34px;">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Новая задача</span>
+        </button>
+        <div class="seg" id="tasksScope">
+          <button class="seg-btn active" type="button" data-scope="all">Все</button>
+          <button class="seg-btn" type="button" data-scope="mine">Мои</button>
+          <button class="seg-btn" type="button" data-scope="assigned">Я поставил</button>
+        </div>
+        <div class="seg" id="tasksState">
+          <button class="seg-btn active" type="button" data-state="open">Текущие</button>
+          <button class="seg-btn" type="button" data-state="done">Завершённые</button>
+        </div>
+      </div>
+    </div>
+    <div class="task-banner hidden" id="tasksBanner"></div>
+    <div class="folder-toolbar">
+      <input type="text" id="tasksSearch" placeholder="Поиск по задаче или проекту">
+      <!-- Фильтры считает сервер: список обрезается на 500 задачах, и
+           отбор в браузере искал бы внутри первых пятисот. -->
+      <select class="task-filter" id="tasksDue" title="Срок задачи">
+        <option value="any">Срок: любой</option>
+        <option value="overdue">Просрочено</option>
+        <option value="today">Срок сегодня</option>
+        <option value="week">Ближайшие 7 дней</option>
+        <option value="none">Без срока</option>
+      </select>
+      <select class="task-filter" id="tasksType" title="Что за проект">
+        <option value="any">Тип: любой</option>
+        <option value="expertise">Экспертизы</option>
+        <option value="research">Независимые исследования</option>
+        <option value="none">Без типа</option>
+      </select>
+      <select class="task-filter" id="tasksStage" title="Стадия проекта">
+        <option value="any">Стадия: любая</option>
+        <option value="plan">План</option>
+        <option value="active">Активный</option>
+        <option value="control">Контроль</option>
+        <option value="done">Завершённый</option>
+      </select>
+      <select class="task-filter" id="tasksAssignee" title="На ком задача">
+        <option value="">Исполнитель: любой</option>
+      </select>
+      <span class="task-found" id="tasksFound"></span>
+    </div>
+    <!-- Что сейчас отобрано — крупно и с крестиками, чтобы короткий
+         список не выглядел как «задач больше нет». -->
+    <div class="task-chips hidden" id="tasksChips"></div>
+    <div class="folder-body" id="tasksBody"></div>
+  </div>
+
+  <!-- Карточка задачи: подробности, комментарии, смена исполнителей и срока. -->
+  <div id="taskCardOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:720px;">
+      <div class="modal-header">
+        <span id="taskCardHead">Задача</span>
+        <button class="back-btn" id="taskCardClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <div id="taskCardBody" style="max-height:70vh; overflow-y:auto; padding-right:4px;"></div>
+    </div>
+  </div>
+
+  <!-- Новая задача: уходит в Planfix, постановщиком становится текущий пользователь. -->
+  <div id="taskNewOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:640px;">
+      <div class="modal-header">
+        <span>Новая задача</span>
+        <button class="back-btn" id="taskNewClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <form id="taskNewForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+        <div class="add-user-row">
+          <label style="flex:1 1 100%;">Проект
+            <select id="taskNewCase" required>
+              <option value="">Выберите проект…</option>
+            </select>
+          </label>
+        </div>
+        <!-- Когда окно открыто из папки проекта, проект уже известен и
+             менять его здесь нельзя — иначе задача уедет не туда. -->
+        <p class="row-subtitle hidden" id="taskNewCaseLocked" style="margin:-8px 0 0;"></p>
+        <!-- Задача: выбор из списка типовых задач текущей стадии проекта
+             плюс возможность вписать свою (она сохранится в тот же список). -->
+        <div class="add-user-row">
+          <label style="flex:1 1 100%;">Задача
+            <!-- Кнопка «в список» стоит рядом, а не под полем: выпадающий
+                 список раскрывается вниз и накрыл бы её собой. -->
+            <div class="combo-row">
+              <div class="combo" id="taskNewNameCombo">
+                <input type="text" id="taskNewName" maxlength="255" autocomplete="off"
+                       placeholder="Выберите из списка или впишите свою">
+                <button type="button" class="combo-toggle" id="taskNewNameToggle" aria-label="Показать список">
+                  <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="combo-list hidden" id="taskNewNameList"></div>
+              </div>
+              <button type="button" class="upload-btn" id="taskNewNameAdd">+ В список</button>
+            </div>
+          </label>
+        </div>
+        <div class="add-user-row" style="margin-top:-8px;">
+          <span class="row-subtitle" id="taskNewStageHint"></span>
+        </div>
+        <div id="taskNewChosen" class="chosen-tasks"></div>
+        <div class="add-user-row">
+          <label>Срок
+            <input type="date" id="taskNewDeadline">
+          </label>
+        </div>
+
+        <div class="picker" id="taskNewAssigneesPicker">
+          <div class="picker-head">
+            <span class="row-subtitle">Исполнители</span>
+            <span class="picker-count" id="taskNewAssigneesCount">Никого не выбрано</span>
+          </div>
+          <div class="picker-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="taskNewAssigneesSearch" placeholder="Поиск сотрудника" autocomplete="off">
+          </div>
+          <div id="taskNewAssigneesList" class="picker-list"></div>
+        </div>
+
+        <p class="row-subtitle" id="taskNewHint" style="margin:0;"></p>
+        <div class="modal-actions">
+          <button class="primary" type="submit" id="taskNewSubmit">Поставить задачу</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Администрирование: кто из пользователей ИСУ кем является в Planfix. -->
+  <div id="pfPeopleOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" style="max-width:760px;">
+      <div class="modal-header">
+        <span>Сотрудники Planfix</span>
+        <button class="back-btn" id="pfPeopleClose" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Закрыть
+        </button>
+      </div>
+      <p class="row-subtitle">
+        Связь нужна, чтобы в Planfix было видно, кто именно поставил задачу или написал
+        комментарий, и чтобы у человека работал фильтр «Мои задачи».
+      </p>
+      <div style="display:flex; gap:8px; margin:12px 0 4px; align-items:center; flex-wrap:wrap;">
+        <button class="upload-btn" id="pfPeopleSyncBtn" type="button">Обновить список из Planfix</button>
+        <span class="row-subtitle" id="pfPeopleSynced"></span>
+      </div>
+      <div id="pfPeopleBody" style="max-height:60vh; overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <div class="folder-view section hidden" id="historySection" data-view="history">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">История</h1>
+        <p class="page-sub">Что происходило в системе</p>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <select class="col-sort-select" id="historyActor" style="max-width:170px;">
+          <option value="">Все сотрудники</option>
+        </select>
+        <select class="col-sort-select" id="historyAction" style="max-width:170px;">
+          <option value="">Все действия</option>
+        </select>
+        <!-- Только администратору: стирает историю целиком и безвозвратно. -->
+        <button class="upload-btn hidden" id="historyClearBtn" type="button">Очистить историю</button>
+      </div>
+    </div>
+    <div class="folder-body" id="historyList"></div>
+  </div>
+
+  <!-- Список дел: все дела центра, разложенные по стадиям. Нужен, чтобы
+       посмотреть, что с делом, поставить задачу или перевести на другую
+       стадию, не разыскивая его папку. -->
+  <div class="folder-view section hidden" id="registrySection" data-view="registry">
+    <div class="page-head">
+      <div class="folder-title-row">
+        <button class="folder-up-btn hidden" id="registryBackBtn" type="button" title="Ко всем стадиям" aria-label="Ко всем стадиям">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h1 class="folder-title" id="registryTitle">Список дел</h1>
+          <p class="page-sub" id="registrySub"></p>
+        </div>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;">
+        <input type="text" id="registrySearch" placeholder="Поиск по делу" style="width:240px;">
+        <select class="col-sort-select hidden" id="registryType" style="max-width:200px;">
+          <option value="any">Все типы</option>
+          <option value="expertise">Экспертизы</option>
+          <option value="research">Независимые исследования</option>
+          <option value="none">Без типа</option>
+        </select>
+      </div>
+    </div>
+    <div class="folder-body" id="registryBody"></div>
+  </div>
+
+  <!-- Журнал регистрации: тот же журнал, что в Excel, но с фильтрами
+       и правкой прямо в ячейке. Данные читаются из той же таблицы, из
+       которой собирается файл, — синхронизировать нечего. -->
+  <div class="folder-view section hidden" id="journalSection" data-view="journal">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Журнал регистрации</h1>
+        <p class="page-sub">Те же данные, что в файле «Дела / Журнал регистрации» — обновляются сами при любом изменении проекта</p>
+      </div>
+      <div class="jr-head-actions">
+        <button class="upload-btn" id="journalExportSelBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Скачать выборку
+        </button>
+        <button class="upload-btn" id="journalExportAllBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+          Скачать весь журнал
+        </button>
+      </div>
+    </div>
+
+    <div class="jr-tabs" id="journalTabs">
+      <button class="jr-tab active" type="button" data-jr-tab="current">Текущие <i id="jrCountCurrent">—</i></button>
+      <button class="jr-tab" type="button" data-jr-tab="archive">Архив <i id="jrCountArchive">—</i></button>
+    </div>
+
+    <div class="jr-filters" id="journalFilters">
+      <label class="jr-f jr-grow">Поиск
+        <input type="text" id="jrSearch" placeholder="Название, заказчик, номер дела, эксперт…">
+      </label>
+      <label class="jr-f" id="jrStageWrap">Стадия
+        <select id="jrStage">
+          <option value="any">Все</option>
+          <option value="plan">План</option>
+          <option value="active">Активный</option>
+          <option value="control">Контроль</option>
+        </select>
+      </label>
+      <label class="jr-f hidden" id="jrOutcomeWrap">Чем кончилось
+        <select id="jrOutcome">
+          <option value="any">Все</option>
+          <option value="done">Завершён</option>
+          <option value="cancelled">Отменён</option>
+        </select>
+      </label>
+      <label class="jr-f">Тип проекта
+        <select id="jrType">
+          <option value="any">Все</option>
+          <option value="expertise">Экспертизы</option>
+          <option value="research">Независимые исследования</option>
+          <option value="none">Без типа</option>
+        </select>
+      </label>
+      <label class="jr-f">Структура<select id="jrOrg"><option value="any">Все</option></select></label>
+      <label class="jr-f">Тип экспертизы<select id="jrExpType"><option value="any">Все</option></select></label>
+      <label class="jr-f">Год<select id="jrYear"><option value="any">Все</option></select></label>
+      <label class="jr-f">Руководитель<select id="jrManager"><option value="any">Все</option></select></label>
+    </div>
+
+    <div class="jr-applied" id="journalApplied"></div>
+    <div class="jr-tablebox" id="journalTableBox"></div>
+    <div class="jr-foot" id="journalFoot"></div>
+  </div>
+
+  <!-- Карточка проекта: всё о проекте на одном экране и без папок.
+       Открывается щелчком по названию проекта в списке задач. Нужна,
+       чтобы посмотреть состояние и быстро поправить статус или задачу,
+       не уходя в файловый браузер. -->
+  <div class="folder-view section hidden" id="caseCardSection" data-view="case">
+    <div class="page-head">
+      <div class="folder-title-row">
+        <button class="folder-up-btn" id="caseCardBackBtn" type="button" title="Назад" aria-label="Назад">
+          <svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h1 class="folder-title" id="caseCardName">Проект</h1>
+          <div class="case-card-badges" id="caseCardBadges"></div>
+        </div>
+      </div>
+      <div class="folder-toolbar" style="margin:0; width:auto; flex:0 0 auto;" id="caseCardActions"></div>
+    </div>
+    <div class="folder-body" id="caseCardBody"></div>
+    <div id="caseChatBox" class="case-chat-box hidden">
+        <div class="case-chat-header" id="caseChatToggle">
+          <span>💬 Спросить ассистента по проекту</span>
+          <span id="caseChatArrow">▾</span>
+        </div>
+        <div id="caseChatBody" class="hidden">
+          <div id="caseChatMessages" class="case-chat-messages"></div>
+          <form id="caseChatForm" class="case-chat-form">
+            <input type="text" id="caseChatInput" placeholder="Например: составь отказное письмо" autocomplete="off">
+            <button type="submit" class="primary" id="caseChatSendBtn">Отправить</button>
+          </form>
+        </div>
+      </div>
+  </div>
+
+</div>
+
+<div id="usersOverlay" class="modal-overlay hidden">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <span>Пользователи</span>
+      <button class="back-btn" id="usersCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+
+    <div id="usersList" class="users-list"></div>
+
+    <div class="add-user-form">
+      <h2>Добавить пользователя</h2>
+      <div class="add-user-row">
+        <label>Логин<input id="newUserLogin" autocomplete="off"></label>
+        <label>Пароль<input id="newUserPassword" type="text" autocomplete="off"></label>
+        <label>Роль
+          <select id="newUserRole">
+            <option value="employee">Сотрудник</option>
+            <option value="admin">Администратор</option>
+          </select>
+        </label>
+      </div>
+      <div class="perm-checks">
+        <label><input type="checkbox" id="newPermTools" checked> Инструменты</label>
+        <label><input type="checkbox" id="newPermDb" checked> База данных</label>
+        <label><input type="checkbox" id="newPermCases" checked> Дела</label>
+        <label title="Подтверждает отмену начатой экспертизы и решает спорные случаи оплаты"><input type="checkbox" id="newPermManage"> Руководитель</label>
+      </div>
+      <button class="primary" id="createUserBtn" type="button">Создать пользователя</button>
+    </div>
+  </div>
+</div>
+
+<div id="folderPermOverlay" class="modal-overlay hidden">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <span id="folderPermTitle">Доступ к папке</span>
+      <button class="back-btn" id="folderPermCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+
+    <div id="folderPermList" class="users-list"></div>
+
+    <div class="add-user-form">
+      <h2>Выдать доступ</h2>
+      <div class="add-user-row">
+        <label>Пользователь
+          <select id="folderPermUserSelect"></select>
+        </label>
+        <label>Доступ
+          <select id="folderPermAccessSelect">
+            <option value="read">Читать</option>
+            <option value="write">Редактировать</option>
+            <option value="none">Закрыть доступ</option>
+          </select>
+        </label>
+      </div>
+      <button class="primary" id="folderPermAddBtn" type="button">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<div id="uploadPanel" class="upload-panel hidden">
+  <div class="upload-panel-header">
+    <span id="uploadPanelTitle">Загрузка</span>
+    <button id="uploadPanelCloseBtn" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div id="uploadPanelTotal" class="upload-panel-total hidden">
+    <div id="uploadPanelTotalFill" class="upload-panel-total-fill" style="width:0%;"></div>
+  </div>
+  <div id="uploadPanelList" class="upload-panel-list"></div>
+</div>
+
+<div id="uploadModalOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:480px;">
+    <div class="modal-header">
+      <span>Загрузить в эту папку</span>
+      <button class="back-btn" id="uploadModalCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div id="uploadDropzone" class="upload-dropzone">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg>
+      <span>Перетащите файлы или папки сюда</span>
+    </div>
+    <div class="upload-choice">
+      <button class="upload-choice-btn" id="chooseFilesBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Выбрать файлы
+      </button>
+      <button class="upload-choice-btn" id="chooseFolderBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        Выбрать папку
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="downloadChoiceOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:360px;">
+    <div class="modal-header">
+      <span>Как скачать?</span>
+      <button class="back-btn" id="downloadChoiceCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div class="upload-choice" style="flex-direction:column;">
+      <button class="upload-choice-btn" id="downloadAsZipBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+        Скачать как ZIP-архив
+      </button>
+      <button class="upload-choice-btn" id="downloadAsFolderBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        Скачать как обычную папку
+      </button>
+      <p id="downloadFolderHint" class="empty-hint hidden" style="text-align:center;">
+        Ваш браузер не поддерживает сохранение папки напрямую — доступен только ZIP
+      </p>
+    </div>
+  </div>
+</div>
+
+<div id="instrumentOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:620px;">
+    <div class="modal-header">
+      <span>Добавить прибор</span>
+      <button class="back-btn" id="instrumentCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="instrumentForm" style="display:flex; flex-direction:column; gap:12px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <label>Инвентарный номер (необязательно)<input type="text" name="inventory_no" maxlength="60"></label>
+      <label>Название<input type="text" name="name" required maxlength="200"></label>
+      <label>Серийный номер<input type="text" name="serial_number" maxlength="120"></label>
+      <label>Модель<input type="text" name="model" maxlength="120"></label>
+      <label>Тип метрологического контроля
+        <select name="check_type">
+          <option value="verification">Поверка</option>
+          <option value="calibration">Калибровка</option>
+          <option value="none">Не требуется</option>
+        </select>
+      </label>
+      <label>Классификация
+        <select name="control_type" id="instrumentControlType"><option value="">Не указано</option></select>
+        <span class="field-hint" id="instrumentTypeHint"></span>
+      </label>
+      <label>Владелец
+        <select name="company_code" id="instrumentCompany"><option value="">Не привязан</option></select>
+      </label>
+      <label>Дата поверки/калибровки<input type="date" name="verification_date"></label>
+      <label>Действительно до<input type="date" name="valid_until"></label>
+      <label>Комментарий<input type="text" name="comment" maxlength="500"></label>
+
+      <label>Фото прибора
+        <input type="file" id="instrumentPhotos" accept="image/*" multiple>
+        <span class="field-hint">Лягут в подпапку «Изображения». Первое станет фотографией карточки в «Учёте».</span>
+      </label>
+      <label>Фото документа поверки/калибровки
+        <input type="file" id="instrumentDocs" multiple>
+        <span class="field-hint">Лягут в подпапку «Поверка».</span>
+      </label>
+
+      <p class="error-text" id="instrumentError"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="instrumentSubmitBtn">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="expertOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:620px;">
+    <div class="modal-header">
+      <span>Добавить эксперта</span>
+      <button class="back-btn" id="expertCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="expertForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <label>Имя эксперта
+        <input id="expertName" type="text" required maxlength="120" placeholder="Иванов Иван Иванович">
+        <span class="field-hint">Так эксперт будет подписан в гарантийном письме, и так будет называться его папка.</span>
+      </label>
+
+      <div class="expert-source">
+        <span class="field-label">Сведения об эксперте</span>
+        <label class="radio-row">
+          <input type="radio" name="expertInfoSource" value="text" checked>
+          <span>Набрать здесь</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="expertInfoSource" value="file">
+          <span>Приложить готовый файл</span>
+        </label>
+      </div>
+
+      <label id="expertTextWrap">
+        <textarea id="expertInfoText" rows="7" placeholder="Образование: ...&#10;Стаж работы: ...&#10;Сертификаты: ..."></textarea>
+        <span class="field-hint">Каждая строка станет отдельным абзацем — ровно в таком виде сведения попадут в гарантийное письмо.</span>
+      </label>
+
+      <label id="expertFileWrap" class="hidden">Файл со сведениями (.docx)
+        <input type="file" id="expertInfoFile" accept=".docx">
+        <span class="field-hint">Файл будет сохранён как «Сведения.docx». В письмо попадут его абзацы.</span>
+      </label>
+
+      <label>Приложения — дипломы, сертификаты, удостоверения
+        <input type="file" id="expertAttachments" multiple>
+        <span class="field-hint">Лягут в подпапку «Приложения». При создании ГП копии попадут в папку письма, а их названия — в перечень приложений.</span>
+      </label>
+
+      <p class="error-text" id="expertError"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="expertSubmitBtn">Завести эксперта</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="gpOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:640px;">
+    <div class="modal-header">
+      <span>Добавить гарантийное письмо</span>
+      <button class="back-btn" id="gpCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="gpForm" style="display:flex; flex-direction:column; gap:14px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Проект
+          <select id="gpCaseSelect" required>
+            <option value="">Выберите проект…</option>
+          </select>
+        </label>
+      </div>
+      <p class="row-subtitle" style="margin:-6px 0 0;">Файл сохранится прямо в этот проект («Планирование проекта / ГП»). Суд и номер дела подставятся из карточки проекта — их можно поправить вручную.</p>
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Суд (шапка письма) — можно несколько строк
+          <textarea id="gpCourtHeader" rows="3" placeholder="В ООО «Заказчик»&#10;В Арбитражный суд Калужской области&#10;Судье Ивановой Е.В." required style="resize:vertical; font-family:inherit; font-size:inherit; padding:8px 10px; border:1px solid var(--border); border-radius:8px;"></textarea>
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label>Номер дела
+          <input type="text" id="gpCaseNumber" placeholder="А40-000000/2026" required>
+        </label>
+        <!-- Суд в родительном падеже больше не заполняется руками — считается
+             автоматически из "Суд (шапка письма)". Поле оставлено в разметке
+             (скрыто), чтобы его значение по-прежнему уходило вместе с формой. -->
+        <input type="hidden" id="gpCourtGenitive">
+        <!-- "Чистое" название суда (без "В", без судьи/заказчика) — источник
+             для автоматического склонения, не зависит от того, что ещё
+             дописано в многострочную шапку письма. -->
+        <input type="hidden" id="gpCourtRaw">
+      </div>
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Вид экспертизы
+          <select id="gpExpertiseType" required>
+            <option value="">Выберите вид…</option>
+            <option value="строительно-технической">Строительно-техническая</option>
+            <option value="пожарно-технической">Пожарно-техническая</option>
+            <option value="землеустроительной">Землеустроительная</option>
+            <option value="почерковедческой">Почерковедческая</option>
+          </select>
+        </label>
+      </div>
+
+      <div>
+        <span class="row-subtitle">Вопросы экспертизы</span>
+        <div id="gpQuestionsList" style="display:flex; flex-direction:column; gap:8px; margin-top:6px;"></div>
+        <button type="button" class="secondary" id="gpAddQuestionBtn" style="margin-top:8px;">+ Добавить вопрос</button>
+      </div>
+
+      <div class="add-user-row">
+        <label>Стоимость, цифрами
+          <input type="text" inputmode="numeric" id="gpCostAmount" placeholder="6400000" required>
+        </label>
+        <label>Стоимость, прописью (заполняется само)
+          <input type="text" id="gpCostWords" readonly tabindex="-1">
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label>Срок, рабочих дней
+          <input type="text" inputmode="numeric" id="gpTermDays" placeholder="20" required>
+        </label>
+        <label>Срок, прописью (заполняется само)
+          <input type="text" id="gpTermWords" readonly tabindex="-1">
+        </label>
+      </div>
+
+      <div class="picker" id="gpExpertsPicker">
+        <div class="picker-head">
+          <span class="row-subtitle">Эксперты</span>
+          <span class="picker-count" id="gpExpertsCount">Никого не выбрано</span>
+        </div>
+        <div class="picker-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" id="gpExpertSearch" placeholder="Поиск по фамилии" autocomplete="off">
+        </div>
+        <div id="gpExpertsList" class="picker-list"></div>
+      </div>
+
+      <div id="gpExpertsOrderBox" class="hidden">
+        <span class="row-subtitle">Порядок в письме</span>
+        <div id="gpExpertsOrderList" style="display:flex; flex-direction:column; gap:6px; margin-top:6px;"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="primary" type="submit">Создать</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="projectFormOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:560px;">
+    <div class="modal-header">
+      <span>Новый проект</span>
+      <button class="back-btn" id="projectFormCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <p class="row-subtitle">Папка и запись в журнале создадутся автоматически</p>
+
+    <form id="projectForm" style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+      <div class="add-user-row">
+        <label>Тип проекта
+          <select id="pfType" required>
+            <option value="expertise">Экспертиза (ЭКС.)</option>
+            <option value="research">НИ (НИ.)</option>
+          </select>
+        </label>
+        <label>Исходная стадия
+          <select id="pfStage" required>
+            <option value="plan">План (обычный запрос)</option>
+            <option value="active">Активный (суд назначил напрямую)</option>
+          </select>
+        </label>
+      </div>
+      <label>Условное наименование
+        <input type="text" id="pfName" placeholder="Название объекта (без ЭКС./НИ. — подставится само)" required>
+      </label>
+      <div class="add-user-row">
+        <label>Суд / заказчик
+          <input type="text" id="pfCourt">
+        </label>
+        <label>Номер дела/договора
+          <input type="text" id="pfCaseNumber">
+        </label>
+      </div>
+      <label>Вид экспертизы <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfExpertiseType" list="expertiseTypeList"
+               placeholder="Например: строительно-техническая">
+      </label>
+      <div class="add-user-row">
+        <label>Руководитель
+          <select id="pfManager"></select>
+        </label>
+        <label>Год начала
+          <input type="number" id="pfYear">
+        </label>
+      </div>
+      <label>Структура (организация)
+        <div style="display:flex; gap:8px; align-items:center;">
+          <select id="pfOrganization" style="flex:1;">
+            <option value="">Не выбрана</option>
+          </select>
+          <button type="button" class="secondary" id="pfManageOrgBtn" title="Добавить/удалить организацию" style="flex:0 0 auto; width:36px; padding:0;">+</button>
+        </div>
+      </label>
+      <div class="add-user-row">
+        <label>Сторона 1
+          <input type="text" id="pfParty1">
+        </label>
+        <label>Сторона 2
+          <input type="text" id="pfParty2">
+        </label>
+      </div>
+      <label>Судья
+        <input type="text" id="pfJudgeName">
+      </label>
+      <label>Эксперты <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfExperts" placeholder="Через запятую">
+      </label>
+      <label>Описание <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
+        <input type="text" id="pfDescription">
+      </label>
+
+      <div>
+        <span class="row-subtitle">Материалы <span style="font-weight:400;">(необязательно)</span></span>
+        <div class="pf-attach-zone" id="pfAttachZaprosZone">
+          <div class="pf-attach-zone-header">
+            <span>Запрос<span class="pf-attach-count hidden" id="pfAttachZaprosCount"></span></span>
+            <input type="file" id="pfAttachZapros" multiple style="display:none;">
+            <button type="button" class="secondary" id="pfAttachZaprosBtn">+ Выбрать файлы</button>
+          </div>
+          <div class="pf-attach-hint" id="pfAttachZaprosHint">Перетащите сюда файлы или папку — можно сразу несколько</div>
+          <div id="pfAttachZaprosList" class="pf-attach-file-list"></div>
+        </div>
+        <div class="pf-attach-zone" id="pfAttachMaterialsZone">
+          <div class="pf-attach-zone-header">
+            <span>Первичные материалы для ознакомления<span class="pf-attach-count hidden" id="pfAttachMaterialsCount"></span></span>
+            <input type="file" id="pfAttachMaterials" multiple style="display:none;">
+            <button type="button" class="secondary" id="pfAttachMaterialsBtn">+ Выбрать файлы</button>
+          </div>
+          <div class="pf-attach-hint" id="pfAttachMaterialsHint">Перетащите сюда файлы или папку — можно сразу несколько</div>
+          <div id="pfAttachMaterialsList" class="pf-attach-file-list"></div>
+        </div>
+      </div>
+
+      <p id="projectFormError" class="error-text"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit">Создать проект</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Виды экспертиз: подсказка для поля, а не жёсткий список — вписать
+     можно любой, потому что виды со временем добавляются. -->
+<datalist id="expertiseTypeList">
+  <option value="строительно-техническая"></option>
+  <option value="пожарно-техническая"></option>
+  <option value="землеустроительная"></option>
+  <option value="почерковедческая"></option>
+  <option value="оценочная"></option>
+  <option value="автотехническая"></option>
+  <option value="электротехническая"></option>
+</datalist>
+
+<!-- Правка карточки уже заведённого проекта. Отдельное окно, а не форма
+     создания: при создании заводится папка, здесь — только данные. -->
+<div id="caseEditOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:560px;">
+    <div class="modal-header">
+      <span id="caseEditHead">Карточка проекта</span>
+      <button class="back-btn" id="caseEditCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <form id="caseEditForm" style="display:flex; flex-direction:column; gap:14px; margin-top:10px; max-height:70vh; overflow-y:auto; padding-right:4px;">
+      <div class="add-user-row">
+        <label>Что это за проект
+          <select id="ceType">
+            <option value="expertise">Экспертизы</option>
+            <option value="research">Независимые исследования</option>
+            <option value="">Прочее (без типа)</option>
+          </select>
+        </label>
+        <label>Статус
+          <select id="ceStatus">
+            <option value="waiting">Ожидание</option>
+            <option value="in_progress">В работе</option>
+            <option value="problem">Проблема</option>
+          </select>
+        </label>
+      </div>
+      <p class="row-subtitle" id="ceTypeHint" style="margin:-8px 0 0;"></p>
+
+      <label>Вид экспертизы
+        <input type="text" id="ceExpertiseType" list="expertiseTypeList"
+               placeholder="Например: строительно-техническая">
+      </label>
+      <div class="add-user-row">
+        <label>Суд / заказчик
+          <input type="text" id="ceCourt">
+        </label>
+        <label>Номер дела/договора
+          <input type="text" id="ceCaseNumber">
+        </label>
+      </div>
+      <p class="row-subtitle" id="ceKadHint" style="margin:-8px 0 0;"></p>
+      <div class="add-user-row">
+        <label>Руководитель
+          <select id="ceManager"></select>
+        </label>
+        <label>Год начала
+          <input type="number" id="ceYear">
+        </label>
+      </div>
+      <label>Структура (организация)
+        <select id="ceOrganization">
+          <option value="">Не выбрана</option>
+        </select>
+      </label>
+      <div class="add-user-row">
+        <label>Сторона 1
+          <input type="text" id="ceParty1">
+        </label>
+        <label>Сторона 2
+          <input type="text" id="ceParty2">
+        </label>
+      </div>
+      <label>Судья
+        <input type="text" id="ceJudgeName">
+      </label>
+      <label>Эксперты
+        <input type="text" id="ceExperts" placeholder="Через запятую">
+      </label>
+      <label>Описание
+        <input type="text" id="ceDescription">
+      </label>
+
+      <p id="caseEditError" class="error-text"></p>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="caseEditSubmit">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="orgManageOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:420px;">
+    <div class="modal-header">
+      <span>Организации (Структура)</span>
+      <button class="back-btn" id="orgManageCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div id="orgList" style="max-height:260px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:10px;"></div>
+    <form id="orgAddForm" style="display:flex; gap:8px; margin-top:12px;">
+      <input type="text" id="orgAddName" placeholder="Название организации" style="flex:1;" required>
+      <button class="primary" type="submit">Добавить</button>
+    </form>
+    <p id="orgManageError" class="error-text"></p>
+  </div>
+</div>
+
+<div id="itemContextMenu" class="context-menu hidden">
+  <button type="button" data-ctx-action="select">Выбрать</button>
+  <button type="button" data-ctx-action="download">Скачать</button>
+  <button type="button" data-ctx-action="rename">Переименовать</button>
+  <button type="button" data-ctx-action="move">Переместить</button>
+  <button type="button" data-ctx-action="copy">Копировать</button>
+  <button type="button" data-ctx-action="share">Скопировать ссылку</button>
+  <button type="button" data-ctx-action="perms">Настроить доступ</button>
+  <button type="button" class="danger-item" data-ctx-action="delete">Удалить</button>
+</div>
+
+<div id="planfixOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:720px;">
+    <div class="modal-header">
+      <span>Planfix</span>
+      <button class="back-btn" id="planfixCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <p class="row-subtitle" id="planfixLastSync">Проверяю, когда сверялись в последний раз…</p>
+
+    <div style="display:flex; gap:8px; margin:12px 0 4px; flex-wrap:wrap;">
+      <button class="upload-btn" id="planfixProbeBtn" type="button">Проверить связь</button>
+      <button class="upload-btn" id="planfixPeopleBtn" type="button">Сотрудники и связь</button>
+      <button class="create-btn" id="planfixRunBtn" type="button" style="height:34px;">
+        <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
+        <span>Перенести проекты и задачи</span>
+      </button>
+    </div>
+
+    <div id="planfixResult" class="planfix-result"></div>
+  </div>
+</div>
+
+<div id="moveOverlay" class="modal-overlay hidden">
+  <div class="modal-panel" style="max-width:480px;">
+    <div class="modal-header">
+      <span>Куда переместить?</span>
+      <button class="back-btn" id="moveCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div id="moveBreadcrumbs" class="breadcrumbs" style="margin-top:8px; font-size:14px;"></div>
+    <div id="moveFolderList" style="max-height:280px; overflow-y:auto; margin-top:10px; border:1px solid var(--border); border-radius:8px;"></div>
+    <button type="button" class="upload-btn" id="moveNewFolderBtn" style="margin-top:10px;">+ Новая папка</button>
+    <p id="moveError" class="error-text"></p>
+    <div class="modal-actions">
+      <button class="primary" id="moveConfirmBtn" type="button" disabled>Переместить</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
