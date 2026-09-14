@@ -3,6 +3,7 @@ const fs = require("fs");
 const multer = require("multer");
 const db = require("./db");
 const settings = require("./settings");
+const lookups = require("./lookups");
 const files = require("./files");
 const caseFolders = require("./caseFolders");
 const folderPermissions = require("./folderPermissions");
@@ -475,15 +476,31 @@ async function journalRows(user) {
 cases.get("/journal", async (req, res) => {
   try {
     const rows = await journalRows(req.user);
-    const { rows: managers } = await db.query(
-      "SELECT id, username FROM users ORDER BY lower(username)"
-    );
+    const [lists, people] = await Promise.all([lookups.all(), lookups.people()]);
+
+    // Списки для правки — из справочников: вписать мимо них нельзя.
+    // Списки для ФИЛЬТРОВ — из справочников плюс то, что уже стоит в
+    // проектах: в старых записях могут быть значения, заведённые до
+    // справочников, и не дать по ним отфильтровать значило бы спрятать
+    // эти проекты от поиска.
+    const withExisting = (fromList, fromRows) =>
+      uniqueSorted([...fromList, ...fromRows]);
+
     res.json({
       rows,
-      managers,
-      organizations: uniqueSorted(rows.map((r) => r.organization)),
-      expertise_types: uniqueSorted(rows.map((r) => r.expertise_type)),
-      years: uniqueSorted(rows.map((r) => r.year)).sort((a, b) => String(b).localeCompare(String(a))),
+      managers: people.managers,
+      experts: people.experts,
+      // Из чего выбирают при правке.
+      lists: {
+        organizations: lists.organizations,
+        expertise_types: lists.expertise_types,
+        years: lists.years,
+      },
+      // По чему фильтруют.
+      organizations: withExisting(lists.organizations, rows.map((r) => r.organization)),
+      expertise_types: withExisting(lists.expertise_types, rows.map((r) => r.expertise_type)),
+      years: withExisting(lists.years, rows.map((r) => r.year))
+        .sort((a, b) => String(b).localeCompare(String(a))),
     });
   } catch (err) {
     console.error("Не удалось получить журнал регистрации:", err);
@@ -1293,6 +1310,64 @@ cases.post("/stage-files", upload.array("files", 50), async (req, res) => {
   res.json({ batchId, results });
 });
 
+
+/**
+ * Проверяет, что учётные поля проекта заполнены значениями ИЗ СПИСКА.
+ *
+ * Проверяем только то, что пришло в запросе. Это важно: правка одного
+ * поля не должна упираться в то, что в соседнем лежит старое значение,
+ * заведённое ещё до справочников.
+ *
+ * Ошибку возвращаем строкой, а не бросаем: вызывающий сам решает, что
+ * с ней делать — отказать или дописать в справочник (так делает импорт
+ * из Planfix).
+ */
+async function checkLookupFields(body, existing = null) {
+  // Значение, которое у проекта УЖЕ стоит, пропускаем всегда — даже если
+  // его нет в списке. Иначе карточку старого проекта нельзя было бы
+  // сохранить вовсе: форма отправляет все поля разом, и правка описания
+  // упиралась бы в тип экспертизы, заведённый до справочников. Запрет
+  // касается нового значения, а не прошлого.
+  const unchanged = (field) => existing
+    && String(existing[field] ?? "").trim() === String(body[field] ?? "").trim();
+
+  if (body.organization !== undefined && String(body.organization || "").trim()
+      && !unchanged("organization")) {
+    const { rows } = await db.query(
+      "SELECT 1 FROM organizations WHERE name = $1", [String(body.organization).trim()]
+    );
+    if (!rows.length) {
+      return `Структуры «${body.organization}» нет в списке. Добавьте её в «Настройки → Справочники».`;
+    }
+  }
+  if (body.expertise_type !== undefined && !unchanged("expertise_type")
+      && !(await lookups.has("expertise_type", body.expertise_type))) {
+    return `Типа экспертизы «${body.expertise_type}» нет в списке. Добавьте его в «Настройки → Справочники».`;
+  }
+  if (body.year !== undefined && !unchanged("year")
+      && !(await lookups.has("year", body.year))) {
+    return `Года «${body.year}» нет в списке. Добавьте его в «Настройки → Справочники».`;
+  }
+
+  const { managers, experts } = await lookups.people();
+  if (body.manager_id !== undefined && String(body.manager_id || "").trim()
+      && !unchanged("manager_id")) {
+    if (!managers.some((m) => String(m.id) === String(body.manager_id))) {
+      return "Этот сотрудник не значится руководителем проектов. Отметьте его в «Настройки → Сотрудники».";
+    }
+  }
+  if (body.experts !== undefined && String(body.experts || "").trim()
+      && !unchanged("experts")) {
+    const allowed = new Set(experts.map((e) => e.username));
+    const unknown = String(body.experts).split(",").map((x) => x.trim()).filter(Boolean)
+      .filter((name) => !allowed.has(name));
+    if (unknown.length) {
+      return `Не значатся специалистами: ${unknown.join(", ")}. Отметьте их в «Настройки → Сотрудники».`;
+    }
+  }
+  return null;
+}
+
 cases.post("/", async (req, res) => {
   try {
     const {
@@ -1308,6 +1383,8 @@ cases.post("/", async (req, res) => {
     if (!["plan", "active"].includes(stage)) {
       return res.status(400).json({ message: "Начальная стадия — только «План» или «Активный»" });
     }
+    const wrong = await checkLookupFields(req.body || {});
+    if (wrong) return res.status(400).json({ message: wrong });
     const cleanName = validateName(type, name);
 
     const folderPath = await caseFolders.createCaseFolders({
@@ -1417,6 +1494,9 @@ cases.post("/", async (req, res) => {
  * истории.
  */
 cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
+  const wrong = await checkLookupFields(req.body || {}, req.case || null);
+  if (wrong) return res.status(400).json({ message: wrong });
+
   const fields = [
     "court_or_customer", "case_number", "manager_id", "experts", "year", "description", "status",
     "organization", "party1", "party2", "judge_name", "expertise_type",
@@ -2020,4 +2100,7 @@ cases.post("/:id/chat", loadCase, requireWriteOnCaseFolder, async (req, res) => 
   }
 });
 
-module.exports = { cases };
+// checkLookupFields отдаём наружу нарочно: это и есть то правило, ради
+// которого затевались справочники, и проверять надо именно его, а не
+// его копию на стенде.
+module.exports = { cases, checkLookupFields };

@@ -13,7 +13,12 @@ const SELECT_JOINED = `
          COALESCE(p.can_tools, false) AS can_tools,
          COALESCE(p.can_db, false) AS can_db,
          COALESCE(p.can_cases, false) AS can_cases,
-         COALESCE(p.can_manage, false) AS can_manage
+         COALESCE(p.can_manage, false) AS can_manage,
+         -- Умолчание TRUE, а не FALSE: у человека может не быть строки
+         -- прав вовсе, и тогда он должен оставаться в списках журнала —
+         -- ровно как было до появления этих галочек.
+         COALESCE(p.can_be_manager, true) AS can_be_manager,
+         COALESCE(p.can_be_expert, true)  AS can_be_expert
   FROM users u
   LEFT JOIN fm_permissions p ON p.user_id = u.id
 `;
@@ -33,7 +38,8 @@ async function countAdmins() {
   return res.rows[0].c;
 }
 
-async function createUser({ username, password, role, can_tools, can_db, can_cases, can_manage }) {
+async function createUser({ username, password, role, can_tools, can_db, can_cases, can_manage,
+  can_be_manager = true, can_be_expert = true }) {
   const hash = await bcrypt.hash(password, 12);
   const client = await db.connect();
   try {
@@ -46,15 +52,18 @@ async function createUser({ username, password, role, can_tools, can_db, can_cas
     );
     const user = rows[0];
     await client.query(
-      `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases, can_manage)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [user.id, !!can_tools, !!can_db, !!can_cases, !!can_manage]
+      `INSERT INTO fm_permissions
+         (user_id, can_tools, can_db, can_cases, can_manage, can_be_manager, can_be_expert)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [user.id, !!can_tools, !!can_db, !!can_cases, !!can_manage,
+       !!can_be_manager, !!can_be_expert]
     );
     await client.query("COMMIT");
     return {
       ...user,
       can_tools: !!can_tools, can_db: !!can_db,
       can_cases: !!can_cases, can_manage: !!can_manage,
+      can_be_manager: !!can_be_manager, can_be_expert: !!can_be_expert,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -86,8 +95,9 @@ async function updateUser(id, fields) {
     await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
   }
 
-  if (fields.can_tools !== undefined || fields.can_db !== undefined
-      || fields.can_cases !== undefined || fields.can_manage !== undefined) {
+  const PERM_FIELDS = ["can_tools", "can_db", "can_cases", "can_manage",
+    "can_be_manager", "can_be_expert"];
+  if (PERM_FIELDS.some((f) => fields[f] !== undefined)) {
     // На случай, если у пользователя ещё вообще не было своей строки прав ИСУ.
     await db.query(
       `INSERT INTO fm_permissions (user_id, can_tools, can_db, can_cases, can_manage)
@@ -98,10 +108,11 @@ async function updateUser(id, fields) {
     const permSets = [];
     const permValues = [];
     let j = 1;
-    if (fields.can_tools !== undefined) { permSets.push(`can_tools = $${j++}`); permValues.push(!!fields.can_tools); }
-    if (fields.can_db !== undefined) { permSets.push(`can_db = $${j++}`); permValues.push(!!fields.can_db); }
-    if (fields.can_cases !== undefined) { permSets.push(`can_cases = $${j++}`); permValues.push(!!fields.can_cases); }
-    if (fields.can_manage !== undefined) { permSets.push(`can_manage = $${j++}`); permValues.push(!!fields.can_manage); }
+    for (const f of PERM_FIELDS) {
+      if (fields[f] === undefined) continue;
+      permSets.push(`${f} = $${j++}`);
+      permValues.push(!!fields[f]);
+    }
     permValues.push(id);
     await db.query(`UPDATE fm_permissions SET ${permSets.join(", ")} WHERE user_id = $${j}`, permValues);
   }

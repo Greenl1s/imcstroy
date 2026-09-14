@@ -10,6 +10,7 @@
  * недостающие папки; ничего не удаляет и не перемещает.
  */
 const db = require("./db");
+const lookups = require("./lookups");
 const files = require("./files");
 const caseFolders = require("./caseFolders");
 const planfix = require("./planfixSync");
@@ -66,6 +67,34 @@ function stageOf(project, stageFieldId) {
   const stage = STAGE_FROM_PLANFIX[raw];
   if (!stage) return { stage: null, isCancelled: false };
   return { stage, isCancelled: false };
+}
+
+
+/**
+ * Дописывает в справочники то, что приехало из Planfix.
+ *
+ * Planfix нам не подчиняется: там заводят проекты со своими структурами
+ * и типами экспертиз. Отказать импорту значило бы потерять проект,
+ * поэтому неизвестное значение не отвергаем, а дописываем — тогда оно и
+ * в журнале выбирается, и администратор видит, что оно появилось.
+ *
+ * Ошибки здесь глотаем НАРОЧНО. Импорт существует ради проектов, а не
+ * ради справочников: если справочник почему-то недоступен (например,
+ * миграцию ещё не накатили), проект всё равно должен доехать. Молча,
+ * но в журнал — чтобы причина не потерялась совсем.
+ */
+async function noteLookupValues(parsed) {
+  try {
+    await lookups.ensure("expertise_type", parsed.expertiseType);
+    if (parsed.organization) {
+      await db.query(
+        "INSERT INTO organizations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
+        [String(parsed.organization).trim()]
+      );
+    }
+  } catch (err) {
+    console.warn("Не удалось пополнить справочники из Planfix:", err.message);
+  }
 }
 
 /** Разбирает карточку Planfix в поля нашего проекта. */
@@ -255,6 +284,8 @@ async function importProjects(report) {
   for (const project of projects) {
     const parsed = readProject(project, fieldIds);
     try {
+      await noteLookupValues(parsed);
+
       if (!parsed.name) {
         report.skipped.push({ name: `#${parsed.planfixId}`, why: "в Planfix у проекта пустое наименование" });
         continue;

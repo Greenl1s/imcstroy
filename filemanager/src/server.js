@@ -9,6 +9,7 @@ const { ZipArchive } = require("archiver");
 const auth = require("./auth");
 const db = require("./db");
 const settings = require("./settings");
+const lookups = require("./lookups");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
@@ -335,6 +336,44 @@ app.patch("/api/admin/settings", auth.requireAuth, auth.requireAdmin, async (req
   }
 });
 
+/* ---------------- Справочники журнала ---------------- */
+
+// Читать может каждый, кому открыты «Дела»: из этих списков выбирают в
+// журнале и в карточке проекта. Править — только администратор.
+app.get("/api/lookups", auth.requireAuth, async (req, res) => {
+  try {
+    const [lists, people] = await Promise.all([lookups.all(), lookups.people()]);
+    res.json({ ...lists, ...people });
+  } catch (err) {
+    console.error("Не удалось получить справочники:", err);
+    res.status(500).json({ message: "Не удалось получить справочники: " + err.message });
+  }
+});
+
+app.post("/api/admin/lookups", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const value = await lookups.add(req.body?.kind, req.body?.value, req.user.id);
+    events.log(req.user, "lookup", {
+      name: value, details: { kind: req.body?.kind, action: "добавлено" },
+    });
+    res.json({ ok: true, value });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+app.delete("/api/admin/lookups", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    await lookups.remove(req.query.kind, req.query.value);
+    events.log(req.user, "lookup", {
+      name: req.query.value, details: { kind: req.query.kind, action: "убрано" },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
 /**
  * Кто что видит: один человек — и сразу всё, к чему у него есть доступ.
  *
@@ -409,12 +448,14 @@ app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
 
 app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    const { username, password, role, can_tools, can_db, can_cases, can_manage } = req.body || {};
+    const { username, password, role, can_tools, can_db, can_cases, can_manage,
+      can_be_manager, can_be_expert } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ message: "Укажите логин и пароль" });
     }
     const user = await users.createUser({
       username, password, role, can_tools, can_db, can_cases, can_manage,
+      can_be_manager, can_be_expert,
     });
     res.json({ user });
   } catch (err) {
