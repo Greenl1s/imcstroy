@@ -1,45 +1,53 @@
-const PLANFIX_BASE_URL = process.env.PLANFIX_BASE_URL || "https://cse.planfix.ru/rest";
-const PLANFIX_TOKEN = process.env.PLANFIX_TOKEN;
+const settings = require("./settings");
+
+/* Адрес, токен и номера полей больше не константы, а настройки: их
+   правит администратор в панели, не трогая сервер. Читаются они в
+   момент обращения, а не при загрузке файла, — иначе поменянное в
+   панели начало бы действовать только после перезапуска.
+
+   Если в базе ничего не задано, settings отдаёт значение из .env, а
+   при его отсутствии — прежнее умолчание. Поэтому для сервера, где
+   настройки не трогали, ничего не изменилось. */
+const baseUrl = () => settings.get("planfix_base_url");
+const token = () => settings.get("planfix_token");
 
 /**
  * Адрес самого Planfix, а не его API: из «https://cse.planfix.ru/rest»
  * получаем «https://cse.planfix.ru». Нужен, чтобы из карточки проекта
  * можно было открыть его страницу в Planfix.
  *
- * Считаем из PLANFIX_BASE_URL, а не пишем отдельной настройкой: адрес
+ * Считаем из адреса API, а не держим отдельной настройкой: адрес
  * аккаунта один, и две настройки для одного адреса однажды разъедутся.
  */
-const PLANFIX_WEB_URL = PLANFIX_BASE_URL.replace(/\/rest\/?$/, "").replace(/\/+$/, "");
+const webUrl = () => baseUrl().replace(/\/rest\/?$/, "").replace(/\/+$/, "");
 
 /** Ссылка на карточку проекта в Planfix. null — если проекта там ещё нет. */
 function projectWebUrl(planfixId) {
   const id = Number(planfixId);
-  return id ? `${PLANFIX_WEB_URL}/project/${id}` : null;
+  return id ? `${webUrl()}/project/${id}` : null;
 }
 
 // ID пользовательских полей проекта в Planfix (Управление аккаунтом →
-// Типы объектов → Проект → Настраиваемые поля) — свои для этого
-// конкретного аккаунта, узнаны один раз через интерфейс 25.08.2026.
-const FIELD_STAGE = 76010;        // "Этап проекта"
-const FIELD_STATUS = 76040;       // "Статус проекта"
-const FIELD_ORGANIZATION = 76014; // "Структура"
-const FIELD_CASE_NUMBER = 76006;  // "Номер договора / Номер дела"
-// "Тип экспертизы" — id этого поля отличается в разных аккаунтах, поэтому
-// он берётся из окружения (PLANFIX_FIELD_EXPERTISE_TYPE) и правится без
-// пересборки образа.
-const FIELD_EXPERTISE_TYPE = Number(process.env.PLANFIX_FIELD_EXPERTISE_TYPE || 0) || null;
+// Типы объектов → Проект → Настраиваемые поля) — свои для каждого
+// аккаунта. Здешние узнаны через интерфейс 25.08.2026 и служат
+// умолчанием; поменять их можно в панели настроек.
+const fieldStage = () => settings.num("planfix_field_stage") || null;
+const fieldStatus = () => settings.num("planfix_field_status") || null;
+const fieldOrganization = () => settings.num("planfix_field_organization") || null;
+const fieldCaseNumber = () => settings.num("planfix_field_case_number") || null;
+const fieldExpertiseType = () => settings.num("planfix_field_expertise_type") || null;
 
 const STAGE_TO_PLANFIX = { plan: "План", active: "Активный", control: "Контроль", done: "Завершён" };
 const STATUS_TO_PLANFIX = { waiting: "Ожидание", in_progress: "В работе", problem: "Проблема" };
 
 async function planfixRequest(method, path, body) {
-  if (!PLANFIX_TOKEN) {
-    throw new Error("Не настроен PLANFIX_TOKEN — синхронизация с Planfix отключена");
+  if (!token()) {
+    throw new Error("Токен Planfix не задан — синхронизация выключена. Задайте его в «Настройки → Связь с Planfix».");
   }
-  const res = await fetch(`${PLANFIX_BASE_URL}${path}`, {
+  const res = await fetch(`${baseUrl()}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${PLANFIX_TOKEN}`,
+      Authorization: `Bearer ${token()}`,
       "Content-Type": "application/json",
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -77,13 +85,13 @@ function buildCustomFieldData(kase) {
   const data = [];
 
   const stageValue = stageValueForPlanfix(kase);
-  if (stageValue) data.push({ field: { id: FIELD_STAGE }, value: stageValue });
+  if (stageValue) data.push({ field: { id: fieldStage() }, value: stageValue });
 
   const statusValue = STATUS_TO_PLANFIX[kase.status];
-  if (statusValue) data.push({ field: { id: FIELD_STATUS }, value: statusValue });
+  if (statusValue) data.push({ field: { id: fieldStatus() }, value: statusValue });
 
-  if (kase.organization) data.push({ field: { id: FIELD_ORGANIZATION }, value: kase.organization });
-  if (kase.case_number) data.push({ field: { id: FIELD_CASE_NUMBER }, value: kase.case_number });
+  if (kase.organization) data.push({ field: { id: fieldOrganization() }, value: kase.organization });
+  if (kase.case_number) data.push({ field: { id: fieldCaseNumber() }, value: kase.case_number });
 
   return data;
 }
@@ -270,7 +278,7 @@ async function probe() {
     groups: [...groups.values()].sort((a, b) => b.count - a.count),
     fields: [...fields.values()].sort((a, b) => a.id - b.id),
     taskStatuses: [...statuses.values()].sort((a, b) => b.count - a.count),
-    expertiseFieldConfigured: FIELD_EXPERTISE_TYPE,
+    expertiseFieldConfigured: fieldExpertiseType(),
   };
 }
 
@@ -560,11 +568,11 @@ async function resolveFieldIds() {
     return hit ? hit.id : null;
   };
   return {
-    stage: byName(FIELD_NAME_PATTERNS.stage) || FIELD_STAGE,
-    status: byName(FIELD_NAME_PATTERNS.status) || FIELD_STATUS,
-    organization: byName(FIELD_NAME_PATTERNS.organization) || FIELD_ORGANIZATION,
-    caseNumber: byName(FIELD_NAME_PATTERNS.caseNumber) || FIELD_CASE_NUMBER,
-    expertiseType: byName(FIELD_NAME_PATTERNS.expertiseType) || FIELD_EXPERTISE_TYPE,
+    stage: byName(FIELD_NAME_PATTERNS.stage) || fieldStage(),
+    status: byName(FIELD_NAME_PATTERNS.status) || fieldStatus(),
+    organization: byName(FIELD_NAME_PATTERNS.organization) || fieldOrganization(),
+    caseNumber: byName(FIELD_NAME_PATTERNS.caseNumber) || fieldCaseNumber(),
+    expertiseType: byName(FIELD_NAME_PATTERNS.expertiseType) || fieldExpertiseType(),
     catalogue,
   };
 }
@@ -597,18 +605,22 @@ function listAllTasks() {
 // Статусы задач в Planfix настраиваются в аккаунте, поэтому "завершённость"
 // определяем по названию статуса, а не по числовому id: список названий
 // известен и меняется редко.
-const DONE_STATUS_NAMES = new Set([
+const DONE_STATUS_NAMES = [
   "завершенная", "завершённая", "завершена", "завершено",
   "выполненная", "выполнена", "выполнено",
   "закрыта", "закрытая", "отменена", "отменённая", "отмененная",
-  // Свои названия статусов можно дописать в .env через запятую,
-  // не трогая код: PLANFIX_DONE_STATUSES="Сдана,Принята"
-  ...String(process.env.PLANFIX_DONE_STATUSES || "")
-    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
-]);
+];
 
 function isDoneStatus(name) {
-  return DONE_STATUS_NAMES.has(String(name || "").trim().toLowerCase());
+  const needle = String(name || "").trim().toLowerCase();
+  if (!needle) return false;
+  if (DONE_STATUS_NAMES.includes(needle)) return true;
+  // Свои названия дописываются в настройках через запятую и читаются
+  // здесь же, а не один раз при загрузке файла: иначе добавленное в
+  // панели начало бы действовать только после перезапуска.
+  return settings.get("planfix_done_statuses")
+    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)
+    .includes(needle);
 }
 
 /** "01-09-2026" или {date:"01-09-2026"} -> "2026-09-01" для базы. */
@@ -712,7 +724,21 @@ module.exports = {
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
   peopleToIds, completeTask, cancelPlanfixTask, fetchTask,
-  fetchFieldCatalogue, resolveFieldIds, projectWebUrl, PLANFIX_WEB_URL,
-  FIELD_STAGE, FIELD_STATUS, FIELD_ORGANIZATION, FIELD_CASE_NUMBER, FIELD_EXPERTISE_TYPE,
+  fetchFieldCatalogue, resolveFieldIds, projectWebUrl,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };
+
+/* Номера полей и адрес раньше были константами и так и разошлись по
+   коду — planfixImport читает их как planfix.FIELD_STAGE. Отдаём их
+   свойствами-читалками: снаружи всё выглядит как прежде, а значение
+   берётся из настроек в момент обращения. */
+for (const [name, read] of [
+  ["PLANFIX_WEB_URL", webUrl],
+  ["FIELD_STAGE", fieldStage],
+  ["FIELD_STATUS", fieldStatus],
+  ["FIELD_ORGANIZATION", fieldOrganization],
+  ["FIELD_CASE_NUMBER", fieldCaseNumber],
+  ["FIELD_EXPERTISE_TYPE", fieldExpertiseType],
+]) {
+  Object.defineProperty(module.exports, name, { get: read, enumerable: true });
+}

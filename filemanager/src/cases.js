@@ -2,6 +2,7 @@ const { Router } = require("express");
 const fs = require("fs");
 const multer = require("multer");
 const db = require("./db");
+const settings = require("./settings");
 const files = require("./files");
 const caseFolders = require("./caseFolders");
 const folderPermissions = require("./folderPermissions");
@@ -737,13 +738,13 @@ cases.get("/tasks/all", async (req, res) => {
 });
 
 /**
- * Каким статусом Planfix помечает завершение. Берём из окружения, а если
+ * Каким статусом Planfix помечает завершение. Берём из настроек, а если
  * там пусто — вычисляем по уже перенесённым задачам: у завершённых виден
  * их статус, самый частый и есть нужный.
  */
 async function doneStatusId() {
-  const fromEnv = Number(process.env.PLANFIX_DONE_STATUS_ID || 0);
-  if (fromEnv) return fromEnv;
+  const chosen = settings.num("planfix_done_status_id");
+  if (chosen) return chosen;
   const { rows } = await db.query(
     `SELECT status_id, COUNT(*)::int AS c FROM case_tasks
       WHERE is_done = true AND status_id IS NOT NULL
@@ -754,12 +755,12 @@ async function doneStatusId() {
 
 /**
  * Номер статуса «Отмененная». Ищем так же, как и статус завершения:
- * сначала в окружении, потом по уже загруженным задачам — у отменённых
+ * сначала в настройках, потом по уже загруженным задачам — у отменённых
  * в Planfix статус называется «Отмененная»/«Отменена».
  */
 async function cancelledStatusId() {
-  const fromEnv = Number(process.env.PLANFIX_CANCELLED_STATUS_ID || 0);
-  if (fromEnv) return fromEnv;
+  const chosen = settings.num("planfix_cancelled_status_id");
+  if (chosen) return chosen;
   const { rows } = await db.query(
     `SELECT status_id, COUNT(*)::int AS c FROM case_tasks
       WHERE status_id IS NOT NULL AND status_name ILIKE '%отмен%'

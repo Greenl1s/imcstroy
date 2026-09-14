@@ -8,6 +8,7 @@ const { ZipArchive } = require("archiver");
 
 const auth = require("./auth");
 const db = require("./db");
+const settings = require("./settings");
 const filesLib = require("./files");
 const onlyoffice = require("./onlyoffice");
 const tools = require("./tools");
@@ -289,6 +290,85 @@ app.delete("/api/folder-permissions/:id", auth.requireAuth, auth.requireAdmin, a
   } catch (err) {
     console.error("Не удалось удалить право доступа:", err);
     res.status(500).json({ message: "Не удалось убрать право доступа: " + err.message });
+  }
+});
+
+/* ---------------- Панель настроек (только администратор) ----------------
+
+   Всё, что раньше требовало зайти на сервер, поправить .env и
+   пересобрать образ. Отдельная приставка /api/admin/ у адресов — не
+   украшение: по ней видно, что за этой чертой всё закрыто ролью, и
+   забыть повесить проверку на новый маршрут труднее.
+   ---------------------------------------------------------------- */
+
+app.get("/api/admin/settings", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    // Читаем из базы заново, а не из памяти: настройки мог поменять
+    // другой администратор, и показывать ему чужие правки как свои —
+    // худший вид рассинхрона.
+    await settings.load();
+    res.json({ settings: settings.describe(req.query.group || null) });
+  } catch (err) {
+    console.error("Не удалось прочитать настройки:", err);
+    res.status(500).json({ message: "Не удалось прочитать настройки: " + err.message });
+  }
+});
+
+app.patch("/api/admin/settings", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const values = req.body && req.body.values;
+    if (!values || typeof values !== "object") {
+      return res.status(400).json({ message: "Нечего сохранять" });
+    }
+    const changed = [];
+    for (const [key, value] of Object.entries(values)) {
+      const result = await settings.set(key, value, req.user.id);
+      changed.push(key);
+      // В журнал пишем ключ и только его: значение может быть токеном.
+      events.log(req.user, "settings", { name: key, details: { cleared: result.cleared } });
+    }
+    res.json({ ok: true, changed, settings: settings.describe(req.query.group || null) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
+    console.error("Не удалось сохранить настройки:", err);
+    res.status(500).json({ message: "Не удалось сохранить настройки: " + err.message });
+  }
+});
+
+/**
+ * Кто что видит: один человек — и сразу всё, к чему у него есть доступ.
+ *
+ * Разделы (fm_permissions) и правила по папкам «Дел» лежат в разных
+ * таблицах и правились в разных окнах, поэтому цельной картины не было
+ * ни у кого. Здесь они наконец в одном ответе.
+ */
+app.get("/api/admin/access", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const list = await users.listUsers();
+    const counts = await folderPermissions.countByUser();
+    const byId = new Map(counts.map((c) => [c.user_id, c]));
+    res.json({
+      users: list.map((u) => ({
+        ...u,
+        folder_rules: byId.get(u.id) ? byId.get(u.id).rules : 0,
+        folder_denials: byId.get(u.id) ? byId.get(u.id).denials : 0,
+      })),
+    });
+  } catch (err) {
+    console.error("Не удалось собрать доступы:", err);
+    res.status(500).json({ message: "Не удалось собрать доступы: " + err.message });
+  }
+});
+
+app.get("/api/admin/access/:userId", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const user = await users.getUser(Number(req.params.userId));
+    if (!user) return res.status(404).json({ message: "Сотрудник не найден" });
+    const rules = await folderPermissions.listForUser(user.id);
+    res.json({ user, rules });
+  } catch (err) {
+    console.error("Не удалось собрать доступы сотрудника:", err);
+    res.status(500).json({ message: "Не удалось собрать доступы сотрудника: " + err.message });
   }
 });
 
@@ -1584,10 +1664,11 @@ setInterval(runTrashCleanup, 6 * 60 * 60 * 1000).unref();
 // Планфикс — источник правды, мы только читаем; если он недоступен,
 // следующий заход просто повторит попытку.
 const planfixImport = require("./planfixImport");
-const PLANFIX_SYNC_MINUTES = Number(process.env.PLANFIX_SYNC_MINUTES || 15);
 
 async function runPlanfixSync() {
-  if (!process.env.PLANFIX_TOKEN) return;
+  // Нет токена — сверять нечем и незачем: молча пропускаем заход, а не
+  // сыплем ошибками каждые пятнадцать минут.
+  if (!settings.get("planfix_token")) return;
   try {
     const report = await planfixImport.runSync({ trigger: "schedule" });
     const touched = report.created.length + report.adopted.length + report.updated.length;
@@ -1602,12 +1683,34 @@ async function runPlanfixSync() {
   }
 }
 
-if (PLANFIX_SYNC_MINUTES > 0) {
+/**
+ * Расписание сверки ставим после того, как настройки прочитаны из базы:
+ * частота задаётся в панели, и читать её до загрузки значило бы всегда
+ * брать умолчание. Само расписание ставится один раз при запуске —
+ * изменение частоты вступает в силу после перезапуска сервиса, и так
+ * и написано на экране настроек.
+ */
+function schedulePlanfixSync() {
+  const minutes = settings.num("planfix_sync_minutes");
+  if (minutes <= 0) return;
   setTimeout(runPlanfixSync, 60 * 1000).unref();
-  setInterval(runPlanfixSync, PLANFIX_SYNC_MINUTES * 60 * 1000).unref();
+  setInterval(runPlanfixSync, minutes * 60 * 1000).unref();
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`filemanager запущен на порту ${PORT}`);
-});
+
+// Настройки читаем до того, как начали принимать запросы: иначе первый
+// же запрос увидел бы умолчания вместо того, что задал администратор.
+// Не прочитались (нет таблицы — миграцию ещё не накатили) — работаем
+// на .env, как работали раньше, и говорим об этом в журнал.
+settings.load()
+  .then((ok) => {
+    if (!ok) console.warn("Настройки из базы не прочитаны — работаем на переменных окружения");
+  })
+  .catch(() => {})
+  .finally(() => {
+    schedulePlanfixSync();
+    app.listen(PORT, () => {
+      console.log(`filemanager запущен на порту ${PORT}`);
+    });
+  });

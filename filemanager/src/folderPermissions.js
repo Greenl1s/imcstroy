@@ -51,4 +51,36 @@ async function renamePath(oldPath, newPath) {
   }
 }
 
-module.exports = { listForPath, setPermission, removePermission, removeRulesUnderPath, renamePath };
+/**
+ * Все правила одного человека — по всем папкам сразу.
+ *
+ * Раньше ответить на вопрос «что видит Петров» можно было только обойдя
+ * дерево папок руками и заглянув в каждое окно доступа. Правил у одного
+ * человека единицы, поэтому просто отдаём их списком, разложенным по
+ * глубине пути: сначала то, что ближе к корню.
+ */
+async function listForUser(userId) {
+  const res = await db.query(
+    `SELECT id, path, access, created_at
+       FROM fm_folder_permissions
+      WHERE user_id = $1
+      ORDER BY length(path) - length(replace(path, '/', '')) ASC, path ASC`,
+    [userId]
+  );
+  return res.rows;
+}
+
+/** Сколько правил у каждого человека — чтобы показать это прямо в списке. */
+async function countByUser() {
+  const res = await db.query(
+    `SELECT user_id, COUNT(*)::int AS rules,
+            COUNT(*) FILTER (WHERE access = 'none')::int AS denials
+       FROM fm_folder_permissions GROUP BY user_id`
+  );
+  return res.rows;
+}
+
+module.exports = {
+  listForPath, setPermission, removePermission, removeRulesUnderPath, renamePath,
+  listForUser, countByUser,
+};
