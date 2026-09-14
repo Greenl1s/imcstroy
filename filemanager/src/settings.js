@@ -33,6 +33,12 @@ const db = require("./db");
  *   text   — строка
  *   number — целое неотрицательное; пустое значит «не задано»
  *   secret — наружу не показывается никогда
+ *
+ * screen: показывать ли настройку на экране. Номера полей и статусов
+ * Planfix оставлены здесь и продолжают читаться из .env, но экрана им
+ * не положено: их правят раз в жизни, при заведении аккаунта, а на
+ * экране настроек они превращали простую страницу в десяток полей с
+ * непонятными числами. Понадобится поменять — задаётся в .env.
  */
 const REGISTRY = [
   {
@@ -43,7 +49,7 @@ const REGISTRY = [
   },
   {
     key: "planfix_token", env: "PLANFIX_TOKEN", kind: "secret",
-    def: "", group: "planfix",
+    def: "", group: "planfix", screen: true,
     label: "Токен доступа",
     hint: "Выдаётся в Planfix: Управление аккаунтом → API. Токен должен принадлежать сотруднику, который видит нужные проекты, иначе Planfix отвечает «Scope denied».",
   },
@@ -157,9 +163,9 @@ function tail(value) {
  * Описание настроек для экрана. Секреты не отдаются: вместо значения
  * идёт «задан» и последние четыре знака.
  */
-function describe(group) {
+function describe(group, { all = false } = {}) {
   return REGISTRY
-    .filter((item) => !group || item.group === group)
+    .filter((item) => (all || item.screen) && (!group || item.group === group))
     .map((item) => {
       const value = get(item.key);
       const common = {
@@ -184,7 +190,11 @@ function describe(group) {
  */
 async function set(key, rawValue, userId) {
   const item = BY_KEY.get(key);
-  if (!item) {
+  // Менять можно только то, что есть на экране. Не «на всякий случай»:
+  // адрес запроса виден в браузере, и без этой проверки кто угодно с
+  // правами администратора мог бы переписать номера полей Planfix,
+  // которых он в глаза не видел.
+  if (!item || !item.screen) {
     const err = new Error(`Неизвестная настройка: ${key}`);
     err.status = 400;
     throw err;
