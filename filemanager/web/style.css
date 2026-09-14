@@ -2556,3 +2556,29 @@ a.upload-btn { text-decoration: none; }
   .access-layout { flex-direction: column; }
   .access-side { flex: none; width: 100%; }
 }
+
+/* Справочники: три коротких списка рядом, а не в столбик — так видно
+   все три разом и не приходится листать. */
+.lists-grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: start;
+}
+.lists-card { max-width: none; padding: 18px; }
+.lists-values { margin: 10px 0 0; max-height: 320px; overflow-y: auto; }
+.lists-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--border);
+  font-size: var(--fs-body);
+}
+.lists-row:last-child { border-bottom: none; }
+.lists-card .settings-row { margin-top: 12px; }
+.lists-card .settings-row input { flex: 1; min-width: 0; }
+
+/* Галочки специалистов в карточке проекта: список с прокруткой, чтобы
+   окно не росло от количества людей. */
+#ceExpertsBox, #expertsPicker {
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px; background: var(--bg-card);
+}

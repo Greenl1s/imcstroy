@@ -312,6 +312,7 @@
     <div class="settings-body">
       <nav class="settings-tabs" id="settingsTabs">
         <button class="settings-tab active" data-tab="people" type="button">Сотрудники</button>
+        <button class="settings-tab" data-tab="lists" type="button">Справочники</button>
         <button class="settings-tab" data-tab="planfix" type="button">Связь с Planfix</button>
       </nav>
       <div class="settings-pane" id="settingsPane"></div>
@@ -682,6 +683,24 @@
   </div>
 </div>
 
+<!-- Выбор специалистов из журнала. Их бывает несколько, и в ячейку
+     таблицы столько галочек не поместится — поэтому отдельное окно. -->
+<div id="expertsOverlay" class="modal-overlay hidden">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <span>Специалисты и эксперты</span>
+      <button class="back-btn" id="expertsCloseBtn">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Закрыть
+      </button>
+    </div>
+    <div class="add-user-form">
+      <div class="picker-box" id="expertsPicker"></div>
+      <button class="primary" id="expertsSave" type="button">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <div id="uploadPanel" class="upload-panel hidden">
@@ -980,24 +999,18 @@
         </label>
       </div>
       <label>Вид экспертизы <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
-        <input type="text" id="pfExpertiseType" list="expertiseTypeList"
-               placeholder="Например: строительно-техническая">
+        <select id="pfExpertiseType"><option value="">Не выбран</option></select>
       </label>
       <div class="add-user-row">
         <label>Руководитель
           <select id="pfManager"></select>
         </label>
         <label>Год начала
-          <input type="number" id="pfYear">
+          <select id="pfYear"><option value="">Не выбран</option></select>
         </label>
       </div>
       <label>Структура (организация)
-        <div style="display:flex; gap:8px; align-items:center;">
-          <select id="pfOrganization" style="flex:1;">
-            <option value="">Не выбрана</option>
-          </select>
-          <button type="button" class="secondary" id="pfManageOrgBtn" title="Добавить/удалить организацию" style="flex:0 0 auto; width:36px; padding:0;">+</button>
-        </div>
+        <select id="pfOrganization"><option value="">Не выбрана</option></select>
       </label>
       <div class="add-user-row">
         <label>Сторона 1
@@ -1047,17 +1060,8 @@
   </div>
 </div>
 
-<!-- Виды экспертиз: подсказка для поля, а не жёсткий список — вписать
-     можно любой, потому что виды со временем добавляются. -->
-<datalist id="expertiseTypeList">
-  <option value="строительно-техническая"></option>
-  <option value="пожарно-техническая"></option>
-  <option value="землеустроительная"></option>
-  <option value="почерковедческая"></option>
-  <option value="оценочная"></option>
-  <option value="автотехническая"></option>
-  <option value="электротехническая"></option>
-</datalist>
+<!-- Список видов экспертиз переехал в справочники: подсказка была
+     нужна, пока значение вписывали руками. Теперь его выбирают. -->
 
 <!-- Правка карточки уже заведённого проекта. Отдельное окно, а не форма
      создания: при создании заводится папка, здесь — только данные. -->
@@ -1090,8 +1094,7 @@
       <p class="row-subtitle" id="ceTypeHint" style="margin:-8px 0 0;"></p>
 
       <label>Вид экспертизы
-        <input type="text" id="ceExpertiseType" list="expertiseTypeList"
-               placeholder="Например: строительно-техническая">
+        <select id="ceExpertiseType"><option value="">Не выбран</option></select>
       </label>
       <div class="add-user-row">
         <label>Суд / заказчик
@@ -1107,7 +1110,7 @@
           <select id="ceManager"></select>
         </label>
         <label>Год начала
-          <input type="number" id="ceYear">
+          <select id="ceYear"><option value="">Не выбран</option></select>
         </label>
       </div>
       <label>Структура (организация)
@@ -1126,9 +1129,14 @@
       <label>Судья
         <input type="text" id="ceJudgeName">
       </label>
-      <label>Эксперты
-        <input type="text" id="ceExperts" placeholder="Через запятую">
-      </label>
+      <!-- Специалистов бывает несколько, поэтому галочки, а не список.
+           Значение остаётся строкой через запятую: так не ломаются ни
+           выгрузка, ни файл журнала в папке, ни старые записи. -->
+      <div class="form-field-group">
+        <span class="settings-label">Специалисты / эксперты</span>
+        <div class="picker-box" id="ceExpertsBox"></div>
+        <input type="hidden" id="ceExperts">
+      </div>
       <label>Описание
         <input type="text" id="ceDescription">
       </label>
@@ -1141,23 +1149,8 @@
   </div>
 </div>
 
-<div id="orgManageOverlay" class="modal-overlay hidden">
-  <div class="modal-panel" style="max-width:420px;">
-    <div class="modal-header">
-      <span>Организации (Структура)</span>
-      <button class="back-btn" id="orgManageCloseBtn" type="button">
-        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        Закрыть
-      </button>
-    </div>
-    <div id="orgList" style="max-height:260px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:10px;"></div>
-    <form id="orgAddForm" style="display:flex; gap:8px; margin-top:12px;">
-      <input type="text" id="orgAddName" placeholder="Название организации" style="flex:1;" required>
-      <button class="primary" type="submit">Добавить</button>
-    </form>
-    <p id="orgManageError" class="error-text"></p>
-  </div>
-</div>
+<!-- Окно «Организации (Структура)» убрано: список переехал в
+     «Настройки → Справочники», где его правит только администратор. -->
 
 <div id="itemContextMenu" class="context-menu hidden">
   <button type="button" data-ctx-action="select">Выбрать</button>

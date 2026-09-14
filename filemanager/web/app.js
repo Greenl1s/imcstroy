@@ -1913,7 +1913,17 @@ const SECTION_RIGHTS = [
   ["can_cases", "Дела", "Проекты, задачи, журнал регистрации"],
   ["can_db", "База данных", "Файлы, эксперты, оборудование"],
   ["can_tools", "Инструменты", "Служебный раздел"],
-  ["can_manage", "Руководитель", "Ведёт производственный календарь и утверждает решения по заседаниям"],
+  ["can_manage", "Руководитель центра", "Ведёт производственный календарь и утверждает решения по заседаниям"],
+];
+
+/* Кто попадает в выпадающие списки журнала регистрации.
+
+   Это не право, а роль в проектах: человек может иметь полный доступ к
+   «Делам» и при этом не значиться ни руководителем проектов, ни
+   специалистом. Поэтому отдельной группой, а не рядом с разделами. */
+const JOURNAL_ROLES = [
+  ["can_be_manager", "Может быть руководителем проекта", "Попадает в список «Руководитель» в журнале и в карточке проекта"],
+  ["can_be_expert", "Может быть специалистом / экспертом", "Попадает в список «Специалисты / Эксперты»"],
 ];
 
 const ACCESS_LABEL = { read: "Только смотреть", write: "Смотреть и менять", none: "Закрыто" };
@@ -1933,6 +1943,7 @@ async function loadSettings() {
   pane.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
     if (settingsTab === "people") await renderPeopleTab();
+    else if (settingsTab === "lists") await renderListsTab();
     else await renderPlanfixTab();
   } catch (err) {
     pane.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
@@ -2050,6 +2061,15 @@ async function showPersonDetail(userId) {
         <label class="access-right">
           <input type="checkbox" data-right="${key}" ${user[key] ? "checked" : ""} ${isAdmin ? "disabled" : ""}>
           <span><b>${label}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
+        </label>`).join("")}
+    </div>
+
+    <h3 class="access-sub">В журнале регистрации</h3>
+    <div class="access-rights">
+      ${JOURNAL_ROLES.map(([key, label, hint]) => `
+        <label class="access-right">
+          <input type="checkbox" data-right="${key}" ${user[key] ? "checked" : ""}>
+          <span><b>${escapeHtml(label)}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
         </label>`).join("")}
     </div>
 
@@ -2225,7 +2245,17 @@ function renderAddPersonForm() {
           ${SECTION_RIGHTS.map(([key, label, hint]) => `
             <label class="access-right">
               <input type="checkbox" name="${key}" ${key === "can_manage" ? "" : "checked"}>
-              <span><b>${label}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
+              <span><b>${escapeHtml(label)}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
+            </label>`).join("")}
+        </div>
+      </div>
+      <div>
+        <span class="settings-label">В журнале регистрации</span>
+        <div class="access-rights" style="margin-top:8px;">
+          ${JOURNAL_ROLES.map(([key, label, hint]) => `
+            <label class="access-right">
+              <input type="checkbox" name="${key}" checked>
+              <span><b>${escapeHtml(label)}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
             </label>`).join("")}
         </div>
       </div>
@@ -2258,6 +2288,8 @@ function renderAddPersonForm() {
           can_db: form.can_db.checked,
           can_cases: form.can_cases.checked,
           can_manage: form.can_manage.checked,
+          can_be_manager: form.can_be_manager.checked,
+          can_be_expert: form.can_be_expert.checked,
         }),
       });
       showToast("Сотрудник заведён");
@@ -2267,6 +2299,139 @@ function renderAddPersonForm() {
     } catch (err) {
       settingsError(err);
     }
+  });
+}
+
+
+/* ---------- Вкладка «Справочники» ----------
+
+   Три списка, из которых выбирают в журнале регистрации. Раньше эти
+   поля вписывали руками, и «строительно-техническая» соседствовала со
+   «Строительно-технической» — для человека одно и то же, для фильтра и
+   выгрузки три разных проекта.
+
+   «Тип проекта» сюда не вынесен нарочно: его три значения — не названия,
+   а поведение. От них зависит, какие папки заводятся под проект, в какую
+   группу он уходит в Planfix и какие задачи ставятся по стадиям. Тип,
+   заведённый в справочнике, система просто не знала бы, как обслужить.
+
+   Руководителей и специалистов здесь тоже нет: это свойство человека, и
+   правится оно там, где живёт человек, — во вкладке «Сотрудники». Здесь
+   только видно, кто в списках сейчас. */
+
+const LOOKUP_LISTS = [
+  {
+    kind: "organization", title: "Структура",
+    hint: "Организации, от имени которых ведутся проекты.",
+    placeholder: "Например: АО «НИЦ Строительство»",
+  },
+  {
+    kind: "expertise_type", title: "Тип экспертизы",
+    hint: "Виды экспертиз и исследований.",
+    placeholder: "Например: строительно-техническая",
+  },
+  {
+    kind: "year", title: "Год",
+    hint: "Годы начала проектов. Четыре цифры.",
+    placeholder: "2027",
+  },
+];
+
+async function renderListsTab() {
+  const [lists, people] = await Promise.all([
+    apiFetch("/api/lookups"),
+    apiFetch("/api/admin/access"),
+  ]);
+  const byKind = {
+    organization: lists.organizations || [],
+    expertise_type: lists.expertise_types || [],
+    year: lists.years || [],
+  };
+
+  settingsPane().innerHTML = `
+    <p class="access-note">Из этих списков выбирают в журнале регистрации и в карточке
+    проекта. Вписать значение мимо списка нельзя — ни в журнале, ни через запрос.</p>
+
+    <div class="lists-grid">
+      ${LOOKUP_LISTS.map((list) => `
+        <section class="settings-card lists-card">
+          <h2 class="access-title">${escapeHtml(list.title)}</h2>
+          <p class="access-note">${escapeHtml(list.hint)}</p>
+          <div class="lists-values" data-values="${list.kind}">
+            ${byKind[list.kind].length
+              ? byKind[list.kind].map((v) => `
+                <div class="lists-row">
+                  <span>${escapeHtml(String(v))}</span>
+                  <button type="button" class="link-btn" data-drop="${list.kind}"
+                          data-value="${escapeHtml(String(v))}">Убрать</button>
+                </div>`).join("")
+              : '<p class="empty-hint">Список пуст</p>'}
+          </div>
+          <form class="settings-row" data-add="${list.kind}">
+            <input type="text" placeholder="${escapeHtml(list.placeholder)}" autocomplete="off">
+            <button class="primary" type="submit">Добавить</button>
+          </form>
+        </section>`).join("")}
+    </div>
+
+    <section class="settings-card" style="margin-top:20px;">
+      <h2 class="access-title">Руководители и специалисты</h2>
+      <p class="access-note">Кто сейчас попадает в выпадающие списки журнала. Меняется
+      во вкладке «Сотрудники»: это свойство человека, и правится оно там, где человек.</p>
+      <table class="access-rules">
+        <thead><tr><th>Сотрудник</th><th>Руководитель проекта</th><th>Специалист / эксперт</th></tr></thead>
+        <tbody>${(people.users || []).map((u) => `
+          <tr>
+            <td class="access-path">${escapeHtml(u.username)}</td>
+            <td>${u.can_be_manager ? "да" : "—"}</td>
+            <td>${u.can_be_expert ? "да" : "—"}</td>
+          </tr>`).join("")}</tbody>
+      </table>
+    </section>`;
+
+  settingsPane().querySelectorAll("[data-add]").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = form.querySelector("input");
+      const value = input.value.trim();
+      if (!value) return;
+      try {
+        if (form.dataset.add === "organization") {
+          await apiFetch("/api/organizations", { method: "POST", body: JSON.stringify({ name: value }) });
+        } else {
+          await apiFetch("/api/admin/lookups", {
+            method: "POST", body: JSON.stringify({ kind: form.dataset.add, value }),
+          });
+        }
+        input.value = "";
+        forgetLookups();
+        showToast("Добавлено");
+        renderListsTab();
+      } catch (err) {
+        settingsError(err);
+      }
+    });
+  });
+
+  settingsPane().querySelectorAll("[data-drop]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const { drop: kind, value } = btn.dataset;
+      if (!confirm(`Убрать «${value}» из списка?`)) return;
+      try {
+        if (kind === "organization") {
+          await apiFetch(`/api/organizations/${encodeURIComponent(value)}`, { method: "DELETE" });
+        } else {
+          await apiFetch(`/api/admin/lookups?kind=${kind}&value=${encodeURIComponent(value)}`,
+            { method: "DELETE" });
+        }
+        forgetLookups();
+        showToast("Убрано");
+        renderListsTab();
+      } catch (err) {
+        // Значение занято проектами — сервер объясняет, сколькими.
+        settingsError(err);
+      }
+    });
   });
 }
 
@@ -4549,24 +4714,89 @@ function openPlanfixTasksFor(project) {
   planfixTasksCurrentProject = project;
 }
 
-/* ---- Форма создания проекта ---- */
 
-/** Заполняет выпадающий список "Структура" из справочника организаций. */
-async function loadOrganizationsSelect() {
-  const select = document.getElementById("pfOrganization");
-  const current = select.value;
-  select.innerHTML = '<option value="">Не выбрана</option>';
-  try {
-    const orgs = await apiFetch("/api/organizations");
-    for (const o of orgs) {
-      const opt = document.createElement("option");
-      opt.value = o.name;
-      opt.textContent = o.name;
-      select.appendChild(opt);
-    }
-    if (current) select.value = current;
-  } catch { /* список организаций необязателен для работы формы */ }
+/* ---------- Справочники журнала на формах ----------
+
+   Один запрос на все списки и на то, кто может быть руководителем и
+   специалистом. Держим последний ответ: формы открываются часто, а
+   списки меняются редко, и ходить за ними на каждое открытие — значит
+   заставлять человека ждать пустое окно. */
+
+let lookupsCache = null;
+
+/**
+ * Справочник поменялся — забываем всё, что на нём построено.
+ *
+ * Журнал держит ответ сервера в памяти и не перечитывает его при каждом
+ * открытии. Без этого администратор заводил бы тип экспертизы и тут же
+ * не находил его в журнале — и решил бы, что не сохранилось.
+ */
+function forgetLookups() {
+  lookupsCache = null;
+  journalData = null;
 }
+
+async function loadLookups({ fresh = false } = {}) {
+  if (lookupsCache && !fresh) return lookupsCache;
+  try {
+    lookupsCache = await apiFetch("/api/lookups");
+  } catch {
+    // Без справочников форма всё равно должна открыться: человек
+    // увидит пустые списки и поймёт, что настраивать.
+    lookupsCache = { organizations: [], expertise_types: [], years: [], managers: [], experts: [] };
+  }
+  return lookupsCache;
+}
+
+/**
+ * Заполняет выпадающий список значениями справочника.
+ *
+ * Если у проекта стоит значение, которого в списке нет (осталось с тех
+ * пор, когда вписывали руками, или приехало из Planfix), добавляем его
+ * отдельным пунктом с пометкой. Молча подменить его первым попавшимся —
+ * значит потерять данные так, что никто не заметит.
+ */
+function fillFromLookup(select, values, current, emptyLabel) {
+  const value = current == null ? "" : String(current);
+  fillSelect(select, (values || []).map((v) => ({ value: String(v), label: String(v) })), value, emptyLabel);
+  if (value && select.value !== value) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value + " — не из списка";
+    select.appendChild(opt);
+    select.value = value;
+  }
+}
+
+/**
+ * Галочки специалистов. Пишем в скрытое поле строкой через запятую —
+ * тем же видом, каким это поле жило всегда.
+ */
+function fillExpertsBox(boxId, hiddenId, current, people) {
+  const box = document.getElementById(boxId);
+  const hidden = document.getElementById(hiddenId);
+  const chosen = new Set(String(current || "").split(",").map((x) => x.trim()).filter(Boolean));
+  const known = (people || []).map((p) => p.username);
+  const strangers = [...chosen].filter((n) => !known.includes(n));
+
+  box.innerHTML = (known.length || strangers.length)
+    ? [...known.map((n) => [n, chosen.has(n), ""]),
+       ...strangers.map((n) => [n, true, " — не значится специалистом"])]
+        .map(([name, on, note]) => `
+          <label class="picker-item">
+            <input type="checkbox" value="${escapeHtml(name)}" ${on ? "checked" : ""}>
+            <span>${escapeHtml(name)}<span class="access-hint">${escapeHtml(note)}</span></span>
+          </label>`).join("")
+    : '<p class="empty-hint">Специалистами никто не отмечен. Отметьте в «Настройки → Сотрудники».</p>';
+
+  const sync = () => {
+    hidden.value = [...box.querySelectorAll("input:checked")].map((i) => i.value).join(", ");
+  };
+  box.querySelectorAll("input").forEach((i) => i.addEventListener("change", sync));
+  sync();
+}
+
+/* ---- Форма создания проекта ---- */
 
 /* ---- Материалы при создании проекта (без ИИ — просто выбор папки) ---- */
 
@@ -4731,20 +4961,18 @@ async function uploadPendingProjectFiles() {
 async function openProjectForm() {
   els.projectFormError.textContent = "";
   els.projectForm.reset();
-  await loadOrganizationsSelect();
   resetPendingProjectFiles();
 
-  const managerSelect = document.getElementById("pfManager");
-  managerSelect.innerHTML = '<option value="">Не выбран</option>';
-  try {
-    const { users } = await apiFetch("/api/users");
-    for (const u of users) {
-      const opt = document.createElement("option");
-      opt.value = u.id;
-      opt.textContent = u.username;
-      managerSelect.appendChild(opt);
-    }
-  } catch { /* без списка руководителей форма всё равно рабочая */ }
+  // Справочники читаем заново: администратор мог только что завести
+  // новую структуру или год, и увидеть их надо сразу, а не после
+  // перезагрузки страницы.
+  const lists = await loadLookups({ fresh: true });
+  fillFromLookup(document.getElementById("pfOrganization"), lists.organizations, "", "Не выбрана");
+  fillFromLookup(document.getElementById("pfExpertiseType"), lists.expertise_types, "", "Не выбран");
+  fillFromLookup(document.getElementById("pfYear"), lists.years, "", "Не выбран");
+  // Руководителем может стать не всякий, а кто отмечен в настройках.
+  fillSelect(document.getElementById("pfManager"),
+    (lists.managers || []).map((u) => ({ value: u.id, label: u.username })), "", "Не выбран");
 
   els.projectFormOverlay.classList.remove("hidden");
 }
@@ -4806,14 +5034,11 @@ async function openCaseEdit(project) {
   const set = (id, value) => { document.getElementById(id).value = value == null ? "" : String(value); };
   document.getElementById("ceType").value = project.type || "";
   set("ceStatus", project.status || "waiting");
-  set("ceExpertiseType", project.expertise_type);
   set("ceCourt", project.court_or_customer);
   set("ceCaseNumber", project.case_number);
-  set("ceYear", project.year);
   set("ceParty1", project.party1);
   set("ceParty2", project.party2);
   set("ceJudgeName", project.judge_name);
-  set("ceExperts", project.experts);
   set("ceDescription", project.description);
 
   // Название папки не переименовываем — говорим об этом сразу, чтобы
@@ -4828,31 +5053,16 @@ async function openCaseEdit(project) {
 
   // Справочники грузим после показа окна: без них форма всё равно
   // рабочая, а ждать их незачем.
-  const managerSelect = document.getElementById("ceManager");
-  const orgSelect = document.getElementById("ceOrganization");
-  try {
-    const { users } = await apiFetch("/api/users");
-    fillSelect(managerSelect, users.map((u) => ({ value: u.id, label: u.username })),
-      project.manager_id, "Не выбран");
-  } catch {
-    fillSelect(managerSelect, [], project.manager_id, "Не выбран");
-  }
-  try {
-    const orgs = await apiFetch("/api/organizations");
-    fillSelect(orgSelect, orgs.map((o) => ({ value: o.name, label: o.name })),
-      project.organization, "Не выбрана");
-    // Организации может не быть в справочнике (приехала из Planfix) —
-    // тогда добавляем её отдельным пунктом, чтобы не затереть молча.
-    if (project.organization && orgSelect.value !== project.organization) {
-      const opt = document.createElement("option");
-      opt.value = project.organization;
-      opt.textContent = project.organization + " (не из справочника)";
-      orgSelect.appendChild(opt);
-      orgSelect.value = project.organization;
-    }
-  } catch {
-    fillSelect(orgSelect, [], project.organization, "Не выбрана");
-  }
+  const lists = await loadLookups({ fresh: true });
+  fillFromLookup(document.getElementById("ceOrganization"), lists.organizations,
+    project.organization, "Не выбрана");
+  fillFromLookup(document.getElementById("ceExpertiseType"), lists.expertise_types,
+    project.expertise_type, "Не выбран");
+  fillFromLookup(document.getElementById("ceYear"), lists.years, project.year, "Не выбран");
+  fillSelect(document.getElementById("ceManager"),
+    (lists.managers || []).map((u) => ({ value: u.id, label: u.username })),
+    project.manager_id, "Не выбран");
+  fillExpertsBox("ceExpertsBox", "ceExperts", project.experts, lists.experts);
 }
 
 // Подсказку обновляем прямо при наборе номера: разбирает его сервер,
@@ -5158,9 +5368,17 @@ const journalFilters = {
 /**
  * Колонки — ровно те же и в том же порядке, что в Excel.
  *
- * edit говорит, как поле правится: text — свободный текст, select —
- * выбор из списка (стадия, тип и руководитель живут значениями, а не
- * произвольной строкой), null — не правится вовсе.
+ * edit говорит, как поле правится:
+ *   text            — свободный текст;
+ *   list:<название>  — выбор из справочника, который ведёт администратор;
+ *   type            — три вида проекта, они зашиты в поведение системы;
+ *   manager         — один человек из тех, кто отмечен руководителем;
+ *   experts         — несколько человек галочками;
+ *   null            — не правится вовсе.
+ *
+ * Учётные поля вписывать руками нельзя нарочно: «строительно-техническая»,
+ * «Строительно-техническая» и «стр.-техническая» для человека одно и то
+ * же, а для фильтра и выгрузки — три разных проекта.
  *
  * Стадии здесь нет намеренно: её смена двигает папку на диске и карточку
  * в Planfix, для этого есть отдельное действие с подтверждением. Правка
@@ -5169,13 +5387,13 @@ const journalFilters = {
 const JOURNAL_COLUMNS = [
   { key: "stage",             title: "Стадия",                 edit: null,   sticky: 1, width: 116 },
   { key: "name",              title: "Условное наименование",  edit: null,   sticky: 2, width: 230 },
-  { key: "organization",      title: "Структура",              edit: "text", width: 200 },
+  { key: "organization",      title: "Структура",              edit: "list:organizations", width: 200 },
   { key: "type",              title: "Тип проекта",            edit: "type", width: 190 },
-  { key: "expertise_type",    title: "Тип экспертизы",         edit: "text", width: 180 },
-  { key: "year",              title: "Год",                    edit: "text", width: 76 },
+  { key: "expertise_type",    title: "Тип экспертизы",         edit: "list:expertise_types", width: 180 },
+  { key: "year",              title: "Год",                    edit: "list:years", width: 76 },
   { key: "description",       title: "Описание",               edit: "text", width: 240 },
   { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150 },
-  { key: "experts",           title: "Специалисты / Эксперты", edit: "text", width: 200 },
+  { key: "experts",           title: "Специалисты / Эксперты", edit: "experts", width: 200 },
   { key: "court_or_customer", title: "Заказчик",               edit: "text", width: 230 },
   { key: "case_number",       title: "№ дела или договора",    edit: "text", width: 160 },
   { key: "party1",            title: "Сторона 1",              edit: "text", width: 170, court: true },
@@ -5445,6 +5663,14 @@ function startJournalEdit(cell) {
   const column = JOURNAL_COLUMNS.find((c) => c.key === key);
   if (!row || !column) return;
 
+  // Несколько специалистов в один <select> не влезают — для них своё
+  // окно с галочками. Ячейку при этом не трогаем вовсе: правка идёт в
+  // окне, и подменять её содержимое на время было бы мельтешением.
+  if (column.edit === "experts") {
+    openExpertsPicker(row, cell);
+    return;
+  }
+
   journalEditing = { cell, id, key, before: cell.innerHTML, className: cell.className };
   cell.classList.add("jr-editing");
 
@@ -5480,8 +5706,85 @@ function journalEditOptions(kind, row) {
       .map((m) => `<option value="${m.id}"${String(row.manager_id || "") === String(m.id) ? " selected" : ""}>${escapeHtml(m.username)}</option>`)
       .join("");
   }
+  if (kind.startsWith("list:")) {
+    const name = kind.slice(5);
+    const key = { organizations: "organization", expertise_types: "expertise_type", years: "year" }[name];
+    const current = row[key] == null ? "" : String(row[key]);
+    const values = ((journalData.lists || {})[name] || []).map(String);
+    // Старое значение, заведённое до справочников, показываем отдельным
+    // пунктом: иначе список молча подменил бы его первым попавшимся, а
+    // человек бы об этом не узнал.
+    const extra = current && !values.includes(current) ? [current] : [];
+    return `<option value="">не указано</option>` +
+      extra.map((v) => `<option value="${escapeHtml(v)}" selected>${escapeHtml(v)} — не из списка</option>`).join("") +
+      values.map((v) => `<option value="${escapeHtml(v)}"${v === current ? " selected" : ""}>${escapeHtml(v)}</option>`).join("");
+  }
   return "";
 }
+
+/**
+ * Окно выбора специалистов.
+ *
+ * Их бывает несколько, поэтому не выпадающий список, а галочки. Пишем в
+ * то же поле через запятую, каким оно было и раньше: так не ломаются ни
+ * выгрузка, ни файл журнала в папке, ни старые записи.
+ */
+function openExpertsPicker(row, cell) {
+  const overlay = document.getElementById("expertsOverlay");
+  const box = document.getElementById("expertsPicker");
+  const chosen = new Set(String(row.experts || "").split(",").map((x) => x.trim()).filter(Boolean));
+  const people = journalData.experts || [];
+  // Кто записан, но специалистом больше не значится, — показываем, а не
+  // выбрасываем: сначала человек должен увидеть, что снимает.
+  const strangers = [...chosen].filter((name) => !people.some((p) => p.username === name));
+
+  box.innerHTML = (people.length || strangers.length)
+    ? [...people.map((p) => [p.username, chosen.has(p.username), ""]),
+       ...strangers.map((n) => [n, true, " — не значится специалистом"])]
+        .map(([name, on, note]) => `
+          <label class="picker-item">
+            <input type="checkbox" value="${escapeHtml(name)}" ${on ? "checked" : ""}>
+            <span>${escapeHtml(name)}<span class="access-hint">${escapeHtml(note)}</span></span>
+          </label>`).join("")
+    : '<p class="empty-hint">Специалистами никто не отмечен. Отметьте в «Настройки → Сотрудники».</p>';
+
+  overlay.classList.remove("hidden");
+
+  document.getElementById("expertsSave").onclick = async () => {
+    const picked = [...box.querySelectorAll("input:checked")].map((i) => i.value);
+    const value = picked.join(", ");
+    try {
+      const saved = await apiFetch(`/api/cases/${row.id}`, {
+        method: "PATCH", body: JSON.stringify({ experts: value || null }),
+      });
+      Object.assign(row, saved);
+      overlay.classList.add("hidden");
+      const shown = journalValue(row, "experts");
+      cell.textContent = shown || JOURNAL_EMPTY.experts || "—";
+      cell.title = shown;
+      cell.classList.toggle("jr-empty", !shown);
+      cell.classList.add("jr-saved");
+      setTimeout(() => cell.classList.remove("jr-saved"), 1400);
+    } catch (err) {
+      showToast("Не удалось сохранить: " + err.message);
+    }
+  };
+}
+
+const closeExpertsPicker = () =>
+  document.getElementById("expertsOverlay").classList.add("hidden");
+
+bind(document.getElementById("expertsCloseBtn"), "click", closeExpertsPicker);
+// Esc и щелчок по затемнению — привычные способы уйти из окна. Без них
+// окно закрывается только крестиком, и это замечают не сразу.
+bind(document.getElementById("expertsOverlay"), "click", (e) => {
+  if (e.target.id === "expertsOverlay") closeExpertsPicker();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const overlay = document.getElementById("expertsOverlay");
+  if (overlay && !overlay.classList.contains("hidden")) closeExpertsPicker();
+});
 
 function cancelJournalEdit() {
   if (!journalEditing) return;
@@ -5536,24 +5839,13 @@ async function commitJournalEdit(rawValue) {
     cell.textContent = shown || JOURNAL_EMPTY[key] || "—";
     cell.title = shown;
     setTimeout(() => cell.classList.remove("jr-saved"), 1400);
-    // Списки фильтров могли пополниться новым значением.
-    if (["organization", "expertise_type", "year"].includes(key)) refreshJournalOptionLists();
+    // Значения теперь только из справочников, новых появиться неоткуда —
+    // пересобирать списки фильтров после правки больше не нужно.
   } catch (err) {
     cell.className = className;
     cell.innerHTML = before;
     showToast("Не удалось сохранить: " + err.message);
   }
-}
-
-/** Пересобирает списки фильтров из текущих строк — после правки. */
-function refreshJournalOptionLists() {
-  const uniq = (values) => [...new Set(values.map((v) => (v == null ? "" : String(v).trim())).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, "ru"));
-  const rows = journalData.rows || [];
-  journalData.organizations = uniq(rows.map((r) => r.organization));
-  journalData.expertise_types = uniq(rows.map((r) => r.expertise_type));
-  journalData.years = uniq(rows.map((r) => r.year)).sort((a, b) => String(b).localeCompare(String(a)));
-  fillJournalOptions();
 }
 
 /* ---------- Выгрузка ---------- */
@@ -5917,63 +6209,9 @@ bind(document.getElementById("caseCardBackBtn"), "click", () => history.back());
 
 /* ---- Управление списком организаций ("Структура") ---- */
 
-const orgManageOverlay = document.getElementById("orgManageOverlay");
-const orgList = document.getElementById("orgList");
-const orgManageError = document.getElementById("orgManageError");
-
-async function renderOrgList() {
-  orgManageError.textContent = "";
-  orgList.innerHTML = '<div class="row-subtitle">Загрузка…</div>';
-  try {
-    const orgs = await apiFetch("/api/organizations");
-    if (!orgs.length) {
-      orgList.innerHTML = '<div class="row-subtitle">Список пока пуст</div>';
-      return;
-    }
-    orgList.innerHTML = orgs.map((o) => `
-      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:var(--bg-page); border-radius:6px; font-size:13px;">
-        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(o.name)}</span>
-        <button type="button" class="back-btn danger-outline" data-org-delete="${escapeHtml(o.name)}" style="padding:2px 8px; font-size:12px;">Удалить</button>
-      </div>`).join("");
-    orgList.querySelectorAll("[data-org-delete]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm(`Удалить организацию «${btn.dataset.orgDelete}»?`)) return;
-        try {
-          await apiFetch(`/api/organizations/${encodeURIComponent(btn.dataset.orgDelete)}`, { method: "DELETE" });
-          await renderOrgList();
-          await loadOrganizationsSelect();
-        } catch (err) {
-          orgManageError.textContent = err.message;
-        }
-      });
-    });
-  } catch (err) {
-    orgList.innerHTML = "";
-    orgManageError.textContent = err.message;
-  }
-}
-
-document.getElementById("pfManageOrgBtn").addEventListener("click", () => {
-  orgManageOverlay.classList.remove("hidden");
-  renderOrgList();
-});
-document.getElementById("orgManageCloseBtn").addEventListener("click", () => orgManageOverlay.classList.add("hidden"));
-
-document.getElementById("orgAddForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  orgManageError.textContent = "";
-  const input = document.getElementById("orgAddName");
-  const name = input.value.trim();
-  if (!name) return;
-  try {
-    await apiFetch("/api/organizations", { method: "POST", body: JSON.stringify({ name }) });
-    input.value = "";
-    await renderOrgList();
-    await loadOrganizationsSelect();
-  } catch (err) {
-    orgManageError.textContent = err.message;
-  }
-});
+/* Окно «Организации (Структура)» убрано отсюда: список переехал в
+   «Настройки → Справочники». Править его может только администратор, а
+   здесь кнопка стояла у всех и упиралась в отказ сервера. */
 
 els.projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
