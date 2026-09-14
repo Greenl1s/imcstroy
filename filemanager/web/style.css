@@ -2435,13 +2435,40 @@ a.upload-btn { text-decoration: none; }
 }
 .access-hint { font-size: var(--fs-meta); color: var(--text-muted); }
 
-/* --- «Кто что видит»: люди слева, подробности справа --- */
+/* --- «Сотрудники»: люди слева, подробности справа --- */
 
 .access-layout { display: flex; gap: 20px; align-items: flex-start; }
+.access-side { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; }
 .access-people {
-  flex: 0 0 260px; display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 2px;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 6px;
+}
+/* «Добавить» — под списком, а не над: список читают сверху вниз, и
+   действие логично стоит там, где он кончается. */
+.access-add {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px dashed var(--border-strong); background: transparent;
+  border-radius: var(--radius); padding: 10px;
+  font: inherit; font-size: var(--fs-body); font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+}
+.access-add:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.access-add.on {
+  background: var(--accent-bg); border-style: solid;
+  border-color: var(--accent); color: var(--accent-on-tint);
+}
+
+.access-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 4px;
+}
+
+/* Карточка для вкладки с одной настройкой: без неё одинокое поле
+   болтается в пустоте на весь экран. */
+.settings-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; max-width: 680px;
 }
 .access-person {
   display: flex; flex-direction: column; gap: 2px; text-align: left;
@@ -2495,12 +2522,14 @@ a.upload-btn { text-decoration: none; }
   font-size: var(--fs-body); font-weight: 600;
 }
 .settings-origin { font-size: var(--fs-meta); font-weight: 400; color: var(--text-muted); }
-.settings-field input {
+.settings-field input, .settings-field select {
   padding: 9px 12px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); font: inherit; font-size: var(--fs-body);
   background: var(--bg-card); color: var(--text-primary);
 }
-.settings-field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.settings-field input:focus, .settings-field select:focus {
+  outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent;
+}
 .settings-hint { font-size: var(--fs-meta); color: var(--text-muted); line-height: 1.45; }
 
 .settings-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
@@ -2525,5 +2554,5 @@ a.upload-btn { text-decoration: none; }
   .settings-body { flex-direction: column; }
   .settings-tabs { flex-direction: row; flex: none; position: static; width: 100%; overflow-x: auto; }
   .access-layout { flex-direction: column; }
-  .access-people { flex: none; width: 100%; }
+  .access-side { flex: none; width: 100%; }
 }

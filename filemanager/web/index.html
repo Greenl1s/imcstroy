@@ -311,9 +311,8 @@
     </div>
     <div class="settings-body">
       <nav class="settings-tabs" id="settingsTabs">
-        <button class="settings-tab active" data-tab="access" type="button">Кто что видит</button>
+        <button class="settings-tab active" data-tab="people" type="button">Сотрудники</button>
         <button class="settings-tab" data-tab="planfix" type="button">Связь с Planfix</button>
-        <button class="settings-tab" data-tab="refs" type="button">Справочники</button>
       </nav>
       <div class="settings-pane" id="settingsPane"></div>
     </div>
@@ -648,40 +647,9 @@
 
 </div>
 
-<div id="usersOverlay" class="modal-overlay hidden">
-  <div class="modal-panel">
-    <div class="modal-header">
-      <span>Пользователи</span>
-      <button class="back-btn" id="usersCloseBtn">
-        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        Закрыть
-      </button>
-    </div>
-
-    <div id="usersList" class="users-list"></div>
-
-    <div class="add-user-form">
-      <h2>Добавить пользователя</h2>
-      <div class="add-user-row">
-        <label>Логин<input id="newUserLogin" autocomplete="off"></label>
-        <label>Пароль<input id="newUserPassword" type="text" autocomplete="off"></label>
-        <label>Роль
-          <select id="newUserRole">
-            <option value="employee">Сотрудник</option>
-            <option value="admin">Администратор</option>
-          </select>
-        </label>
-      </div>
-      <div class="perm-checks">
-        <label><input type="checkbox" id="newPermTools" checked> Инструменты</label>
-        <label><input type="checkbox" id="newPermDb" checked> База данных</label>
-        <label><input type="checkbox" id="newPermCases" checked> Дела</label>
-        <label title="Подтверждает отмену начатой экспертизы и решает спорные случаи оплаты"><input type="checkbox" id="newPermManage"> Руководитель</label>
-      </div>
-      <button class="primary" id="createUserBtn" type="button">Создать пользователя</button>
-    </div>
-  </div>
-</div>
+<!-- Окно «Пользователи» убрано: всё управление людьми живёт в
+     «Настройки → Сотрудники». Две двери в одно и то же расходятся
+     тем быстрее, чем реже в одну из них заходят. -->
 
 <div id="folderPermOverlay" class="modal-overlay hidden">
   <div class="modal-panel">

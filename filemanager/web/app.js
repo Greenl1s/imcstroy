@@ -68,10 +68,6 @@ const els = {
   createSideMenu: document.getElementById("createSideMenu"),
   planfixSyncBtn: document.getElementById("planfixSyncBtn"),
   profileBtn: document.getElementById("profileBtn"),
-  usersOverlay: document.getElementById("usersOverlay"),
-  usersCloseBtn: document.getElementById("usersCloseBtn"),
-  usersList: document.getElementById("usersList"),
-  createUserBtn: document.getElementById("createUserBtn"),
   uploadPanel: document.getElementById("uploadPanel"),
   uploadPanelTitle: document.getElementById("uploadPanelTitle"),
   uploadPanelList: document.getElementById("uploadPanelList"),
@@ -1433,122 +1429,20 @@ els.logoutBtn.addEventListener("click", async () => {
   showLogin();
 });
 
-/* ---------- Профиль / управление пользователями ---------- */
+/* ---------- Профиль ----------
+
+   Управление людьми переехало в «Настройки → Сотрудники»: там ему и
+   место, а здесь оставалось по привычке. Чтобы привычка не ломалась,
+   аватар администратора ведёт туда же — это не вторая кнопка для того
+   же действия, а вторая дверь в одну и ту же комнату. */
 
 els.profileBtn.addEventListener("click", () => {
   if (currentUser && currentUser.role === "admin") {
-    openUsersPanel();
-  } else {
-    alert(`Пользователь: ${currentUser?.username || "—"}\nРоль: сотрудник`);
-  }
-});
-
-els.usersCloseBtn.addEventListener("click", () => {
-  els.usersOverlay.classList.add("hidden");
-});
-
-async function openUsersPanel() {
-  els.usersOverlay.classList.remove("hidden");
-  await loadUsersList();
-}
-
-async function loadUsersList() {
-  els.usersList.innerHTML = '<div class="empty-hint">Загрузка…</div>';
-  try {
-    const { users } = await apiFetch("/api/users");
-    renderUsersList(users);
-  } catch (err) {
-    els.usersList.innerHTML = '<div class="empty-hint">Не удалось загрузить список пользователей</div>';
-  }
-}
-
-function renderUsersList(list) {
-  els.usersList.innerHTML = "";
-  if (!list || list.length === 0) {
-    els.usersList.innerHTML = '<div class="empty-hint">Пользователей пока нет</div>';
+    settingsTab = "people";
+    showSection("settings", true);
     return;
   }
-  for (const u of list) {
-    const row = document.createElement("div");
-    row.className = "user-row";
-    row.innerHTML = `
-      <span class="user-name">${escapeHtml(u.username)}</span>
-      <span class="role-badge">${u.role === "admin" ? "администратор" : "сотрудник"}</span>
-      <label><input type="checkbox" data-perm="can_tools" ${u.can_tools ? "checked" : ""}> Инструменты</label>
-      <label><input type="checkbox" data-perm="can_db" ${u.can_db ? "checked" : ""}> База данных</label>
-      <label><input type="checkbox" data-perm="can_cases" ${u.can_cases ? "checked" : ""}> Дела</label>
-      <label title="Подтверждает отмену начатой экспертизы (п. 29.3) и решает спорные случаи оплаты (п. 27.3)"><input type="checkbox" data-perm="can_manage" ${u.can_manage ? "checked" : ""}> Руководитель</label>
-      <button class="delete-btn" title="Удалить пользователя" aria-label="Удалить пользователя">${svgTrash}</button>
-    `;
-    row.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-      cb.addEventListener("change", async () => {
-        try {
-          await apiFetch(`/api/users/${u.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ [cb.dataset.perm]: cb.checked }),
-          });
-          if (currentUser && currentUser.username === u.username) {
-            currentUser[cb.dataset.perm] = cb.checked;
-            applyPermissionsUI();
-          }
-        } catch (err) {
-          alert("Не удалось обновить права: " + err.message);
-          cb.checked = !cb.checked;
-        }
-      });
-    });
-    row.querySelector(".delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Удалить пользователя «${u.username}»?`)) return;
-      try {
-        await apiFetch(`/api/users/${u.id}`, { method: "DELETE" });
-        loadUsersList();
-      } catch (err) {
-        alert("Не удалось удалить: " + err.message);
-      }
-    });
-    els.usersList.appendChild(row);
-  }
-}
-
-els.createUserBtn.addEventListener("click", async () => {
-  const loginInput = document.getElementById("newUserLogin");
-  const passInput = document.getElementById("newUserPassword");
-  const roleSelect = document.getElementById("newUserRole");
-  const permTools = document.getElementById("newPermTools");
-  const permDb = document.getElementById("newPermDb");
-  const permCases = document.getElementById("newPermCases");
-  const permManage = document.getElementById("newPermManage");
-
-  const username = loginInput.value.trim();
-  const password = passInput.value;
-  if (!username || !password) {
-    alert("Укажите логин и пароль");
-    return;
-  }
-  try {
-    await apiFetch("/api/users", {
-      method: "POST",
-      body: JSON.stringify({
-        username,
-        password,
-        role: roleSelect.value,
-        can_tools: permTools.checked,
-        can_db: permDb.checked,
-        can_cases: permCases.checked,
-        can_manage: permManage.checked,
-      }),
-    });
-    loginInput.value = "";
-    passInput.value = "";
-    roleSelect.value = "employee";
-    permTools.checked = true;
-    permDb.checked = true;
-    permCases.checked = true;
-    permManage.checked = false;
-    loadUsersList();
-  } catch (err) {
-    alert("Не удалось создать пользователя: " + err.message);
-  }
+  alert(`Пользователь: ${currentUser?.username || "—"}\nРоль: сотрудник`);
 });
 
 /* ---------- Доступ к папкам/файлам в "Дела" (только для админа) ---------- */
@@ -1995,17 +1889,25 @@ function pickFilesFor(path, refresh) {
 /* ============================================================
    Настройки (только администратор).
 
-   Раздел собран из трёх вкладок. Рисуются они одинаково: каждая
-   возвращает готовую разметку и вешает обработчики после вставки.
-   Ссылок на узлы между перерисовками не храним — вид всегда
-   собирается заново из того, что пришло с сервера.
+   Две вкладки: сотрудники и связь с Planfix. Раньше сотрудники жили в
+   отдельном окне, которое открывалось по нажатию на свой аватар, —
+   место неочевидное, и половина того, что там правится, к своему
+   профилю отношения не имела. Теперь всё управление людьми здесь.
+
+   Список слева перерисовывается ОТДЕЛЬНО от правой части: щелчок по
+   человеку меняет только подсветку и подробности. Раньше на каждый
+   щелчок пересобирался весь экран, и любая заминка сервера оставляла
+   его в подвешенном состоянии — со стороны это выглядело как
+   «переключается только первый».
    ============================================================ */
 
-let settingsTab = "access";
-// Кого сейчас смотрим во вкладке «Кто что видит». Держим отдельно от
-// разметки: после сохранения вкладка перерисовывается целиком, и
-// человек должен остаться на том же сотруднике.
+let settingsTab = "people";
+// Кого сейчас смотрим. null означает «показываем форму добавления».
 let accessUserId = null;
+let addingUser = false;
+// Последний загруженный список — чтобы перерисовать подсветку, не
+// ходя на сервер ещё раз.
+let peopleCache = [];
 
 const SECTION_RIGHTS = [
   ["can_cases", "Дела", "Проекты, задачи, журнал регистрации"],
@@ -2016,8 +1918,11 @@ const SECTION_RIGHTS = [
 
 const ACCESS_LABEL = { read: "Только смотреть", write: "Смотреть и менять", none: "Закрыто" };
 
-function settingsPane() {
-  return document.getElementById("settingsPane");
+const settingsPane = () => document.getElementById("settingsPane");
+
+/** Показать человеку, что пошло не так, вместо молчаливого бездействия. */
+function settingsError(err) {
+  showToast(err && err.message ? err.message : "Не получилось");
 }
 
 async function loadSettings() {
@@ -2027,9 +1932,8 @@ async function loadSettings() {
   const pane = settingsPane();
   pane.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   try {
-    if (settingsTab === "access") await renderAccessTab();
-    else if (settingsTab === "planfix") await renderPlanfixTab();
-    else await renderRefsTab();
+    if (settingsTab === "people") await renderPeopleTab();
+    else await renderPlanfixTab();
   } catch (err) {
     pane.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
   }
@@ -2042,39 +1946,74 @@ document.querySelectorAll(".settings-tab").forEach((btn) => {
   });
 });
 
-/* ---------- Вкладка «Кто что видит» ---------- */
+/* ---------- Вкладка «Сотрудники» ---------- */
 
-async function renderAccessTab() {
-  const { users: list } = await apiFetch("/api/admin/access");
-  if (!list.some((u) => u.id === accessUserId)) {
-    const firstEmployee = list.find((u) => u.role !== "admin");
-    accessUserId = (firstEmployee || list[0] || {}).id || null;
-  }
-
+/** Рисует каркас вкладки один раз: список слева, подробности справа. */
+async function renderPeopleTab() {
   settingsPane().innerHTML = `
     <div class="access-layout">
-      <div class="access-people" id="accessPeople">
-        ${list.map((u) => `
-          <button type="button" class="access-person${u.id === accessUserId ? " on" : ""}" data-person="${u.id}">
-            <span class="access-person-name">${escapeHtml(u.username)}</span>
-            <span class="access-person-sub">${u.role === "admin"
-              ? "администратор — видит всё"
-              : sectionSummary(u) + (u.folder_rules ? ` · папок: ${u.folder_rules}` : "")}</span>
-          </button>`).join("")}
+      <div class="access-side">
+        <div class="access-people" id="accessPeople"></div>
+        <button type="button" class="access-add" id="accessAddBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Добавить сотрудника
+        </button>
       </div>
       <div class="access-detail" id="accessDetail"><div class="empty-hint">Загрузка…</div></div>
     </div>`;
 
-  settingsPane().querySelectorAll("[data-person]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      accessUserId = Number(btn.dataset.person);
-      renderAccessTab();
-    });
+  // Щелчки ловим на всём списке разом, а не вешаем обработчик на каждую
+  // строку: список перерисовывается, и обработчики на строках после
+  // перерисовки терялись бы.
+  document.getElementById("accessPeople").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-person]");
+    if (!btn) return;
+    addingUser = false;
+    accessUserId = Number(btn.dataset.person);
+    markSelectedPerson();
+    showPersonDetail(accessUserId).catch(settingsError);
   });
 
-  if (accessUserId) await renderAccessDetail(accessUserId);
-  else document.getElementById("accessDetail").innerHTML =
-    '<div class="empty-hint">Сотрудников пока нет</div>';
+  document.getElementById("accessAddBtn").addEventListener("click", () => {
+    addingUser = true;
+    accessUserId = null;
+    markSelectedPerson();
+    renderAddPersonForm();
+  });
+
+  await reloadPeople();
+}
+
+/** Перечитывает список людей с сервера и рисует его. */
+async function reloadPeople() {
+  const { users: list } = await apiFetch("/api/admin/access");
+  peopleCache = list;
+  if (!addingUser && !list.some((u) => u.id === accessUserId)) {
+    accessUserId = (list.find((u) => u.role !== "admin") || list[0] || {}).id || null;
+  }
+  drawPeopleList();
+  if (addingUser) renderAddPersonForm();
+  else if (accessUserId) await showPersonDetail(accessUserId);
+}
+
+function drawPeopleList() {
+  document.getElementById("accessPeople").innerHTML = peopleCache.map((u) => `
+    <button type="button" class="access-person" data-person="${u.id}">
+      <span class="access-person-name">${escapeHtml(u.username)}</span>
+      <span class="access-person-sub">${u.role === "admin"
+        ? "администратор — видит всё"
+        : sectionSummary(u) + (u.folder_rules ? ` · папок: ${u.folder_rules}` : "")}</span>
+    </button>`).join("");
+  markSelectedPerson();
+}
+
+/** Подсветка выбранного — отдельно от отрисовки: щелчок отзывается сразу. */
+function markSelectedPerson() {
+  document.querySelectorAll("#accessPeople [data-person]").forEach((b) => {
+    b.classList.toggle("on", !addingUser && Number(b.dataset.person) === accessUserId);
+  });
+  const add = document.getElementById("accessAddBtn");
+  if (add) add.classList.toggle("on", addingUser);
 }
 
 /** Короткая строка «что открыто» для списка слева. */
@@ -2083,16 +2022,27 @@ function sectionSummary(u) {
   return open.length ? open.join(", ") : "ничего не открыто";
 }
 
-async function renderAccessDetail(userId) {
+async function showPersonDetail(userId) {
   const box = document.getElementById("accessDetail");
+  box.innerHTML = '<div class="empty-hint">Загрузка…</div>';
   const { user, rules } = await apiFetch(`/api/admin/access/${userId}`);
+  // Пока грузили, могли выбрать другого — тогда рисовать поздно.
+  if (accessUserId !== userId || addingUser) return;
   const isAdmin = user.role === "admin";
+  const isMe = currentUser && currentUser.id === user.id;
 
   box.innerHTML = `
-    <h2 class="access-title">${escapeHtml(user.username)}</h2>
-    ${isAdmin ? `
-      <p class="access-note">Администратор видит всё и правит всё — отдельные правила на него не действуют.
-      Чтобы ограничить доступ, сделайте его сотрудником в окне «Пользователи».</p>` : ""}
+    <div class="access-head">
+      <h2 class="access-title">${escapeHtml(user.username)}</h2>
+      <label class="settings-inline">Роль
+        <select data-role ${isMe ? "disabled" : ""}>
+          <option value="employee"${!isAdmin ? " selected" : ""}>Сотрудник</option>
+          <option value="admin"${isAdmin ? " selected" : ""}>Администратор</option>
+        </select>
+      </label>
+    </div>
+    ${isMe ? '<p class="access-note">Это вы. Свою роль менять нельзя — иначе можно остаться без администратора вовсе.</p>' : ""}
+    ${isAdmin && !isMe ? '<p class="access-note">Администратор видит всё и правит всё: отдельные правила на него не действуют.</p>' : ""}
 
     <h3 class="access-sub">Разделы</h3>
     <div class="access-rights">
@@ -2113,7 +2063,7 @@ async function renderAccessDetail(userId) {
                <tr>
                  <td class="access-path">${escapeHtml(prettyPath(r.path))}</td>
                  <td>
-                   <select data-rule="${r.id}">
+                   <select data-rule="${r.id}" data-rule-path="${escapeHtml(r.path)}">
                      ${["read", "write", "none"].map((a) =>
                        `<option value="${a}"${r.access === a ? " selected" : ""}>${ACCESS_LABEL[a]}</option>`).join("")}
                    </select>
@@ -2121,41 +2071,79 @@ async function renderAccessDetail(userId) {
                  <td><button type="button" class="link-btn" data-drop-rule="${r.id}">Убрать</button></td>
                </tr>`).join("")}</tbody>
            </table>
-           <p class="access-note">«Закрыто» — это запрет, который перебивает доступ к папке выше.
-           «Убрать» просто снимает правило: тогда действует то, что задано у родительской папки.</p>`
-        : `<p class="access-note">Своих правил нет. Значит, в «Делах» этот сотрудник видит только то,
-           что открыто всем, — и ничего, если не открыто ничего. Правила заводятся в самой папке:
-           «Дела» → «…» у строки → «Доступ к папке».</p>`}`;
+           <p class="access-note">«Закрыто» — запрет, который перебивает доступ к папке выше.
+           «Убрать» снимает правило: тогда действует то, что задано у родительской папки.</p>`
+        : `<p class="access-note">Своих правил нет: в «Делах» этот сотрудник видит только то,
+           что открыто всем. Правила заводятся в самой папке: «Дела» → «…» у строки →
+           «Доступ к папке».</p>`}
 
-  if (isAdmin) return;
+    <h3 class="access-sub">Пароль и учётная запись</h3>
+    <div class="settings-row">
+      <input type="text" data-new-password placeholder="Новый пароль" autocomplete="off">
+      <button type="button" class="upload-btn" data-set-password>Сменить пароль</button>
+    </div>
+    ${isMe
+      ? '<p class="access-note">Удалить себя нельзя.</p>'
+      : `<p class="access-note">Удаление необратимо: приборы, которые числились за
+         сотрудником, освободятся, а его правила доступа исчезнут.</p>
+         <button type="button" class="link-btn" data-delete-person>Удалить сотрудника</button>`}`;
+
+  wirePersonDetail(box, user, isAdmin, isMe);
+}
+
+function wirePersonDetail(box, user, isAdmin, isMe) {
+  const roleSelect = box.querySelector("[data-role]");
+  if (roleSelect && !isMe) {
+    roleSelect.addEventListener("change", async () => {
+      try {
+        await apiFetch(`/api/users/${user.id}`, {
+          method: "PATCH", body: JSON.stringify({ role: roleSelect.value }),
+        });
+        showToast("Роль изменена");
+        await reloadPeople();
+      } catch (err) {
+        roleSelect.value = isAdmin ? "admin" : "employee";
+        settingsError(err);
+      }
+    });
+  }
 
   box.querySelectorAll("[data-right]").forEach((input) => {
     input.addEventListener("change", async () => {
-      const values = {};
-      box.querySelectorAll("[data-right]").forEach((i) => { values[i.dataset.right] = i.checked; });
       try {
-        await apiFetch(`/api/users/${userId}`, { method: "PATCH", body: JSON.stringify(values) });
-        showToast("Права сохранены");
-        renderAccessTab();
+        await apiFetch(`/api/users/${user.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ [input.dataset.right]: input.checked }),
+        });
+        // Себе поменяли право — интерфейс должен это сразу учесть.
+        if (currentUser && currentUser.id === user.id) {
+          currentUser[input.dataset.right] = input.checked;
+          applyPermissionsUI();
+        }
+        // Перерисовываем только список: подпись под именем изменилась.
+        const { users: list } = await apiFetch("/api/admin/access");
+        peopleCache = list;
+        drawPeopleList();
       } catch (err) {
         input.checked = !input.checked;
-        showToast(err.message);
+        settingsError(err);
       }
     });
   });
 
   box.querySelectorAll("[data-rule]").forEach((select) => {
     select.addEventListener("change", async () => {
-      const row = rules.find((r) => String(r.id) === select.dataset.rule);
       try {
         await apiFetch("/api/folder-permissions", {
           method: "POST",
-          body: JSON.stringify({ path: row.path, userId, access: select.value }),
+          body: JSON.stringify({
+            path: select.dataset.rulePath, userId: user.id, access: select.value,
+          }),
         });
         showToast("Доступ изменён");
-        renderAccessDetail(userId);
       } catch (err) {
-        showToast(err.message);
+        settingsError(err);
+        showPersonDetail(user.id).catch(settingsError);
       }
     });
   });
@@ -2165,66 +2153,175 @@ async function renderAccessDetail(userId) {
       try {
         await apiFetch(`/api/folder-permissions/${btn.dataset.dropRule}`, { method: "DELETE" });
         showToast("Правило убрано");
-        renderAccessTab();
+        await reloadPeople();
       } catch (err) {
-        showToast(err.message);
+        settingsError(err);
       }
     });
+  });
+
+  const passBtn = box.querySelector("[data-set-password]");
+  if (passBtn) {
+    passBtn.addEventListener("click", async () => {
+      const field = box.querySelector("[data-new-password]");
+      const password = field.value.trim();
+      if (password.length < 8) return showToast("Пароль короче восьми знаков — так нельзя");
+      try {
+        await apiFetch(`/api/users/${user.id}`, {
+          method: "PATCH", body: JSON.stringify({ password }),
+        });
+        field.value = "";
+        showToast("Пароль изменён");
+      } catch (err) {
+        settingsError(err);
+      }
+    });
+  }
+
+  const delBtn = box.querySelector("[data-delete-person]");
+  if (delBtn) {
+    delBtn.addEventListener("click", async () => {
+      if (!confirm(`Удалить сотрудника «${user.username}»? Это необратимо.`)) return;
+      try {
+        await apiFetch(`/api/users/${user.id}`, { method: "DELETE" });
+        showToast("Сотрудник удалён");
+        accessUserId = null;
+        await reloadPeople();
+      } catch (err) {
+        settingsError(err);
+      }
+    });
+  }
+}
+
+/** Форма нового сотрудника — в той же правой части, а не отдельным окном. */
+function renderAddPersonForm() {
+  const box = document.getElementById("accessDetail");
+  box.innerHTML = `
+    <h2 class="access-title">Новый сотрудник</h2>
+    <p class="access-note">Учётная запись общая для всех трёх систем: с этим логином
+    человек войдёт и в ИСУ, и в «Учёт оборудования», и в «Календарь».</p>
+    <form class="settings-form" id="addPersonForm">
+      <label class="settings-field">
+        <span class="settings-label">Логин</span>
+        <input name="username" autocomplete="off" required>
+      </label>
+      <label class="settings-field">
+        <span class="settings-label">Пароль</span>
+        <input name="password" type="text" autocomplete="off" required>
+        <span class="settings-hint">Не короче восьми знаков. Показан открыто нарочно:
+        его надо передать человеку, а не запомнить самому.</span>
+      </label>
+      <label class="settings-field">
+        <span class="settings-label">Роль</span>
+        <select name="role">
+          <option value="employee">Сотрудник</option>
+          <option value="admin">Администратор</option>
+        </select>
+      </label>
+      <div>
+        <span class="settings-label">Разделы</span>
+        <div class="access-rights" style="margin-top:8px;">
+          ${SECTION_RIGHTS.map(([key, label, hint]) => `
+            <label class="access-right">
+              <input type="checkbox" name="${key}" ${key === "can_manage" ? "" : "checked"}>
+              <span><b>${label}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
+            </label>`).join("")}
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="primary" type="submit">Создать</button>
+        <button class="upload-btn" type="button" id="addPersonCancel">Отмена</button>
+      </div>
+    </form>`;
+
+  document.getElementById("addPersonCancel").addEventListener("click", () => {
+    addingUser = false;
+    markSelectedPerson();
+    if (accessUserId) showPersonDetail(accessUserId).catch(settingsError);
+    else reloadPeople().catch(settingsError);
+  });
+
+  document.getElementById("addPersonForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const username = form.username.value.trim();
+    const password = form.password.value;
+    if (!username) return showToast("Укажите логин");
+    if (password.length < 8) return showToast("Пароль короче восьми знаков — так нельзя");
+    try {
+      const created = await apiFetch("/api/users", {
+        method: "POST",
+        body: JSON.stringify({
+          username, password, role: form.role.value,
+          can_tools: form.can_tools.checked,
+          can_db: form.can_db.checked,
+          can_cases: form.can_cases.checked,
+          can_manage: form.can_manage.checked,
+        }),
+      });
+      showToast("Сотрудник заведён");
+      addingUser = false;
+      accessUserId = created && created.user ? created.user.id : null;
+      await reloadPeople();
+    } catch (err) {
+      settingsError(err);
+    }
   });
 }
 
 /* ---------- Вкладка «Связь с Planfix» ---------- */
 
 const ORIGIN_NOTE = {
-  panel: "задано здесь",
-  env: "задано при развёртывании",
-  default: "значение по умолчанию",
+  panel: "задан здесь",
+  env: "задан при развёртывании",
+  // Про «не задан» скажет само поле — подписывать это ещё и сверху
+  // значит написать одно и то же дважды подряд.
+  default: "",
 };
 
 async function renderPlanfixTab() {
   const { settings: list } = await apiFetch("/api/admin/settings?group=planfix");
+  const token = list.find((s) => s.key === "planfix_token") || {};
 
   settingsPane().innerHTML = `
-    <form class="settings-form" id="planfixForm">
-      <p class="access-note">Токен читает только сервер: обратно он не показывается никогда —
-      видно лишь, задан ли он и чем оканчивается. Пустое поле означает «оставить как было»;
-      чтобы вернуть значение из настроек сервера, сотрите его и сохраните.</p>
-      ${list.map((item) => settingsField(item)).join("")}
-      <div class="settings-actions">
-        <button class="primary" type="submit">Сохранить</button>
-        <button class="upload-btn" type="button" id="planfixProbeBtn">Проверить связь</button>
-        <span class="settings-probe" id="planfixProbeResult"></span>
-      </div>
-    </form>`;
+    <div class="settings-card">
+      <h2 class="access-title">Токен доступа к Planfix</h2>
+      <p class="access-note">Им ИСУ забирает из Planfix проекты и задачи. Токен выдаётся
+      в самом Planfix: Управление аккаунтом → API. Он должен принадлежать сотруднику,
+      который видит нужные проекты, — иначе Planfix отвечает «Scope denied».</p>
+
+      <form class="settings-form" id="planfixForm">
+        <label class="settings-field">
+          <span class="settings-label">Токен
+            <span class="settings-origin">${ORIGIN_NOTE[token.origin] || ""}</span>
+          </span>
+          <input type="password" id="planfixToken" autocomplete="off" spellcheck="false"
+                 placeholder="${token.set ? `задан, оканчивается на ${escapeHtml(token.tail || "")}` : "не задан"}">
+          <span class="settings-hint">Обратно токен не показывается никогда — видно только,
+          задан ли он и чем оканчивается. Пустое поле означает «оставить как есть».</span>
+        </label>
+        <div class="settings-actions">
+          <button class="primary" type="submit">Сохранить</button>
+          <button class="upload-btn" type="button" id="planfixProbeBtn">Проверить связь</button>
+          <span class="settings-probe" id="planfixProbeResult"></span>
+        </div>
+      </form>
+    </div>`;
 
   document.getElementById("planfixForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const values = {};
-    settingsPane().querySelectorAll("[data-setting]").forEach((input) => {
-      // У секрета пустое поле — это «не трогать», а не «стереть»:
-      // иначе каждое сохранение формы стирало бы токен, которого в ней
-      // и не видно.
-      if (input.dataset.kind === "secret" && input.value === "") return;
-      // Отправляем только то, что человек действительно правил. Иначе
-      // первое же сохранение записало бы в базу все поля подряд — и
-      // значения из настроек сервера, и заводские умолчания, — после
-      // чего про каждое было бы написано «задано здесь», а поменять
-      // что-то на сервере стало бы невозможно: панель всё перебила бы.
-      if (input.value === input.dataset.initial) return;
-      values[input.dataset.setting] = input.value;
-    });
-    if (!Object.keys(values).length) {
-      showToast("Менять нечего — ничего не изменилось");
-      return;
-    }
+    const field = document.getElementById("planfixToken");
+    const value = field.value.trim();
+    if (!value) return showToast("Поле пустое — менять нечего");
     try {
       await apiFetch("/api/admin/settings?group=planfix", {
-        method: "PATCH", body: JSON.stringify({ values }),
+        method: "PATCH", body: JSON.stringify({ values: { planfix_token: value } }),
       });
-      showToast("Настройки сохранены");
+      showToast("Токен сохранён");
       renderPlanfixTab();
     } catch (err) {
-      showToast(err.message);
+      settingsError(err);
     }
   });
 
@@ -2244,169 +2341,6 @@ async function renderPlanfixTab() {
       out.className = "settings-probe bad";
     }
   });
-}
-
-/** Одно поле настройки: подпись, поле, подсказка и откуда взято значение. */
-function settingsField(item) {
-  const isSecret = item.kind === "secret";
-  const value = isSecret ? "" : escapeHtml(item.value || "");
-  const placeholder = isSecret
-    ? (item.set ? `задан, оканчивается на ${escapeHtml(item.tail)}` : "не задан")
-    : "";
-  return `
-    <label class="settings-field">
-      <span class="settings-label">${escapeHtml(item.label)}
-        <span class="settings-origin">${ORIGIN_NOTE[item.origin] || ""}</span>
-      </span>
-      <input type="${isSecret ? "password" : "text"}"
-             data-setting="${item.key}" data-kind="${item.kind}"
-             data-initial="${value}"
-             value="${value}" placeholder="${placeholder}"
-             autocomplete="off" spellcheck="false">
-      ${item.hint ? `<span class="settings-hint">${escapeHtml(item.hint)}</span>` : ""}
-    </label>`;
-}
-
-/* ---------- Вкладка «Справочники» ---------- */
-
-let refsYear = new Date().getFullYear();
-
-async function renderRefsTab() {
-  const [calendar, outcomes] = await Promise.all([
-    apiFetch(`/api/cases/work-calendar?year=${refsYear}`),
-    apiFetch("/api/cases/court-outcomes"),
-  ]);
-
-  settingsPane().innerHTML = `
-    <section class="settings-block">
-      <h2 class="access-title">Производственный календарь</h2>
-      <p class="access-note">Сроки по задачам считаются в рабочих днях. Суббота и воскресенье
-      нерабочие всегда, а праздники и переносы каждый год свои — их заводят здесь. Пока год
-      не заполнен, система честно помечает такие сроки как ненадёжные, а не подсовывает
-      неверную дату.</p>
-      <div class="settings-actions">
-        <label class="settings-inline">Год
-          <select id="refsYear">
-            ${yearOptions(calendar.years)}
-          </select>
-        </label>
-      </div>
-      ${calendar.days.length ? `
-        <table class="access-rules">
-          <thead><tr><th>Дата</th><th>Какой день</th><th>Пояснение</th><th></th></tr></thead>
-          <tbody>${calendar.days.map((d) => `
-            <tr>
-              <td class="access-path">${escapeHtml(fmtDay(d.day))}</td>
-              <td>${d.kind === "holiday" ? "Нерабочий" : "Рабочий (перенос)"}</td>
-              <td>${escapeHtml(d.note || "")}</td>
-              <td><button type="button" class="link-btn" data-drop-day="${escapeHtml(d.day)}">Убрать</button></td>
-            </tr>`).join("")}</tbody>
-        </table>` : '<p class="empty-hint">За этот год отметок нет</p>'}
-      <form class="settings-row" id="calendarAddForm">
-        <input type="date" id="calDay" required>
-        <select id="calKind">
-          <option value="holiday">Нерабочий</option>
-          <option value="workday">Рабочий (перенос)</option>
-        </select>
-        <input type="text" id="calNote" placeholder="Пояснение, например «День России»">
-        <button class="primary" type="submit">Добавить</button>
-      </form>
-    </section>
-
-    <section class="settings-block">
-      <h2 class="access-title">Исходы заседаний</h2>
-      <p class="access-note">Что система делает с проектом, когда в карточке отмечают исход
-      заседания: куда переводит, какой ставит статус и как считает срок следующего контроля.
-      Состав задач, которые ставятся по исходу, здесь пока только показан — правится он
-      в самой карточке проекта.</p>
-      <table class="access-rules">
-        <thead><tr><th>Исход</th><th>Когда возможен</th><th>Что делает</th><th>Срок контроля</th><th>Задачи</th></tr></thead>
-        <tbody>${outcomes.outcomes.map((o) => `
-          <tr>
-            <td class="access-path">${escapeHtml(o.name)}${o.clause ? `<br><span class="access-hint">${escapeHtml(o.clause)}</span>` : ""}</td>
-            <td>${o.applies_to === "any" ? "на любой стадии" : escapeHtml(stageWord(o.applies_to))}</td>
-            <td>${escapeHtml(outcomeEffect(o))}</td>
-            <td>${escapeHtml(RULE_WORD[o.control_rule] || o.control_rule)}</td>
-            <td>${(o.tasks || []).length
-                  ? (o.tasks || []).map((t) => escapeHtml(t.title || t.name || "")).join("<br>")
-                  : "—"}</td>
-          </tr>`).join("")}</tbody>
-      </table>
-    </section>`;
-
-  document.getElementById("refsYear").addEventListener("change", (e) => {
-    refsYear = Number(e.target.value);
-    renderRefsTab();
-  });
-
-  document.getElementById("calendarAddForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      await apiFetch("/api/cases/work-calendar", {
-        method: "POST",
-        body: JSON.stringify({
-          day: document.getElementById("calDay").value,
-          kind: document.getElementById("calKind").value,
-          note: document.getElementById("calNote").value,
-        }),
-      });
-      showToast("Отметка добавлена");
-      renderRefsTab();
-    } catch (err) {
-      showToast(err.message);
-    }
-  });
-
-  settingsPane().querySelectorAll("[data-drop-day]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        await apiFetch(`/api/cases/work-calendar/${btn.dataset.dropDay}`, { method: "DELETE" });
-        showToast("Отметка убрана");
-        renderRefsTab();
-      } catch (err) {
-        showToast(err.message);
-      }
-    });
-  });
-}
-
-const RULE_WORD = {
-  none: "не пересчитывать",
-  hearing_plus_3: "заседание + 3 рабочих дня",
-  every_2_weeks: "каждые две недели",
-  recheck_2_days: "перепроверить через 2 дня",
-  next_hearing: "к следующему заседанию",
-};
-
-function stageWord(stage) {
-  return { plan: "в плане", active: "в активных", control: "на контроле", done: "в завершённых" }[stage] || stage;
-}
-
-function outcomeEffect(o) {
-  const parts = [];
-  if (o.cancels) parts.push("отменяет проект");
-  if (o.sets_stage) parts.push(`переводит ${stageWord(o.sets_stage)}`);
-  if (o.sets_status) parts.push(`статус «${{ waiting: "Ожидание", in_progress: "В работе", problem: "Проблема" }[o.sets_status] || o.sets_status}»`);
-  if (o.needs_decision) parts.push("спрашивает, куда вести");
-  if (o.needs_deadline) parts.push("просит срок из определения");
-  if (o.requires_manager) parts.push("решает руководитель");
-  return parts.length ? parts.join("; ") : "ничего не меняет";
-}
-
-/** Годы для выбора: те, что уже заведены, плюс нынешний и следующий. */
-function yearOptions(known) {
-  const now = new Date().getFullYear();
-  const years = [...new Set([...(known || []), now, now + 1])].sort();
-  return years.map((y) => `<option value="${y}"${y === refsYear ? " selected" : ""}>${y}</option>`).join("");
-}
-
-/** «15 сентября 2026» — дата в календаре читается, а не расшифровывается. */
-function fmtDay(iso) {
-  const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-  const m = String(iso || "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return String(iso || "");
-  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
 }
 
 /* ---------- Гарантийные письма (ГП) ---------- */
