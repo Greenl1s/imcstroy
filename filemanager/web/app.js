@@ -66,11 +66,7 @@ const els = {
   uploadInput: document.getElementById("uploadInput"),
   createSideBtn: document.getElementById("createSideBtn"),
   createSideMenu: document.getElementById("createSideMenu"),
-  createCasesBtn: document.getElementById("createCasesBtn"),
   planfixSyncBtn: document.getElementById("planfixSyncBtn"),
-  createCasesMenu: document.getElementById("createCasesMenu"),
-  createFolderViewBtn: document.getElementById("createFolderViewBtn"),
-  createFolderViewMenu: document.getElementById("createFolderViewMenu"),
   profileBtn: document.getElementById("profileBtn"),
   usersOverlay: document.getElementById("usersOverlay"),
   usersCloseBtn: document.getElementById("usersCloseBtn"),
@@ -502,6 +498,12 @@ function applyPermissionsUI() {
   // Очистка истории — тоже админское и необратимое.
   const clearHistoryBtn = document.getElementById("historyClearBtn");
   if (clearHistoryBtn) clearHistoryBtn.classList.toggle("hidden", rootOnlyAdmin);
+  // Настройки задевают всех сразу — пункт виден только администратору.
+  // Сервер всё равно проверяет роль сам: спрятанная кнопка защитой не
+  // считается, она лишь убирает со стола то, чем всё равно нельзя
+  // воспользоваться.
+  const settingsBtn = document.getElementById("settingsBtn");
+  if (settingsBtn) settingsBtn.classList.toggle("hidden", rootOnlyAdmin);
   // В панели пункты «Новый проект» и «Гарантийное письмо» живут по тем же
   // правилам, что и в колонке «Дела»: нет доступа к делам — нет и пунктов.
   if (els.createSideMenu) {
@@ -513,12 +515,6 @@ function applyPermissionsUI() {
   if (els.createSideBtn) {
     // Ни дел, ни файлов — создавать нечего, кнопку прячем совсем.
     els.createSideBtn.classList.toggle("hidden", !p.can_db && !p.can_cases);
-  }
-  if (els.createCasesMenu) {
-    els.createCasesMenu.querySelectorAll('[data-create="folder"], [data-create="docx"], [data-create="xlsx"], [data-create="upload"]')
-      .forEach((item) => item.classList.toggle("hidden", rootOnlyAdmin));
-    els.createCasesMenu.querySelectorAll(".create-menu-sep")
-      .forEach((sep) => sep.classList.toggle("hidden", rootOnlyAdmin));
   }
 
   const allowed = [];
@@ -751,6 +747,11 @@ const EVENT_KINDS = {
   task_done:   { label: "Задача завершена",    tone: "add",   text: (e) => `завершил задачу ${b(e.target_name)}` },
   task_changed:{ label: "Правка задачи",       tone: "stage", text: (e) => `изменил задачу ${b(e.target_name)}` },
   task_deleted:{ label: "Задача удалена",      tone: "del",   text: (e) => `удалил задачу ${b(e.target_name)}` },
+  // Настройки задевают всех, поэтому их правка попадает в историю. Имя
+  // настройки пишем, значение — никогда: там может лежать токен.
+  settings:    { label: "Настройки",           tone: "stage", text: (e) => (e.details && e.details.cleared
+                   ? `вернул настройку ${b(e.target_name)} к прежнему значению`
+                   : `изменил настройку ${b(e.target_name)}`) },
 };
 
 const STAGE_CLASS = { plan: "stage-plan", active: "stage-active", control: "stage-control", done: "stage-done" };
@@ -953,6 +954,7 @@ function showSection(name, pushHistory) {
   if (name === "tasks") loadTasksPage();
   if (name === "registry") loadRegistry();
   if (name === "journal") loadJournal();
+  if (name === "settings") loadSettings();
   // Карточку не грузим здесь: её открывает openCaseCard, потому что ей
   // нужен ещё и номер проекта, а showSection знает только имя раздела.
 
@@ -1966,14 +1968,19 @@ wireCreateMenu(els.createSideBtn, els.createSideMenu, () => (
     ? { path: currentPath, refresh: () => renderFolder(currentPath) }
     : { path: DB_PATH, refresh: () => loadColumnList("db") }
 ));
-wireCreateMenu(els.createCasesBtn, els.createCasesMenu, () => ({
-  path: CASES_PATH,
-  refresh: () => loadColumnList("cases"),
-}));
-wireCreateMenu(els.createFolderViewBtn, els.createFolderViewMenu, () => ({
-  path: currentPath,
-  refresh: () => renderFolder(currentPath),
-}));
+
+// Заголовок колонки открывает её корень обычной папкой. Своих кнопок
+// «Создать» у колонок больше нет — она одна, в левой панели, и кладёт
+// туда, где человек стоит. Значит к корню раздела нужен способ встать:
+// зашли в «Дела» — и «Создать» создаёт в «Делах».
+document.querySelectorAll("[data-open-root]").forEach((title) => {
+  title.addEventListener("click", () => {
+    const isDb = title.dataset.openRoot === "db";
+    const path = isDb ? DB_PATH : CASES_PATH;
+    const label = isDb ? "База данных" : "Дела";
+    goToFolder(path, [{ label, path }], true);
+  });
+});
 
 // Куда класть выбранные файлы и что обновить после загрузки. Диалог выбора
 // файлов открывается из разных мест, поэтому цель запоминаем явно.
@@ -1982,6 +1989,424 @@ let uploadTarget = null;
 function pickFilesFor(path, refresh) {
   uploadTarget = { path, refresh };
   els.uploadInput.click();
+}
+
+
+/* ============================================================
+   Настройки (только администратор).
+
+   Раздел собран из трёх вкладок. Рисуются они одинаково: каждая
+   возвращает готовую разметку и вешает обработчики после вставки.
+   Ссылок на узлы между перерисовками не храним — вид всегда
+   собирается заново из того, что пришло с сервера.
+   ============================================================ */
+
+let settingsTab = "access";
+// Кого сейчас смотрим во вкладке «Кто что видит». Держим отдельно от
+// разметки: после сохранения вкладка перерисовывается целиком, и
+// человек должен остаться на том же сотруднике.
+let accessUserId = null;
+
+const SECTION_RIGHTS = [
+  ["can_cases", "Дела", "Проекты, задачи, журнал регистрации"],
+  ["can_db", "База данных", "Файлы, эксперты, оборудование"],
+  ["can_tools", "Инструменты", "Служебный раздел"],
+  ["can_manage", "Руководитель", "Ведёт производственный календарь и утверждает решения по заседаниям"],
+];
+
+const ACCESS_LABEL = { read: "Только смотреть", write: "Смотреть и менять", none: "Закрыто" };
+
+function settingsPane() {
+  return document.getElementById("settingsPane");
+}
+
+async function loadSettings() {
+  document.querySelectorAll(".settings-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === settingsTab);
+  });
+  const pane = settingsPane();
+  pane.innerHTML = '<div class="empty-hint">Загрузка…</div>';
+  try {
+    if (settingsTab === "access") await renderAccessTab();
+    else if (settingsTab === "planfix") await renderPlanfixTab();
+    else await renderRefsTab();
+  } catch (err) {
+    pane.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.querySelectorAll(".settings-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    settingsTab = btn.dataset.tab;
+    loadSettings();
+  });
+});
+
+/* ---------- Вкладка «Кто что видит» ---------- */
+
+async function renderAccessTab() {
+  const { users: list } = await apiFetch("/api/admin/access");
+  if (!list.some((u) => u.id === accessUserId)) {
+    const firstEmployee = list.find((u) => u.role !== "admin");
+    accessUserId = (firstEmployee || list[0] || {}).id || null;
+  }
+
+  settingsPane().innerHTML = `
+    <div class="access-layout">
+      <div class="access-people" id="accessPeople">
+        ${list.map((u) => `
+          <button type="button" class="access-person${u.id === accessUserId ? " on" : ""}" data-person="${u.id}">
+            <span class="access-person-name">${escapeHtml(u.username)}</span>
+            <span class="access-person-sub">${u.role === "admin"
+              ? "администратор — видит всё"
+              : sectionSummary(u) + (u.folder_rules ? ` · папок: ${u.folder_rules}` : "")}</span>
+          </button>`).join("")}
+      </div>
+      <div class="access-detail" id="accessDetail"><div class="empty-hint">Загрузка…</div></div>
+    </div>`;
+
+  settingsPane().querySelectorAll("[data-person]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      accessUserId = Number(btn.dataset.person);
+      renderAccessTab();
+    });
+  });
+
+  if (accessUserId) await renderAccessDetail(accessUserId);
+  else document.getElementById("accessDetail").innerHTML =
+    '<div class="empty-hint">Сотрудников пока нет</div>';
+}
+
+/** Короткая строка «что открыто» для списка слева. */
+function sectionSummary(u) {
+  const open = SECTION_RIGHTS.filter(([key]) => u[key]).map(([, label]) => label);
+  return open.length ? open.join(", ") : "ничего не открыто";
+}
+
+async function renderAccessDetail(userId) {
+  const box = document.getElementById("accessDetail");
+  const { user, rules } = await apiFetch(`/api/admin/access/${userId}`);
+  const isAdmin = user.role === "admin";
+
+  box.innerHTML = `
+    <h2 class="access-title">${escapeHtml(user.username)}</h2>
+    ${isAdmin ? `
+      <p class="access-note">Администратор видит всё и правит всё — отдельные правила на него не действуют.
+      Чтобы ограничить доступ, сделайте его сотрудником в окне «Пользователи».</p>` : ""}
+
+    <h3 class="access-sub">Разделы</h3>
+    <div class="access-rights">
+      ${SECTION_RIGHTS.map(([key, label, hint]) => `
+        <label class="access-right">
+          <input type="checkbox" data-right="${key}" ${user[key] ? "checked" : ""} ${isAdmin ? "disabled" : ""}>
+          <span><b>${label}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
+        </label>`).join("")}
+    </div>
+
+    <h3 class="access-sub">Папки в «Делах»</h3>
+    ${isAdmin
+      ? '<p class="access-note">Администратору правила по папкам не нужны: он видит все.</p>'
+      : rules.length
+        ? `<table class="access-rules">
+             <thead><tr><th>Папка</th><th>Доступ</th><th></th></tr></thead>
+             <tbody>${rules.map((r) => `
+               <tr>
+                 <td class="access-path">${escapeHtml(prettyPath(r.path))}</td>
+                 <td>
+                   <select data-rule="${r.id}">
+                     ${["read", "write", "none"].map((a) =>
+                       `<option value="${a}"${r.access === a ? " selected" : ""}>${ACCESS_LABEL[a]}</option>`).join("")}
+                   </select>
+                 </td>
+                 <td><button type="button" class="link-btn" data-drop-rule="${r.id}">Убрать</button></td>
+               </tr>`).join("")}</tbody>
+           </table>
+           <p class="access-note">«Закрыто» — это запрет, который перебивает доступ к папке выше.
+           «Убрать» просто снимает правило: тогда действует то, что задано у родительской папки.</p>`
+        : `<p class="access-note">Своих правил нет. Значит, в «Делах» этот сотрудник видит только то,
+           что открыто всем, — и ничего, если не открыто ничего. Правила заводятся в самой папке:
+           «Дела» → «…» у строки → «Доступ к папке».</p>`}`;
+
+  if (isAdmin) return;
+
+  box.querySelectorAll("[data-right]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const values = {};
+      box.querySelectorAll("[data-right]").forEach((i) => { values[i.dataset.right] = i.checked; });
+      try {
+        await apiFetch(`/api/users/${userId}`, { method: "PATCH", body: JSON.stringify(values) });
+        showToast("Права сохранены");
+        renderAccessTab();
+      } catch (err) {
+        input.checked = !input.checked;
+        showToast(err.message);
+      }
+    });
+  });
+
+  box.querySelectorAll("[data-rule]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      const row = rules.find((r) => String(r.id) === select.dataset.rule);
+      try {
+        await apiFetch("/api/folder-permissions", {
+          method: "POST",
+          body: JSON.stringify({ path: row.path, userId, access: select.value }),
+        });
+        showToast("Доступ изменён");
+        renderAccessDetail(userId);
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+
+  box.querySelectorAll("[data-drop-rule]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await apiFetch(`/api/folder-permissions/${btn.dataset.dropRule}`, { method: "DELETE" });
+        showToast("Правило убрано");
+        renderAccessTab();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+}
+
+/* ---------- Вкладка «Связь с Planfix» ---------- */
+
+const ORIGIN_NOTE = {
+  panel: "задано здесь",
+  env: "задано при развёртывании",
+  default: "значение по умолчанию",
+};
+
+async function renderPlanfixTab() {
+  const { settings: list } = await apiFetch("/api/admin/settings?group=planfix");
+
+  settingsPane().innerHTML = `
+    <form class="settings-form" id="planfixForm">
+      <p class="access-note">Токен читает только сервер: обратно он не показывается никогда —
+      видно лишь, задан ли он и чем оканчивается. Пустое поле означает «оставить как было»;
+      чтобы вернуть значение из настроек сервера, сотрите его и сохраните.</p>
+      ${list.map((item) => settingsField(item)).join("")}
+      <div class="settings-actions">
+        <button class="primary" type="submit">Сохранить</button>
+        <button class="upload-btn" type="button" id="planfixProbeBtn">Проверить связь</button>
+        <span class="settings-probe" id="planfixProbeResult"></span>
+      </div>
+    </form>`;
+
+  document.getElementById("planfixForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const values = {};
+    settingsPane().querySelectorAll("[data-setting]").forEach((input) => {
+      // У секрета пустое поле — это «не трогать», а не «стереть»:
+      // иначе каждое сохранение формы стирало бы токен, которого в ней
+      // и не видно.
+      if (input.dataset.kind === "secret" && input.value === "") return;
+      // Отправляем только то, что человек действительно правил. Иначе
+      // первое же сохранение записало бы в базу все поля подряд — и
+      // значения из настроек сервера, и заводские умолчания, — после
+      // чего про каждое было бы написано «задано здесь», а поменять
+      // что-то на сервере стало бы невозможно: панель всё перебила бы.
+      if (input.value === input.dataset.initial) return;
+      values[input.dataset.setting] = input.value;
+    });
+    if (!Object.keys(values).length) {
+      showToast("Менять нечего — ничего не изменилось");
+      return;
+    }
+    try {
+      await apiFetch("/api/admin/settings?group=planfix", {
+        method: "PATCH", body: JSON.stringify({ values }),
+      });
+      showToast("Настройки сохранены");
+      renderPlanfixTab();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("planfixProbeBtn").addEventListener("click", async () => {
+    const out = document.getElementById("planfixProbeResult");
+    out.textContent = "Проверяю…";
+    out.className = "settings-probe";
+    try {
+      const data = await apiFetch("/api/cases/planfix/probe");
+      const ok = data.ok !== false;
+      out.textContent = ok
+        ? `Связь есть${data.projects !== undefined ? `, проектов видно: ${data.projects}` : ""}`
+        : `Planfix отвечает отказом: ${data.message || "причина не названа"}`;
+      out.className = "settings-probe " + (ok ? "good" : "bad");
+    } catch (err) {
+      out.textContent = err.message;
+      out.className = "settings-probe bad";
+    }
+  });
+}
+
+/** Одно поле настройки: подпись, поле, подсказка и откуда взято значение. */
+function settingsField(item) {
+  const isSecret = item.kind === "secret";
+  const value = isSecret ? "" : escapeHtml(item.value || "");
+  const placeholder = isSecret
+    ? (item.set ? `задан, оканчивается на ${escapeHtml(item.tail)}` : "не задан")
+    : "";
+  return `
+    <label class="settings-field">
+      <span class="settings-label">${escapeHtml(item.label)}
+        <span class="settings-origin">${ORIGIN_NOTE[item.origin] || ""}</span>
+      </span>
+      <input type="${isSecret ? "password" : "text"}"
+             data-setting="${item.key}" data-kind="${item.kind}"
+             data-initial="${value}"
+             value="${value}" placeholder="${placeholder}"
+             autocomplete="off" spellcheck="false">
+      ${item.hint ? `<span class="settings-hint">${escapeHtml(item.hint)}</span>` : ""}
+    </label>`;
+}
+
+/* ---------- Вкладка «Справочники» ---------- */
+
+let refsYear = new Date().getFullYear();
+
+async function renderRefsTab() {
+  const [calendar, outcomes] = await Promise.all([
+    apiFetch(`/api/cases/work-calendar?year=${refsYear}`),
+    apiFetch("/api/cases/court-outcomes"),
+  ]);
+
+  settingsPane().innerHTML = `
+    <section class="settings-block">
+      <h2 class="access-title">Производственный календарь</h2>
+      <p class="access-note">Сроки по задачам считаются в рабочих днях. Суббота и воскресенье
+      нерабочие всегда, а праздники и переносы каждый год свои — их заводят здесь. Пока год
+      не заполнен, система честно помечает такие сроки как ненадёжные, а не подсовывает
+      неверную дату.</p>
+      <div class="settings-actions">
+        <label class="settings-inline">Год
+          <select id="refsYear">
+            ${yearOptions(calendar.years)}
+          </select>
+        </label>
+      </div>
+      ${calendar.days.length ? `
+        <table class="access-rules">
+          <thead><tr><th>Дата</th><th>Какой день</th><th>Пояснение</th><th></th></tr></thead>
+          <tbody>${calendar.days.map((d) => `
+            <tr>
+              <td class="access-path">${escapeHtml(fmtDay(d.day))}</td>
+              <td>${d.kind === "holiday" ? "Нерабочий" : "Рабочий (перенос)"}</td>
+              <td>${escapeHtml(d.note || "")}</td>
+              <td><button type="button" class="link-btn" data-drop-day="${escapeHtml(d.day)}">Убрать</button></td>
+            </tr>`).join("")}</tbody>
+        </table>` : '<p class="empty-hint">За этот год отметок нет</p>'}
+      <form class="settings-row" id="calendarAddForm">
+        <input type="date" id="calDay" required>
+        <select id="calKind">
+          <option value="holiday">Нерабочий</option>
+          <option value="workday">Рабочий (перенос)</option>
+        </select>
+        <input type="text" id="calNote" placeholder="Пояснение, например «День России»">
+        <button class="primary" type="submit">Добавить</button>
+      </form>
+    </section>
+
+    <section class="settings-block">
+      <h2 class="access-title">Исходы заседаний</h2>
+      <p class="access-note">Что система делает с проектом, когда в карточке отмечают исход
+      заседания: куда переводит, какой ставит статус и как считает срок следующего контроля.
+      Состав задач, которые ставятся по исходу, здесь пока только показан — правится он
+      в самой карточке проекта.</p>
+      <table class="access-rules">
+        <thead><tr><th>Исход</th><th>Когда возможен</th><th>Что делает</th><th>Срок контроля</th><th>Задачи</th></tr></thead>
+        <tbody>${outcomes.outcomes.map((o) => `
+          <tr>
+            <td class="access-path">${escapeHtml(o.name)}${o.clause ? `<br><span class="access-hint">${escapeHtml(o.clause)}</span>` : ""}</td>
+            <td>${o.applies_to === "any" ? "на любой стадии" : escapeHtml(stageWord(o.applies_to))}</td>
+            <td>${escapeHtml(outcomeEffect(o))}</td>
+            <td>${escapeHtml(RULE_WORD[o.control_rule] || o.control_rule)}</td>
+            <td>${(o.tasks || []).length
+                  ? (o.tasks || []).map((t) => escapeHtml(t.title || t.name || "")).join("<br>")
+                  : "—"}</td>
+          </tr>`).join("")}</tbody>
+      </table>
+    </section>`;
+
+  document.getElementById("refsYear").addEventListener("change", (e) => {
+    refsYear = Number(e.target.value);
+    renderRefsTab();
+  });
+
+  document.getElementById("calendarAddForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await apiFetch("/api/cases/work-calendar", {
+        method: "POST",
+        body: JSON.stringify({
+          day: document.getElementById("calDay").value,
+          kind: document.getElementById("calKind").value,
+          note: document.getElementById("calNote").value,
+        }),
+      });
+      showToast("Отметка добавлена");
+      renderRefsTab();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  settingsPane().querySelectorAll("[data-drop-day]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await apiFetch(`/api/cases/work-calendar/${btn.dataset.dropDay}`, { method: "DELETE" });
+        showToast("Отметка убрана");
+        renderRefsTab();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+}
+
+const RULE_WORD = {
+  none: "не пересчитывать",
+  hearing_plus_3: "заседание + 3 рабочих дня",
+  every_2_weeks: "каждые две недели",
+  recheck_2_days: "перепроверить через 2 дня",
+  next_hearing: "к следующему заседанию",
+};
+
+function stageWord(stage) {
+  return { plan: "в плане", active: "в активных", control: "на контроле", done: "в завершённых" }[stage] || stage;
+}
+
+function outcomeEffect(o) {
+  const parts = [];
+  if (o.cancels) parts.push("отменяет проект");
+  if (o.sets_stage) parts.push(`переводит ${stageWord(o.sets_stage)}`);
+  if (o.sets_status) parts.push(`статус «${{ waiting: "Ожидание", in_progress: "В работе", problem: "Проблема" }[o.sets_status] || o.sets_status}»`);
+  if (o.needs_decision) parts.push("спрашивает, куда вести");
+  if (o.needs_deadline) parts.push("просит срок из определения");
+  if (o.requires_manager) parts.push("решает руководитель");
+  return parts.length ? parts.join("; ") : "ничего не меняет";
+}
+
+/** Годы для выбора: те, что уже заведены, плюс нынешний и следующий. */
+function yearOptions(known) {
+  const now = new Date().getFullYear();
+  const years = [...new Set([...(known || []), now, now + 1])].sort();
+  return years.map((y) => `<option value="${y}"${y === refsYear ? " selected" : ""}>${y}</option>`).join("");
+}
+
+/** «15 сентября 2026» — дата в календаре читается, а не расшифровывается. */
+function fmtDay(iso) {
+  const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const m = String(iso || "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return String(iso || "");
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
 }
 
 /* ---------- Гарантийные письма (ГП) ---------- */

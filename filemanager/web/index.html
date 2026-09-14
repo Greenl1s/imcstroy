@@ -121,6 +121,13 @@
     </button>
 
     <div class="side-bottom">
+      <!-- Настройки — в самом низу и только у администратора: сотруднику
+           этот пункт не нужен, а у администратора он нужен редко, и
+           держать его в середине списка значило бы мешать работе. -->
+      <button class="side-item hidden" id="settingsBtn" data-section="settings" type="button">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Настройки</span>
+      </button>
       <div class="side-disk" id="diskUsageWidget" title="Загрузка…">
         <div class="side-disk-top"><span>Место на диске</span><span id="diskUsageFree">…</span></div>
         <div class="side-disk-track"><div class="side-disk-fill" id="diskUsageFill"></div></div>
@@ -138,9 +145,13 @@
 
     <div class="col" data-col="db">
       <div class="col-header">
-        <span>База данных<span class="col-count hidden" id="dbCount"></span></span>
-<!-- «Создать» переехало в левую панель: одна кнопка на всё,
-             как в облачных дисках. -->      </div>
+        <!-- Заголовок колонки открывает её корень обычной папкой. Это
+             и привычно (так ведут себя разделы в облачных дисках), и
+             нужно по делу: «Создать» теперь живёт в левой панели и
+             кладёт туда, где человек стоит, — значит к корню раздела
+             нужен способ «встать». -->
+        <button class="col-title" data-open-root="db" type="button">База данных<span class="col-count hidden" id="dbCount"></span></button>
+      </div>
       <div class="col-toolbar" id="dbToolbar">
         <input type="text" class="col-search-input" id="dbSearchInput" placeholder="Поиск...">
         <select class="col-sort-select" id="dbSortSelect">
@@ -166,7 +177,7 @@
 
     <div class="col" data-col="cases">
       <div class="col-header">
-        <span>Дела<span class="col-count hidden" id="casesCount"></span></span>
+        <button class="col-title" data-open-root="cases" type="button">Дела<span class="col-count hidden" id="casesCount"></span></button>
         <div class="col-head-actions">
         <button class="upload-btn" id="casesTasksBtn" type="button" title="Все задачи по проектам">
           <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m4 6 1.2 1.2L7.5 5"/><path d="m4 12 1.2 1.2L7.5 11"/><path d="m4 18 1.2 1.2L7.5 17"/></svg>
@@ -175,21 +186,6 @@
         <button class="icon-btn hidden" id="planfixSyncBtn" type="button" title="Сверить с Planfix">
           <svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 6.3 5.7L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.3L20 16"/><path d="M20 20v-4h-4"/></svg>
         </button>
-        <div class="create-wrap">
-          <button class="create-btn" id="createCasesBtn" type="button" aria-haspopup="menu" aria-expanded="false">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <div class="create-menu hidden" id="createCasesMenu" role="menu">
-            <button type="button" data-create="project"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/><path d="M13 3v5h5"/><path d="M9 14l2 2 4-4"/></svg>Новый проект</button>
-            <button type="button" data-create="gp"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 6 8 6 8-6"/></svg>Гарантийное письмо</button>
-            <div class="create-menu-sep"></div>
-            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
-            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
-            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
-            <div class="create-menu-sep"></div>
-            <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
-          </div>
-        </div>
         </div>
       </div>
       <div class="col-toolbar" id="casesToolbar">
@@ -251,16 +247,6 @@
           <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
           <span>Добавить эксперта</span>
         </button>
-        <div class="create-wrap">
-          <button class="create-btn" id="createFolderViewBtn" type="button" aria-haspopup="menu" aria-expanded="false">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Создать</span><svg class="create-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <div class="create-menu hidden" id="createFolderViewMenu" role="menu">
-            <button type="button" data-create="folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Папку</button>
-            <button type="button" data-create="docx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h6M8 17h4"/></svg>Текстовый документ</button>
-            <button type="button" data-create="xlsx"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M12 11v8"/></svg>Таблицу</button>
-          </div>
-        </div>
         <button class="upload-btn" id="uploadTriggerBtn" type="button">
           <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
           Загрузить
@@ -311,6 +297,26 @@
       </div>
     </div>
     <div class="folder-body" id="recentList"></div>
+  </div>
+
+  <!-- Настройки. Раздел, а не окно: вкладок здесь будет больше, а в
+       модальном окне они бы теснились и мешали друг другу. Виден только
+       администратору — показывает его applyPermissionsUI. -->
+  <div class="folder-view section hidden" id="settingsSection" data-view="settings">
+    <div class="page-head">
+      <div>
+        <h1 class="folder-title">Настройки</h1>
+        <p class="page-sub">Видны только администраторам. Что меняете здесь — действует у всех.</p>
+      </div>
+    </div>
+    <div class="settings-body">
+      <nav class="settings-tabs" id="settingsTabs">
+        <button class="settings-tab active" data-tab="access" type="button">Кто что видит</button>
+        <button class="settings-tab" data-tab="planfix" type="button">Связь с Planfix</button>
+        <button class="settings-tab" data-tab="refs" type="button">Справочники</button>
+      </nav>
+      <div class="settings-pane" id="settingsPane"></div>
+    </div>
   </div>
 
   <div class="folder-view section hidden" id="trashSection" data-view="trash">

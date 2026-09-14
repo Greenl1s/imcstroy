@@ -608,7 +608,17 @@ button.primary:hover { background: #2569c9; }
   color: var(--text-primary);
 }
 
-.col-header > span:first-child { display: flex; align-items: center; gap: 8px; }
+/* Заголовок колонки — кнопка, но выглядеть должен заголовком: ни рамки,
+   ни фона, шрифт родительский. Подчёркивание при наведении — единственный
+   намёк, что на него можно нажать. */
+.col-title {
+  display: flex; align-items: center; gap: 8px;
+  border: none; background: none; padding: 0;
+  font: inherit; color: inherit; letter-spacing: inherit;
+  cursor: pointer; text-align: left;
+}
+.col-title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.col-title:focus-visible { outline: 2px solid var(--rail-accent); outline-offset: 3px; border-radius: 3px; }
 
 .col-count {
   font-size: var(--fs-meta); font-weight: 700; letter-spacing: 0;
@@ -2385,4 +2395,135 @@ a.upload-btn { text-decoration: none; }
   .eq-banner { gap: 8px; }
   .eq-spacer { display: none; }
   .eq-btn { flex: 1 1 auto; }
+}
+
+/* ============================================================
+   Настройки администратора.
+
+   Вкладки слева, содержимое справа — так же, как разделы устроены
+   в самом приложении, чтобы не заводить второй язык навигации.
+   На узком экране вкладки ложатся в строку сверху.
+   ============================================================ */
+
+.settings-body { display: flex; gap: 24px; align-items: flex-start; padding: 0 0 40px; }
+
+.settings-tabs {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 0 0 220px; position: sticky; top: 16px;
+}
+.settings-tab {
+  text-align: left; border: none; background: transparent; cursor: pointer;
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-body); font-weight: 500;
+  color: var(--text-secondary);
+}
+.settings-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.settings-tab.active { background: var(--accent-bg); color: var(--accent-on-tint); font-weight: 600; }
+
+.settings-pane { flex: 1; min-width: 0; }
+
+.settings-block + .settings-block { margin-top: 32px; }
+
+.access-title { font-size: var(--fs-title); font-weight: 600; margin: 0 0 6px; }
+.access-sub {
+  font-size: var(--fs-body); font-weight: 600; margin: 22px 0 8px;
+  color: var(--text-secondary);
+}
+.access-note {
+  font-size: var(--fs-body); color: var(--text-secondary);
+  margin: 8px 0 14px; max-width: 70ch; line-height: 1.5;
+}
+.access-hint { font-size: var(--fs-meta); color: var(--text-muted); }
+
+/* --- «Кто что видит»: люди слева, подробности справа --- */
+
+.access-layout { display: flex; gap: 20px; align-items: flex-start; }
+.access-people {
+  flex: 0 0 260px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px;
+}
+.access-person {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  border: none; background: transparent; cursor: pointer;
+  padding: 8px 10px; border-radius: var(--radius-sm); font: inherit;
+}
+.access-person:hover { background: var(--bg-subtle); }
+.access-person.on { background: var(--accent-bg); }
+.access-person-name { font-size: var(--fs-body); font-weight: 600; color: var(--text-primary); }
+.access-person-sub { font-size: var(--fs-meta); color: var(--text-muted); }
+
+.access-detail {
+  flex: 1; min-width: 0;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px;
+}
+
+.access-rights { display: grid; gap: 10px; }
+.access-right {
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: var(--fs-body); cursor: pointer;
+}
+.access-right input { margin-top: 3px; accent-color: var(--accent); }
+.access-right input:disabled { cursor: not-allowed; }
+
+/* --- таблицы правил и календаря --- */
+
+.access-rules { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.access-rules th {
+  text-align: left; font-size: var(--fs-meta); font-weight: 600;
+  color: var(--text-muted); padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.access-rules td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.access-rules tr:last-child td { border-bottom: none; }
+.access-path { color: var(--text-primary); font-weight: 500; }
+.access-rules select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); font: inherit; font-size: var(--fs-body); }
+
+.link-btn {
+  border: none; background: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: var(--fs-body); color: var(--danger);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+
+/* --- формы настроек --- */
+
+.settings-form { display: grid; gap: 16px; max-width: 620px; }
+.settings-field { display: grid; gap: 5px; }
+.settings-label {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: var(--fs-body); font-weight: 600;
+}
+.settings-origin { font-size: var(--fs-meta); font-weight: 400; color: var(--text-muted); }
+.settings-field input {
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); font: inherit; font-size: var(--fs-body);
+  background: var(--bg-card); color: var(--text-primary);
+}
+.settings-field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.settings-hint { font-size: var(--fs-meta); color: var(--text-muted); line-height: 1.45; }
+
+.settings-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.settings-inline { display: flex; gap: 8px; align-items: center; font-size: var(--fs-body); }
+.settings-inline select { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); font: inherit; }
+
+.settings-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px;
+  padding-top: 14px; border-top: 1px solid var(--border);
+}
+.settings-row input, .settings-row select {
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); font: inherit; font-size: var(--fs-body);
+}
+.settings-row input[type="text"] { flex: 1; min-width: 200px; }
+
+.settings-probe { font-size: var(--fs-body); color: var(--text-muted); }
+.settings-probe.good { color: var(--success); }
+.settings-probe.bad { color: var(--danger); }
+
+@media (max-width: 900px) {
+  .settings-body { flex-direction: column; }
+  .settings-tabs { flex-direction: row; flex: none; position: static; width: 100%; overflow-x: auto; }
+  .access-layout { flex-direction: column; }
+  .access-people { flex: none; width: 100%; }
 }
