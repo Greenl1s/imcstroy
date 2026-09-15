@@ -2688,3 +2688,46 @@ a.upload-btn { text-decoration: none; }
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 6px; background: var(--bg-card);
 }
+
+/* --- Сведения об эксперте: пункт и его сканы --- */
+
+.ei-items { display: flex; flex-direction: column; gap: 12px; }
+.ei-item {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--bg-subtle);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ei-item-head { display: flex; align-items: center; justify-content: space-between; }
+.ei-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent-bg); color: var(--accent-on-tint);
+  font-size: 12px; font-weight: 600;
+}
+.ei-item textarea {
+  width: 100%; font: inherit; font-size: 14px; resize: vertical;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-card); color: var(--text-primary);
+}
+/* Сканы пункта — строкой под ним: видно, чем именно он подтверждён. */
+.ei-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ei-file {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 6px 4px 10px; font-size: 12.5px;
+}
+.ei-file button {
+  border: none; background: none; cursor: pointer; color: var(--text-muted);
+  font-size: 13px; line-height: 1; padding: 2px 4px;
+}
+.ei-file button:hover { color: var(--danger); }
+.ei-add-scan { cursor: pointer; }
+.ei-add-scan span {
+  display: inline-block; border: 1px dashed var(--border-strong);
+  border-radius: 999px; padding: 4px 12px; font-size: 12.5px; color: var(--text-muted);
+}
+.ei-add-scan:hover span { border-color: var(--accent); color: var(--accent); }
+/* Поле выбора файла прячем стилями, а не атрибутом hidden: скрытое
+   атрибутом поле некоторые браузеры и средства проверки вообще не
+   считают доступным для выбора файла. */
+.ei-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

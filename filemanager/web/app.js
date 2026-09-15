@@ -122,11 +122,6 @@ const els = {
   expertOverlay: document.getElementById("expertOverlay"),
   expertForm: document.getElementById("expertForm"),
   expertName: document.getElementById("expertName"),
-  expertInfoText: document.getElementById("expertInfoText"),
-  expertInfoFile: document.getElementById("expertInfoFile"),
-  expertAttachments: document.getElementById("expertAttachments"),
-  expertTextWrap: document.getElementById("expertTextWrap"),
-  expertFileWrap: document.getElementById("expertFileWrap"),
   expertError: document.getElementById("expertError"),
   addExpertBtn: document.getElementById("addExpertBtn"),
   gpForm: document.getElementById("gpForm"),
@@ -1256,19 +1251,23 @@ async function uploadInstrumentFiles(instrumentId, fileList, kind) {
 
 /* ---------- Эксперты ----------
    Справочник экспертов лежит в файлах: /База данных/Эксперты/<Имя>/,
-   внутри «Сведения.docx» (из него ГП берёт абзацы описания) и подпапка
-   «Приложения» (дипломы и сертификаты).
+   внутри два файла сведений (текстом и со вшитыми сканами) и подпапка
+   «Приложения» с самими сканами.
 
-   Раньше всё это делали руками в Word и проводнике, и эксперт «не
-   появлялся» в списке ГП, если файл назвали иначе или забыли положить.
-   Форма делает то же самое, но имена задаёт код. */
+   Заведение эксперта и его сведения — РАЗНЫЕ действия. Раньше это было
+   одним: заводя папку, тут же набирали биографию или приносили готовый
+   файл. Из-за этого сведения у каждого были устроены по-своему, а сканы
+   лежали рядом кучей и ни с чем не связаны — в письмо они попадали в
+   том порядке, в каком их когда-то назвали. */
 
 const EXPERTS_PATH = DB_PATH + "/Эксперты";
 
 /** Кнопка нужна ровно в одной папке — в самой папке «Эксперты». */
 function updateExpertButton(path) {
   if (!els.addExpertBtn) return;
-  els.addExpertBtn.classList.toggle("hidden", path !== EXPERTS_PATH);
+  const here = path === EXPERTS_PATH;
+  els.addExpertBtn.classList.toggle("hidden", !here);
+  document.getElementById("expertInfoBtn").classList.toggle("hidden", !here);
 }
 
 bind(els.addExpertBtn, "click", () => openExpertForm());
@@ -1277,7 +1276,6 @@ bind(document.getElementById("expertCloseBtn"), "click", closeExpertForm);
 function openExpertForm() {
   els.expertForm.reset();
   els.expertError.textContent = "";
-  toggleExpertSource("text");
   els.expertOverlay.classList.remove("hidden");
   els.expertName.focus();
 }
@@ -1286,58 +1284,21 @@ function closeExpertForm() {
   els.expertOverlay.classList.add("hidden");
 }
 
-/** Сведения — либо текстом, либо файлом. Показываем только выбранное. */
-function toggleExpertSource(mode) {
-  els.expertTextWrap.classList.toggle("hidden", mode !== "text");
-  els.expertFileWrap.classList.toggle("hidden", mode !== "file");
-}
-
-document.querySelectorAll('input[name="expertInfoSource"]').forEach((radio) => {
-  radio.addEventListener("change", () => toggleExpertSource(radio.value));
-});
-
-function expertInfoSource() {
-  const checked = document.querySelector('input[name="expertInfoSource"]:checked');
-  return checked ? checked.value : "text";
-}
-
 /**
- * Заведение идёт в три шага, и порядок здесь важен.
+ * Заводим только папку.
  *
- *   1. POST /api/experts — папка, подпапка «Приложения» и, если сведения
- *      набрали текстом, готовый «Сведения.docx».
- *   2. Готовый файл сведений — обычной загрузкой под именем «Сведения.docx».
- *   3. Приложения — той же загрузкой в подпапку.
- *
- * Файлы идут через ту же загрузку, что и всё остальное в системе, а не
- * через свой отдельный приём: иначе у экспертов оказались бы свои
- * ограничения на размер и своя проверка прав, и они бы разошлись
- * с остальными файлами.
- *
- * Если папка создалась, а файл не долетел, эксперт остаётся заведённым,
- * но без сведений — и об этом честно сообщается: в списке для ГП он не
- * появится, пока сведений нет.
+ * Раньше здесь же набирали сведения или приносили их готовым файлом —
+ * и получалось, что у одного эксперта сведения устроены так, у другого
+ * иначе, а сканы лежат рядом и ни с чем не связаны. Теперь сведения
+ * заводит отдельный инструмент, один для всех.
  */
 bind(els.expertForm, "submit", async (e) => {
   e.preventDefault();
   const button = document.getElementById("expertSubmitBtn");
   const name = els.expertName.value.trim();
-  const mode = expertInfoSource();
-  const infoText = els.expertInfoText.value;
-  const infoFile = els.expertInfoFile.files[0] || null;
-  const attachments = Array.from(els.expertAttachments.files || []);
 
   els.expertError.textContent = "";
   if (!name) return (els.expertError.textContent = "Укажите имя эксперта");
-  if (mode === "text" && !infoText.trim()) {
-    return (els.expertError.textContent = "Заполните сведения — без них эксперта нельзя выбрать в ГП");
-  }
-  if (mode === "file" && !infoFile) {
-    return (els.expertError.textContent = "Приложите файл со сведениями");
-  }
-  if (mode === "file" && !/\.docx$/i.test(infoFile.name)) {
-    return (els.expertError.textContent = "Сведения должны быть файлом .docx — из него берутся абзацы для письма");
-  }
 
   button.disabled = true;
   const label = button.textContent;
@@ -1345,21 +1306,223 @@ bind(els.expertForm, "submit", async (e) => {
   try {
     const { expert } = await apiFetch("/api/experts", {
       method: "POST",
-      body: JSON.stringify({ name, infoText: mode === "text" ? infoText : "" }),
+      body: JSON.stringify({ name }),
     });
-
-    if (mode === "file") {
-      await uploadOneFile(infoFile, expert.path, "Сведения.docx");
-    }
-    for (const file of attachments) {
-      await uploadOneFile(file, expert.path + "/Приложения", file.name);
-    }
-
     closeExpertForm();
-    showToast(`Эксперт «${expert.name}» заведён`);
+    showToast(`Эксперт «${expert.name}» заведён — заполните сведения`);
     if (currentPath === EXPERTS_PATH) renderFolder(currentPath);
+    // Ведём дальше сами: без сведений эксперта нельзя выбрать в ГП, и
+    // оставить человека на этом месте значило бы оставить работу
+    // сделанной наполовину.
+    openExpertInfo(expert.name);
   } catch (err) {
     els.expertError.textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+});
+
+/* ---------- Сведения об эксперте ----------
+
+   Пункт биографии и сканы, которые его подтверждают, — вместе. Раньше
+   это были две несвязанные вещи: текст в одном файле, сканы кучей в
+   соседней папке. Из-за этого в письмо документы уходили в том порядке,
+   в каком их когда-то назвали, а не в том, в каком идёт текст.
+
+   Сканы улетают на сервер сразу при выборе, а пункты сохраняются
+   отдельной кнопкой. Так набранный текст не пропадает, если картинка
+   не долетела, — и наоборот. */
+
+let expertInfoState = { name: null, items: [] };
+let expertInfoWanted = null;
+
+bind(document.getElementById("expertInfoBtn"), "click", () => openExpertInfo());
+bind(document.getElementById("expertInfoCloseBtn"), "click", () => {
+  document.getElementById("expertInfoOverlay").classList.add("hidden");
+});
+
+async function openExpertInfo(preselect) {
+  const overlay = document.getElementById("expertInfoOverlay");
+  const who = document.getElementById("expertInfoWho");
+  document.getElementById("expertInfoError").textContent = "";
+  // Пока список грузится, показывать прошлого человека нельзя: можно
+  // успеть набрать в его пунктах и не понять, чьи они.
+  document.getElementById("expertInfoItems").innerHTML =
+    '<div class="empty-hint">Загрузка…</div>';
+  document.getElementById("expertInfoImported").style.display = "none";
+  overlay.classList.remove("hidden");
+
+  // Открыли снова — возвращаемся к тому, с кем работали: почти всегда
+  // это продолжение того же дела, а не начало нового.
+  const keep = preselect || expertInfoState.name;
+
+  try {
+    const { experts } = await apiFetch("/api/experts");
+    if (!experts.length) {
+      document.getElementById("expertInfoError").textContent =
+        "Экспертов ещё нет — сначала заведите эксперта.";
+      who.innerHTML = "";
+      document.getElementById("expertInfoItems").innerHTML = "";
+      return;
+    }
+    who.innerHTML = experts
+      .map((e) => `<option value="${escapeHtml(e.name)}">${escapeHtml(e.name)}</option>`).join("");
+    if (keep && experts.some((e) => e.name === keep)) who.value = keep;
+    await loadExpertInfo(who.value);
+  } catch (err) {
+    document.getElementById("expertInfoError").textContent = err.message;
+  }
+}
+
+bind(document.getElementById("expertInfoWho"), "change", (e) => {
+  loadExpertInfo(e.target.value).catch((err) => {
+    document.getElementById("expertInfoError").textContent = err.message;
+  });
+});
+
+async function loadExpertInfo(name) {
+  // Пока ответ идёт, человек мог выбрать другого — и тогда прилетевшее
+  // старое перетёрло бы уже показанное. Запоминаем, кого спрашивали
+  // последним, и чужой ответ выбрасываем.
+  expertInfoWanted = name;
+  const data = await apiFetch(`/api/experts/${encodeURIComponent(name)}/info`);
+  if (expertInfoWanted !== name) return;
+  expertInfoState = { name, items: data.items.length ? data.items : [{ text: "", files: [] }] };
+
+  const note = document.getElementById("expertInfoImported");
+  if (data.imported) {
+    // Текст подтянулся из старого файла — человек должен об этом знать,
+    // а не гадать, откуда взялись пункты, которых он не набирал.
+    note.style.display = "";
+    note.textContent = `Пункты подтянуты из файла «${data.imported}» — он был заполнен раньше. ` +
+      "Проверьте, прикрепите сканы и сохраните.";
+  } else {
+    note.style.display = "none";
+  }
+  if (data.broken) {
+    document.getElementById("expertInfoError").textContent =
+      "Файл со связями сканов испорчен — пункты придётся завести заново.";
+  }
+  renderExpertInfoItems();
+}
+
+function renderExpertInfoItems() {
+  const box = document.getElementById("expertInfoItems");
+  box.innerHTML = expertInfoState.items.map((item, i) => `
+    <section class="ei-item" data-ei="${i}">
+      <div class="ei-item-head">
+        <span class="ei-num">${i + 1}</span>
+        <button type="button" class="link-btn" data-ei-drop="${i}">Убрать пункт</button>
+      </div>
+      <textarea rows="2" data-ei-text="${i}"
+        placeholder="образование высшее: …">${escapeHtml(item.text)}</textarea>
+      <div class="ei-files">
+        ${item.files.map((f, j) => `
+          <span class="ei-file">${escapeHtml(f)}
+            <button type="button" data-ei-unfile="${i}:${j}" aria-label="Открепить">✕</button>
+          </span>`).join("")}
+        <label class="ei-add-scan">
+          <input type="file" accept="image/*" multiple data-ei-file="${i}" class="ei-file-input">
+          <span>+ Прикрепить скан</span>
+        </label>
+      </div>
+    </section>`).join("");
+}
+
+/* Слушаем контейнер, а не каждую кнопку по отдельности.
+   Список пунктов перерисовывается на каждое действие, и обработчики,
+   навешенные на сами элементы, живут до первой перерисовки. Делегирование
+   вешается один раз и переживает любое число перерисовок. */
+(function wireExpertInfoBox() {
+  const box = document.getElementById("expertInfoItems");
+  if (!box) return;
+
+  box.addEventListener("input", (e) => {
+    const field = e.target.closest("[data-ei-text]");
+    if (!field) return;
+    expertInfoState.items[Number(field.dataset.eiText)].text = field.value;
+  });
+
+  box.addEventListener("click", (e) => {
+    const drop = e.target.closest("[data-ei-drop]");
+    if (drop) {
+      const i = Number(drop.dataset.eiDrop);
+      const item = expertInfoState.items[i];
+      if ((item.text.trim() || item.files.length) &&
+          !confirm("Убрать этот пункт? Сканы останутся в папке «Приложения».")) return;
+      expertInfoState.items.splice(i, 1);
+      if (!expertInfoState.items.length) expertInfoState.items.push({ text: "", files: [] });
+      return renderExpertInfoItems();
+    }
+
+    const unfile = e.target.closest("[data-ei-unfile]");
+    if (unfile) {
+      const [i, j] = unfile.dataset.eiUnfile.split(":").map(Number);
+      // Только открепляем от пункта. Сам файл остаётся в папке: удалять
+      // с диска из формы, где человек просто передумал, — слишком.
+      expertInfoState.items[i].files.splice(j, 1);
+      renderExpertInfoItems();
+    }
+  });
+
+  box.addEventListener("change", async (e) => {
+    const input = e.target.closest("[data-ei-file]");
+    if (!input) return;
+    const i = Number(input.dataset.eiFile);
+    const files = Array.from(input.files || []);
+    input.value = "";
+    for (const file of files) {
+      try {
+        const saved = await uploadExpertScan(expertInfoState.name, file);
+        expertInfoState.items[i].files.push(saved.name);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+    renderExpertInfoItems();
+  });
+})();
+
+async function uploadExpertScan(expertName, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/experts/${encodeURIComponent(expertName)}/scans`, {
+    method: "POST", credentials: "same-origin", body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Не удалось сохранить скан");
+  return data;
+}
+
+bind(document.getElementById("expertInfoAddItem"), "click", () => {
+  expertInfoState.items.push({ text: "", files: [] });
+  renderExpertInfoItems();
+  const last = document.querySelector("#expertInfoItems .ei-item:last-child textarea");
+  if (last) last.focus();
+});
+
+bind(document.getElementById("expertInfoSaveBtn"), "click", async (e) => {
+  const button = e.currentTarget;
+  const error = document.getElementById("expertInfoError");
+  error.textContent = "";
+  const items = expertInfoState.items.filter((i) => i.text.trim());
+  if (!items.length) return (error.textContent = "Заполните хотя бы один пункт");
+
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = "Сохраняем…";
+  try {
+    const res = await apiFetch(`/api/experts/${encodeURIComponent(expertInfoState.name)}/info`, {
+      method: "PUT", body: JSON.stringify({ items }),
+    });
+    showToast(res.missing && res.missing.length
+      ? `Сохранено, но не нашлись сканы: ${res.missing.join(", ")}`
+      : "Сведения сохранены — оба файла пересобраны");
+    document.getElementById("expertInfoOverlay").classList.add("hidden");
+    if (currentPath && currentPath.startsWith(EXPERTS_PATH)) renderFolder(currentPath);
+  } catch (err) {
+    error.textContent = err.message;
   } finally {
     button.disabled = false;
     button.textContent = label;
@@ -2959,7 +3122,15 @@ els.gpForm.addEventListener("submit", async (e) => {
       }),
     });
     els.gpOverlay.classList.add("hidden");
-    alert(`Готово! Файл «${result.name}» создан в проекте.`);
+    // Файлов теперь два: рабочий и тот, что уходит в суд. Если сканов
+    // нет ни у кого, второго не будет — и об этом надо сказать сразу, а
+    // не дать человеку искать его в папке.
+    alert(result.noScans
+      ? `Готово! Файл «${result.name}» создан в проекте.\n\n` +
+        "Письма с приложениями нет: ни у одного из выбранных экспертов " +
+        "не прикреплено ни одного скана. Их добавляют в «Базе данных / " +
+        "Эксперты» кнопкой «Сведения об эксперте»."
+      : `Готово! В проекте создано два файла:\n\n${result.files.join("\n")}`);
     // Обновим колонку "Дела", если сейчас открыта именно папка этого проекта
     if (currentPath === result.caseFolderPath) {
       renderFolder(currentPath);
