@@ -1,5 +1,6 @@
 const AdmZip = require("adm-zip");
 const path = require("path");
+const docxImages = require("./docxImages");
 
 const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "gp-template.docx");
 
@@ -65,11 +66,31 @@ function extractParagraphTexts(docxBuffer) {
  *   courtHeader, caseNumber, courtGenitive, expertiseType,
  *   questions: [str, ...],
  *   costText, termText,
- *   experts: [{ name, descLines: [str, ...] }, ...],
+ *   experts: [{ name, descLines: [str, ...], scans: [{ name, buffer }] }, ...],
  * }
- * Возвращает Buffer готового .docx.
+ *
+ * Возвращает { plain, withAttachments } — два Buffer'а.
+ *
+ * Два письма, а не одно с картинками: в суд идёт с приложениями, а в
+ * работе (согласовать, поправить, переслать) удобнее текстовое — оно
+ * весит килобайты, а не десятки мегабайт. Собираются оба разом из одних
+ * и тех же данных, поэтому разойтись не могут.
+ *
+ * withAttachments === null, если ни у одного выбранного эксперта нет ни
+ * одного скана: пустое «Приложение» на отдельном листе — это обещание,
+ * которое документ не выполняет.
  */
 function generateGP(data) {
+  return {
+    plain: buildGP(data, false),
+    withAttachments: countScans(data) ? buildGP(data, true) : null,
+  };
+}
+
+const countScans = (data) =>
+  (data.experts || []).reduce((sum, e) => sum + (e.scans || []).length, 0);
+
+function buildGP(data, withAttachments) {
   const zip = new AdmZip(TEMPLATE_PATH);
   const docEntry = zip.getEntry("word/document.xml");
   if (!docEntry) {
@@ -122,75 +143,53 @@ function generateGP(data) {
   xml = replaceRange(xml, nameMold.start, blankEndTag, expertsXml);
 
   // ---------- Приложения ----------
-  xml = fillAttachments(xml, data.attachments || []);
+  // Перечня файлов в строке «Приложение:» больше нет: сканы теперь
+  // вшиты в само письмо, и перечислять рядом ещё и имена файлов,
+  // которых в конверте нет, значило бы сбивать с толку.
+  if (withAttachments) xml = appendScans(zip, xml, data.experts || []);
 
-  docEntry.setData(Buffer.from(xml, "utf8"));
+  zip.updateFile("word/document.xml", Buffer.from(xml, "utf8"));
   return zip.toBuffer();
 }
 
 /**
- * Строка «Приложение:» превращается в перечень приложенных документов.
+ * Приложение в конце письма.
  *
- * В шаблоне это обычный абзац с общей фразой «Приложение: Документы,
- * подтверждающие квалификацию экспертов» — без плейсхолдера. Плейсхолдер
- * сюда сознательно НЕ добавлен: тогда пришлось бы заменить и сам шаблон
- * на сервере, а он у людей уже правленый, и подменять его — значит
- * молча стереть чужие изменения. Поэтому ищем абзац по тексту.
- *
- * Если приложений нет — оставляем прежнюю фразу как была. Если абзац
- * не нашёлся (шаблон переписали) — тоже ничего не делаем: письмо должно
- * получиться в любом случае, пусть и без перечня.
+ * Порядок здесь не случайный и держится осознанно: эксперты идут в том
+ * же порядке, в каком перечислены текстом выше, у эксперта — пункты
+ * сверху вниз, у пункта — его сканы. То есть если первым в биографии
+ * стоит диплом бакалавра, то и первым подтверждением будет он. Иначе
+ * читающему в суде пришлось бы сличать документы с текстом наугад.
  */
-function fillAttachments(xml, attachments) {
-  if (!attachments.length) return xml;
+function appendScans(zip, xml, experts) {
+  const adder = docxImages.imageAdder(zip, xml);
 
-  const marker = findAttachmentParagraph(xml);
-  if (!marker) return xml;
+  let body = PAGE_BREAK_PARAGRAPH +
+    titleParagraph("Приложение") +
+    titleParagraph("Документы, подтверждающие имеющиеся допуски и квалификацию экспертов");
 
-  const head = marker.xml.replace(marker.text, escapeXmlText("Приложение:"));
-  const items = attachments
-    .map((name, i) => marker.xml.replace(marker.text, escapeXmlText(`${i + 1}. ${name}`)))
-    .join("");
-
-  return replaceRange(xml, marker.start, marker.end, head + items);
-}
-
-/**
- * Находит абзац, начинающийся со слова «Приложение», и возвращает его
- * вместе с текстом ровно в том виде, в каком он лежит внутри <w:t> —
- * заменять надо именно эту подстроку, иначе слетит разметка абзаца.
- *
- * Word умеет разбивать одну фразу на несколько <w:t> (например, после
- * правки в середине), поэтому берём самый длинный кусок текста в абзаце:
- * заменяем его, а остальные обнуляем.
- */
-function findAttachmentParagraph(xml) {
-  const paragraphs = xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) || [];
-  for (const p of paragraphs) {
-    const runs = p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
-    const joined = decodeXmlEntities(
-      runs.map((r) => r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "")).join("")
-    ).trim();
-    if (!/^Приложение/i.test(joined)) continue;
-
-    // Самый длинный <w:t> в абзаце — тот, где лежит основная фраза.
-    let longest = "";
-    for (const r of runs) {
-      const inner = r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "");
-      if (inner.length > longest.length) longest = inner;
+  let added = 0;
+  for (const expert of experts) {
+    for (const scan of expert.scans || []) {
+      const paragraph = adder.add(scan.buffer, scan.name);
+      if (!paragraph) continue;   // не картинка — молча мимо, письмо важнее
+      body += paragraph;
+      added++;
     }
-    if (!longest) continue;
-
-    const start = xml.indexOf(p);
-    // Лишние куски фразы убираем, чтобы «Приложение:» не задвоилось.
-    let cleaned = p;
-    for (const r of runs) {
-      const inner = r.replace(/<w:t[^>]*>/, "").replace("</w:t>", "");
-      if (inner !== longest) cleaned = cleaned.replace(r, r.replace(inner, ""));
-    }
-    return { start, end: start + p.length, xml: cleaned, text: longest };
   }
-  return null;
+  if (!added) return xml;
+
+  adder.flush();
+  const sectPrAt = xml.lastIndexOf("<w:sectPr");
+  return xml.slice(0, sectPrAt) + body + xml.slice(sectPrAt);
 }
+
+const FONT_RPR = '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/>';
+
+const PAGE_BREAK_PARAGRAPH = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+
+const titleParagraph = (text) =>
+  `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/><w:rPr>${FONT_RPR}<w:b/></w:rPr></w:pPr>` +
+  `<w:r><w:rPr>${FONT_RPR}<w:b/></w:rPr><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r></w:p>`;
 
 module.exports = { generateGP, extractParagraphTexts };

@@ -19,6 +19,8 @@ const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
 const expertsLib = require("./experts");
+const expertInfo = require("./expertInfo");
+const docxImages = require("./docxImages");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
@@ -817,24 +819,21 @@ app.get("/api/experts", auth.requireAuth, async (req, res) => {
 });
 
 /**
- * Завести эксперта: папка, подпапка «Приложения» и — если сведения
- * набрали текстом — готовый "Сведения.docx".
+ * Завести эксперта — только папка и подпапка «Приложения».
  *
- * Файлы (готовые сведения и сами приложения) сюда не идут: их кладёт
- * обычная загрузка /api/upload уже в созданную папку. Так не приходится
- * заводить второй способ принимать файлы со своими ограничениями
- * размера и своей проверкой прав.
+ * Сведения сюда больше не идут. Раньше их набирали прямо здесь или
+ * приносили готовым файлом, и получалось, что у одного эксперта
+ * сведения — набор абзацев, у другого — чужой файл неизвестного
+ * устройства, а сканы лежат рядом и ни с чем не связаны. Теперь
+ * сведения заводит отдельный инструмент, один для всех, и он же
+ * связывает пункт с подтверждающим документом.
  */
 app.post("/api/experts", auth.requireAuth, async (req, res) => {
   try {
     if (!requireExpertsAccess(req, res)) return;
 
-    const infoText = String(req.body?.infoText || "");
-    const infoLines = infoText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-
     const expert = await expertsLib.createExpert(filesLib.safeResolve, {
       name: req.body?.name,
-      infoLines,
     });
 
     events.log(req.user, "upload", { path: expert.path, name: expert.name });
@@ -845,6 +844,162 @@ app.post("/api/experts", auth.requireAuth, async (req, res) => {
     res.status(status).json({
       message: status === 500 ? "Не удалось завести эксперта" : err.message,
     });
+  }
+});
+
+/* ---------- Сведения об эксперте: пункты и подтверждающие сканы ----------
+
+   Раньше сведения приносили готовым файлом и просто клали в папку, а
+   сканы лежали рядом кучей. Связи «этот диплом подтверждает этот пункт»
+   не было ни на диске, ни в голове у системы — и в письмо документы
+   уходили в том порядке, в каком их когда-то назвали.
+
+   Теперь сведения — это список пунктов, у каждого свои сканы. Из них
+   собираются два файла в папке эксперта и приложение к ГП, и порядок
+   везде один и тот же. */
+
+/** Папка эксперта по имени + проверка, что она вообще есть. */
+async function expertDirOr404(name, res) {
+  let clean;
+  try {
+    clean = expertsLib.normalizeName(name);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+    return null;
+  }
+  const dir = expertsLib.expertPath(clean);
+  try {
+    const stat = await fs.promises.stat(filesLib.safeResolve(dir));
+    if (!stat.isDirectory()) throw new Error("не папка");
+  } catch {
+    res.status(404).json({ message: `Эксперта «${clean}» нет в папке экспертов` });
+    return null;
+  }
+  return { name: clean, dir };
+}
+
+app.get("/api/experts/:name/info", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    let stored = await expertInfo.read(filesLib.safeResolve, found.dir);
+    let imported = null;
+    // Пунктов ещё нет, но старый файл со сведениями лежит — показываем
+    // его текст пунктами. Ничего не сохраняем: человек сначала увидит,
+    // что подтянулось, и только его «Сохранить» это закрепит.
+    if (!stored.items.length) {
+      const legacy = await expertInfo.importLegacy(
+        filesLib.safeResolve, found.dir, found.name, gpGenerate.extractParagraphTexts);
+      if (legacy.items.length) {
+        stored = { items: legacy.items };
+        imported = legacy.from;
+      }
+    }
+
+    res.json({
+      name: found.name,
+      items: stored.items,
+      imported,
+      broken: Boolean(stored.broken),
+      scans: (await expertsLib.listAttachments(filesLib.safeResolve, found.name))
+        .map((a) => a.name),
+    });
+  } catch (err) {
+    console.error("Не удалось прочитать сведения эксперта:", err);
+    res.status(500).json({ message: "Не удалось прочитать сведения эксперта" });
+  }
+});
+
+/**
+ * Сохранить пункты и пересобрать оба файла сведений.
+ *
+ * Сканы к этому моменту уже лежат в папке «Приложения» — их кладёт
+ * отдельный запрос ниже. Здесь только порядок и привязка: так правку
+ * текста можно сохранить, даже если сеть отвалилась на середине
+ * загрузки картинок.
+ */
+app.put("/api/experts/:name/info", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = raw
+      .map((it) => ({
+        text: String(it?.text ?? "").replace(/\s+/g, " ").trim(),
+        files: (Array.isArray(it?.files) ? it.files : [])
+          .map((f) => path.basename(String(f)))
+          .filter(Boolean),
+      }))
+      .filter((it) => it.text);
+    if (!items.length) {
+      return res.status(400).json({ message: "Добавьте хотя бы один пункт сведений" });
+    }
+
+    await expertInfo.write(filesLib.safeResolve, found.dir, items);
+    const { missing } = await expertInfo.rebuildDocs(
+      filesLib.safeResolve, found.dir, found.name, items);
+
+    events.log(req.user, "upload", {
+      path: `${found.dir}/${expertInfo.infoFileName(found.name)}`,
+      name: expertInfo.infoFileName(found.name),
+    });
+    res.json({ ok: true, items, missing });
+  } catch (err) {
+    console.error("Не удалось сохранить сведения эксперта:", err);
+    res.status(500).json({ message: "Не удалось сохранить сведения эксперта" });
+  }
+});
+
+/**
+ * Скан к пункту.
+ *
+ * Принимаем только картинки — их и только их можно вшить в Word. PDF
+ * пришлось бы сначала превращать в изображения, а это отдельный
+ * инструмент на сервере, который иногда не срабатывает; молча положить
+ * в папку файл, который не попадёт ни в один документ, хуже, чем сразу
+ * сказать «сфотографируйте или сохраните картинкой».
+ */
+app.post("/api/experts/:name/scans", auth.requireAuth, upload.single("file"),
+  cleanupTempUpload, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+    if (!req.file) return res.status(400).json({ message: "Файл не получен" });
+
+    const buffer = await fs.promises.readFile(req.file.path);
+    const ext = docxImages.imageExtension(buffer);
+    if (!ext) {
+      return res.status(400).json({
+        message: "Это не картинка. Скан нужен изображением — JPG или PNG: " +
+          "только его можно вшить в документ Word.",
+      });
+    }
+
+    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const attachDirRel = `${found.dir}/${expertInfo.ATTACH_DIRNAME}`;
+    const attachDirAbs = filesLib.safeResolve(attachDirRel);
+    await fs.promises.mkdir(attachDirAbs, { recursive: true });
+
+    // Имя с таким же названием уже есть — не затираем: у эксперта вполне
+    // может быть два «Диплом.jpg» с разных курсов.
+    const base = path.basename(originalName).replace(/[\\/]/g, "-") || `Скан.${ext}`;
+    let fileName = base;
+    for (let i = 2; fs.existsSync(path.join(attachDirAbs, fileName)); i++) {
+      const dot = base.lastIndexOf(".");
+      fileName = dot > 0 ? `${base.slice(0, dot)} (${i})${base.slice(dot)}` : `${base} (${i})`;
+    }
+
+    await fs.promises.writeFile(path.join(attachDirAbs, fileName), buffer);
+    events.log(req.user, "upload", { path: `${attachDirRel}/${fileName}`, name: fileName });
+    res.status(201).json({ name: fileName });
+  } catch (err) {
+    console.error("Не удалось сохранить скан:", err);
+    res.status(500).json({ message: "Не удалось сохранить скан" });
   }
 });
 
@@ -893,17 +1048,44 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/") || p.split(/[\\/]/).includes("..")) {
         return res.status(400).json({ message: "Недопустимый путь к папке эксперта" });
       }
-      const infoAbs = filesLib.safeResolve(p + "/" + EXPERT_INFO_FILENAME);
-      let buffer;
-      try {
-        buffer = await fs.promises.readFile(infoAbs);
-      } catch (err) {
-        return res.status(400).json({ message: `Не удалось прочитать файл «${EXPERT_INFO_FILENAME}» в папке: ${p}` });
-      }
-      const descLines = gpGenerate.extractParagraphTexts(buffer);
       const name = path.basename(p); // имя папки эксперта — как он подписывается в письме
-      const attachments = await expertsLib.listAttachments(filesLib.safeResolve, name);
-      experts.push({ name, descLines, attachments });
+
+      // Сведения берём из пунктов, а не из .docx: в пунктах есть то, чего
+      // в файле нет и быть не может, — какой скан какой пункт
+      // подтверждает. Файл остаётся выгрузкой для чтения.
+      const stored = await expertInfo.read(filesLib.safeResolve, p);
+      let items = stored.items;
+      if (!items.length) {
+        // Эксперт заведён до этой правки: пунктов ещё нет, но текст
+        // лежит в старом файле. Берём его — без сканов, но письмо
+        // должно получиться.
+        const legacy = await expertInfo.importLegacy(
+          filesLib.safeResolve, p, name, gpGenerate.extractParagraphTexts);
+        items = legacy.items;
+      }
+      if (!items.length) {
+        return res.status(400).json({
+          message: `У эксперта «${name}» не заполнены сведения. Откройте «Сведения об эксперте» в папке «Эксперты».`,
+        });
+      }
+
+      // Сканы — в порядке пунктов: первым в биографии стоит диплом,
+      // значит первым подтверждением в приложении будет он же.
+      const scans = [];
+      for (const item of items) {
+        for (const fileName of item.files) {
+          try {
+            scans.push({
+              name: fileName,
+              buffer: await fs.promises.readFile(
+                filesLib.safeResolve(`${p}/${expertInfo.ATTACH_DIRNAME}/${fileName}`)),
+            });
+          } catch {
+            // Скан удалили мимо системы — письмо всё равно должно уйти.
+          }
+        }
+      }
+      experts.push({ name, descLines: items.map((i) => i.text), scans });
     }
 
     const data = {
@@ -915,61 +1097,50 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       costText: `${body.costAmount || ""} (${body.costWords || ""})`,
       termText: `${body.termDays || ""} (${body.termWords || ""})`,
       experts,
-      // В письме перечисляем ровно те документы, которые рядом с ним и
-      // лягут, — иначе перечень и содержимое папки разойдутся, и в суд
-      // уедет список того, чего в конверте нет.
-      attachments: experts.flatMap((e) => e.attachments.map((a) => a.name)),
     };
 
-    const buffer = gpGenerate.generateGP(data);
+    const built = gpGenerate.generateGP(data);
 
     const safeCaseNumber = String(body.caseNumber || "без номера").replace(/[\\/]/g, "-");
     const fileName = `ГП по делу № ${safeCaseNumber}.docx`;
+    const fileNameWithDocs = `ГП по делу № ${safeCaseNumber} с приложением.docx`;
     const destDir = filesLib.safeResolve(gpOutputDir);
     await fs.promises.mkdir(destDir, { recursive: true });
-    const destPath = path.join(destDir, fileName);
 
-    if (fs.existsSync(destPath)) {
-      return res.status(400).json({ message: "Файл с таким названием уже существует в этом проекте" });
-    }
-
-    await fs.promises.writeFile(destPath, buffer);
-    events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + fileName, name: fileName });
-
-    // ---------- Приложения выбранных экспертов ----------
-    // Кладём копии рядом с письмом, в подпапку: пакет для суда собирается
-    // целиком в одном месте, и не надо ходить по папкам экспертов.
-    // Копии, а не ссылки: справочник экспертов живёт своей жизнью, а то,
-    // что отправили в суд по конкретному делу, меняться потом не должно.
-    const copied = [];
-    const skipped = [];
-    for (const expert of experts) {
-      for (const attachment of expert.attachments) {
-        const attachDir = path.join(destDir, "Приложения");
-        try {
-          await fs.promises.mkdir(attachDir, { recursive: true });
-          const target = path.join(attachDir, attachment.name);
-          // Файл с таким именем уже есть — не перезаписываем: у двух
-          // экспертов вполне может быть «Диплом.pdf», и второй не должен
-          // молча затирать первого.
-          const finalTarget = fs.existsSync(target)
-            ? path.join(attachDir, uniqueSuffix(attachment.name, expert.name))
-            : target;
-          await fs.promises.copyFile(filesLib.safeResolve(attachment.path), finalTarget);
-          copied.push(path.basename(finalTarget));
-        } catch (err) {
-          // Одно нечитаемое приложение не должно отменять письмо: оно уже
-          // создано и лежит на месте. Говорим, что именно не доехало.
-          console.error("Не удалось приложить файл к ГП:", attachment.path, err);
-          skipped.push(attachment.name);
-        }
+    // Проверяем ОБА имени до записи: иначе при повторном создании письмо
+    // без приложений легло бы поверх прежнего, а второе упало на
+    // проверке — и в папке осталась бы пара из нового и старого.
+    for (const name of [fileName, fileNameWithDocs]) {
+      if (fs.existsSync(path.join(destDir, name))) {
+        return res.status(400).json({
+          message: `Файл «${name}» уже есть в этом проекте`,
+        });
       }
     }
+
+    await fs.promises.writeFile(path.join(destDir, fileName), built.plain);
+    events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + fileName, name: fileName });
+
+    // Второе письмо — то же самое, но со вшитыми сканами. Отдельные
+    // копии файлов рядом больше не кладём: документы теперь внутри
+    // письма, и папка с их дубликатами только сбивала бы с толку —
+    // непонятно, что из этого отправлять.
+    const written = [fileName];
+    if (built.withAttachments) {
+      await fs.promises.writeFile(path.join(destDir, fileNameWithDocs), built.withAttachments);
+      events.log(req.user, "gp_generate",
+        { path: gpOutputDir + "/" + fileNameWithDocs, name: fileNameWithDocs });
+      written.push(fileNameWithDocs);
+    }
+
+    // Ни у кого из выбранных нет сканов — честно говорим, что второго
+    // файла не будет, вместо пустого «Приложения» на отдельном листе.
+    const noScans = !built.withAttachments;
 
     res.json({
       ok: true, name: fileName, path: gpOutputDir + "/" + fileName,
       caseFolderPath: kase.folder_path,
-      attachments: copied, attachmentsFailed: skipped,
+      files: written, noScans,
     });
   } catch (err) {
     console.error("Не удалось создать ГП:", err);
@@ -1368,13 +1539,6 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUplo
     res.status(400).json({ message: "Не удалось загрузить файл: " + err.message });
   }
 });
-
-/** «Диплом.pdf» + «Иванов И.И.» → «Диплом (Иванов И.И.).pdf». */
-function uniqueSuffix(fileName, expertName) {
-  const ext = path.extname(fileName);
-  const base = path.basename(fileName, ext);
-  return `${base} (${expertName})${ext}`;
-}
 
 app.get("/api/download", auth.requireAuth, requireColumnAccess(), (req, res) => {
   try {
