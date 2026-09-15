@@ -62,7 +62,7 @@ events.get('/events', async (req, res) => {
 /** Кого можно позвать на встречу. Только имена — больше и не нужно. */
 events.get('/people', async (req, res) => {
   const { rows } = await query(
-    'SELECT id, username FROM users WHERE id <> $1 ORDER BY username',
+    `SELECT u.id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name FROM users u WHERE u.id <> $1 ORDER BY COALESCE(NULLIF(btrim(u.full_name), ''), u.username)`,
     [req.user.id]
   );
   res.json(rows);
@@ -75,7 +75,7 @@ events.get('/people', async (req, res) => {
  */
 events.get('/settings', (req, res) => {
   res.json({
-    user: { id: req.user.id, username: req.user.username, role: req.user.role },
+    user: { id: req.user.id, username: req.user.username, name: req.user.name, role: req.user.role },
     work_start: WORK_START,
     work_end: WORK_END,
     today: todayIso(),
