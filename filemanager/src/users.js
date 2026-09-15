@@ -73,10 +73,62 @@ async function createUser({ username, password, role, can_tools, can_db, can_cas
   }
 }
 
+/**
+ * Переименование: переносим имя всюду, где оно записано ТЕКСТОМ.
+ *
+ * Почти везде человек хранится номером, и переименование его не задевает.
+ * Исключение одно — cases.experts: специалисты проекта записаны строкой
+ * через запятую, именами. Не перенести имя туда значило бы не просто
+ * показать старое: сохранить такую карточку стало бы нельзя вовсе —
+ * проверка справочников сказала бы «не значится специалистом» про
+ * человека, который в списке есть.
+ *
+ * История действий (fm_events, history) НЕ трогается нарочно: там запись
+ * о том, кто что сделал в тот день, под тем именем, которое тогда было.
+ * Переписать её значило бы подделать журнал.
+ */
+async function renameInCases(client, oldName, newName) {
+  const { rows } = await client.query(
+    `SELECT id, experts FROM cases
+      WHERE deleted_at IS NULL AND experts IS NOT NULL AND experts <> ''`
+  );
+  let touched = 0;
+  for (const row of rows) {
+    const parts = String(row.experts).split(",").map((x) => x.trim()).filter(Boolean);
+    if (!parts.includes(oldName)) continue;
+    const next = parts.map((n) => (n === oldName ? newName : n)).join(", ");
+    await client.query("UPDATE cases SET experts = $1 WHERE id = $2", [next, row.id]);
+    touched++;
+  }
+  return touched;
+}
+
 async function updateUser(id, fields) {
   const userSets = [];
   const userValues = [];
   let i = 1;
+
+  // Переименование делаем отдельно и до всего остального: нужно старое
+  // имя, а после UPDATE его уже не спросишь.
+  let renamed = null;
+  if (fields.username !== undefined) {
+    const clean = String(fields.username).trim();
+    if (!clean) {
+      const err = new Error("Логин не может быть пустым");
+      err.status = 400;
+      throw err;
+    }
+    if (/\s/.test(clean)) {
+      const err = new Error("В логине не должно быть пробелов — его набирают при входе");
+      err.status = 400;
+      throw err;
+    }
+    const { rows: before } = await db.query("SELECT username FROM users WHERE id = $1", [id]);
+    if (before.length && before[0].username !== clean) {
+      renamed = { from: before[0].username, to: clean };
+    }
+    fields = { ...fields, username: clean };
+  }
 
   if (fields.username !== undefined) {
     userSets.push(`username = $${i++}`);
@@ -92,7 +144,25 @@ async function updateUser(id, fields) {
   }
   if (userSets.length) {
     userValues.push(id);
-    await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
+    if (renamed) {
+      // Имя и его следы в проектах меняем одной транзакцией: иначе
+      // сбой посередине оставил бы половину проектов ссылаться на
+      // человека, которого уже нет под таким именем.
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
+        renamed.cases = await renameInCases(client, renamed.from, renamed.to);
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
+    }
   }
 
   const PERM_FIELDS = ["can_tools", "can_db", "can_cases", "can_manage",
@@ -116,6 +186,8 @@ async function updateUser(id, fields) {
     permValues.push(id);
     await db.query(`UPDATE fm_permissions SET ${permSets.join(", ")} WHERE user_id = $${j}`, permValues);
   }
+
+  return { renamed };
 }
 
 async function deleteUser(id) {

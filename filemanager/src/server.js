@@ -345,6 +345,8 @@ app.get("/api/lookups", auth.requireAuth, async (req, res) => {
     const [lists, people] = await Promise.all([lookups.all(), lookups.people()]);
     res.json({ ...lists, ...people });
   } catch (err) {
+    const notReady = db.notMigrated(err);
+    if (notReady) return res.status(503).json({ message: notReady });
     console.error("Не удалось получить справочники:", err);
     res.status(500).json({ message: "Не удалось получить справочники: " + err.message });
   }
@@ -394,6 +396,8 @@ app.get("/api/admin/access", auth.requireAuth, auth.requireAdmin, async (req, re
       })),
     });
   } catch (err) {
+    const notReady = db.notMigrated(err);
+    if (notReady) return res.status(503).json({ message: notReady });
     console.error("Не удалось собрать доступы:", err);
     res.status(500).json({ message: "Не удалось собрать доступы: " + err.message });
   }
@@ -406,6 +410,8 @@ app.get("/api/admin/access/:userId", auth.requireAuth, auth.requireAdmin, async 
     const rules = await folderPermissions.listForUser(user.id);
     res.json({ user, rules });
   } catch (err) {
+    const notReady = db.notMigrated(err);
+    if (notReady) return res.status(503).json({ message: notReady });
     console.error("Не удалось собрать доступы сотрудника:", err);
     res.status(500).json({ message: "Не удалось собрать доступы сотрудника: " + err.message });
   }
@@ -469,12 +475,24 @@ app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => 
 
 app.patch("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    await users.updateUser(req.params.id, req.body || {});
-    res.json({ ok: true });
+    const { renamed } = await users.updateUser(req.params.id, req.body || {});
+    if (renamed) {
+      events.log(req.user, "user_rename", {
+        name: renamed.to, details: { from: renamed.from, cases: renamed.cases || 0 },
+      });
+      // Специалисты в файле журнала записаны именами. Файл
+      // пересобирается только при правке проекта, поэтому после
+      // переименования его надо пересобрать отдельно — иначе он ещё
+      // неделю показывал бы прежнее имя.
+      require("./journalExcel").regenerateJournal().catch((err) =>
+        console.error("Журнал не пересобрался после переименования:", err.message));
+    }
+    res.json({ ok: true, renamed: renamed || null });
   } catch (err) {
     if (err.code === "23505") {
       return res.status(400).json({ message: "Пользователь с таким логином уже существует" });
     }
+    if (err.status === 400) return res.status(400).json({ message: err.message });
     console.error("Не удалось обновить пользователя:", err);
     res.status(500).json({ message: "Не удалось обновить пользователя" });
   }

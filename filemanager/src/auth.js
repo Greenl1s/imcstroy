@@ -88,18 +88,25 @@ async function requireAuth(req, res, next) {
     // ("Кирилл Базаев", id 9) — разные вещи, связь проставляет админ.
     // Именно от этого id зависят фильтр "Мои задачи" и авторство всего,
     // что ИСУ пишет в Planfix.
+    // Имя и роль читаем из базы, а не из токена, хотя они там есть.
+    // Токен живёт 12 часов: без этого переименованный сотрудник ещё
+    // полдня значился бы под прежним именем — и это имя попадало бы в
+    // историю действий, совершённых уже ПОСЛЕ переименования. По той же
+    // причине берём отсюда и роль: снятые права должны действовать
+    // сразу, а не когда истечёт чужая сессия.
     const { rows: nameRows } = await db.query(
-      "SELECT planfix_name, planfix_user_id FROM users WHERE id = $1", [userId]);
+      "SELECT username, role, planfix_name, planfix_user_id FROM users WHERE id = $1", [userId]);
+    const live = nameRows[0] || {};
     req.user = {
       id: userId,
-      username: identity.username,
-      role: identity.role,
+      username: live.username || identity.username,
+      role: live.role || identity.role,
       can_tools: perms.can_tools,
       can_db: perms.can_db,
       can_cases: perms.can_cases,
       can_manage: perms.can_manage,
-      planfix_name: nameRows.length ? nameRows[0].planfix_name : null,
-      planfix_user_id: nameRows.length ? nameRows[0].planfix_user_id : null,
+      planfix_name: live.planfix_name || null,
+      planfix_user_id: live.planfix_user_id || null,
     };
     next();
   } catch (err) {

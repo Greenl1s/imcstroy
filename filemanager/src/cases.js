@@ -503,6 +503,8 @@ cases.get("/journal", async (req, res) => {
         .sort((a, b) => String(b).localeCompare(String(a))),
     });
   } catch (err) {
+    const notReady = db.notMigrated(err);
+    if (notReady) return res.status(503).json({ message: notReady });
     console.error("Не удалось получить журнал регистрации:", err);
     res.status(500).json({ message: "Не удалось получить журнал: " + err.message });
   }
