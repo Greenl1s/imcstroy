@@ -5,6 +5,10 @@ import { logEvent } from '../history.js';
 import { fetchLinkedFile } from '../fileLink.js';
 import { todayIso } from '../dates.js';
 
+// Как человека зовут. Логин остаётся делом входа — в журнале и в
+// карточках прибора людям нужно имя.
+const userName = (u) => (u && (u.name || u.username)) || '';
+
 export const instruments = Router();
 instruments.use(requireAuth);
 
@@ -480,7 +484,7 @@ instruments.post('/bulk/return', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'return', actor: req.user,
-          note: `Возвращён: ${req.user.username} (групповая операция)`
+          note: `Возвращён: ${userName(req.user)} (групповая операция)`
         });
         return row;
       });
@@ -500,7 +504,9 @@ instruments.post('/bulk/transfer', async (req, res) => {
   const targetId = Number(req.body?.to_user_id);
   if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
 
-  const { rows: target } = await query('SELECT username FROM users WHERE id = $1', [targetId]);
+  const { rows: target } = await query(
+    `SELECT COALESCE(NULLIF(btrim(full_name), ''), username) AS name FROM users WHERE id = $1`,
+    [targetId]);
   if (!target.length) return res.status(400).json({ error: 'Пользователь не найден' });
 
   const taken_where = nullify(req.body?.taken_where);
@@ -532,8 +538,8 @@ instruments.post('/bulk/transfer', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'transfer_request', actor: req.user,
-          targetName: target[0].username, place: taken_where,
-          note: `Запрошена передача: ${req.user.username} → ${target[0].username} (групповая операция), ожидает подтверждения`
+          targetName: target[0].name, place: taken_where,
+          note: `Запрошена передача: ${userName(req.user)} → ${target[0].name} (групповая операция), ожидает подтверждения`
         });
         return row;
       });
@@ -580,7 +586,7 @@ instruments.post('/bulk/accept-transfer', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'transfer_accept', actor: req.user,
-          note: `Передача подтверждена: принял ${req.user.username} (групповая операция)`
+          note: `Передача подтверждена: принял ${userName(req.user)} (групповая операция)`
         });
         return row;
       });
@@ -623,7 +629,7 @@ instruments.post('/bulk/reject-transfer', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'transfer_reject', actor: req.user,
-          note: `Передача отклонена пользователем ${req.user.username} (групповая операция)`
+          note: `Передача отклонена пользователем ${userName(req.user)} (групповая операция)`
         });
         return row;
       });
@@ -668,8 +674,8 @@ instruments.post('/bulk/issue', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'issue', actor: req.user,
-          targetName: req.user.username, place: taken_where, extra: taken_extra,
-          note: `Выдан: ${req.user.username} (групповая выдача)`
+          targetName: userName(req.user), place: taken_where, extra: taken_extra,
+          note: `Выдан: ${userName(req.user)} (групповая выдача)`
         });
         return row;
       });
@@ -714,7 +720,7 @@ instruments.post('/bulk/book', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'book', actor: req.user,
-          targetName: req.user.username, place: booked_where, extra: booked_extra,
+          targetName: userName(req.user), place: booked_where, extra: booked_extra,
           note: `Забронирован на ${booked_for} (групповое бронирование)`
         });
         return row;
@@ -838,8 +844,8 @@ instruments.post('/:id/issue', (req, res) => transition(res, {
     req.body?.taken_at || today()
   ],
   buildLog: (i) => ({
-    targetName: req.user.username, place: i.taken_where, extra: i.taken_extra,
-    note: `Выдан: ${req.user.username}`
+    targetName: userName(req.user), place: i.taken_where, extra: i.taken_extra,
+    note: `Выдан: ${userName(req.user)}`
   })
 }));
 
@@ -855,7 +861,7 @@ instruments.post('/:id/return', (req, res) => transition(res, {
          WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
          RETURNING *`,
   params: [req.params.id, req.user.id, req.user.role === 'admin'],
-  buildLog: () => ({ note: `Возвращён: ${req.user.username}` })
+  buildLog: () => ({ note: `Возвращён: ${userName(req.user)}` })
 }));
 
 /**
@@ -867,7 +873,9 @@ instruments.post('/:id/transfer', async (req, res) => {
   const targetId = Number(req.body?.to_user_id);
   if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
 
-  const { rows: target } = await query('SELECT username FROM users WHERE id = $1', [targetId]);
+  const { rows: target } = await query(
+    `SELECT COALESCE(NULLIF(btrim(full_name), ''), username) AS name FROM users WHERE id = $1`,
+    [targetId]);
   if (!target.length) return res.status(400).json({ error: 'Пользователь не найден' });
 
   return transition(res, {
@@ -884,8 +892,8 @@ instruments.post('/:id/transfer', async (req, res) => {
       nullify(req.body?.taken_where), nullify(req.body?.taken_extra)
     ],
     buildLog: () => ({
-      targetName: target[0].username,
-      note: `Запрошена передача: ${req.user.username} → ${target[0].username}, ожидает подтверждения`
+      targetName: target[0].name,
+      note: `Запрошена передача: ${userName(req.user)} → ${target[0].name}, ожидает подтверждения`
     })
   });
 });
@@ -905,7 +913,7 @@ instruments.post('/:id/accept-transfer', (req, res) => transition(res, {
          WHERE id = $1 AND pending_transfer_to = $2
          RETURNING *`,
   params: [req.params.id, req.user.id, today()],
-  buildLog: () => ({ note: `Передача подтверждена: принял ${req.user.username}` })
+  buildLog: () => ({ note: `Передача подтверждена: принял ${userName(req.user)}` })
 }));
 
 /** Получатель отклоняет — прибор остаётся у прежнего держателя. */
@@ -919,7 +927,7 @@ instruments.post('/:id/reject-transfer', (req, res) => transition(res, {
          WHERE id = $1 AND pending_transfer_to = $2
          RETURNING *`,
   params: [req.params.id, req.user.id],
-  buildLog: () => ({ note: `Передача отклонена пользователем ${req.user.username}` })
+  buildLog: () => ({ note: `Передача отклонена пользователем ${userName(req.user)}` })
 }));
 
 instruments.post('/:id/book', (req, res) => transition(res, {
@@ -936,7 +944,7 @@ instruments.post('/:id/book', (req, res) => transition(res, {
     req.body?.booked_for || today(), nullify(req.body?.booked_extra), nullify(req.body?.booked_where)
   ],
   buildLog: (i) => ({
-    targetName: req.user.username, place: i.booked_where, extra: i.booked_extra,
+    targetName: userName(req.user), place: i.booked_where, extra: i.booked_extra,
     note: `Забронирован на ${i.booked_for}`
   })
 }));

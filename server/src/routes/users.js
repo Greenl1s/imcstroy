@@ -12,7 +12,7 @@ users.use(requireAuth);
  */
 users.get('/', async (req, res) => {
   const { rows } = await query(
-    'SELECT id, username, role, extra FROM users ORDER BY lower(username)'
+    `SELECT id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, role, extra FROM users ORDER BY lower(COALESCE(NULLIF(btrim(full_name), ''), username))`
   );
   res.json(rows);
 });
@@ -29,7 +29,7 @@ users.post('/', requireAdmin, async (req, res) => {
   try {
     const { rows } = await query(
       `INSERT INTO users (username, password_hash, role, extra)
-       VALUES ($1, $2, $3, $4) RETURNING id, username, role, extra`,
+       VALUES ($1, $2, $3, $4) RETURNING id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, role, extra`,
       [username, await hashPassword(password), role, extra]
     );
     res.status(201).json(rows[0]);
@@ -87,7 +87,8 @@ users.patch('/:id', requireAdmin, async (req, res) => {
 
   try {
     const { rows } = await query(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = $1 RETURNING id, username, role, extra`,
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $1
+         RETURNING id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, role, extra`,
       params
     );
     res.json(rows[0]);

@@ -25,7 +25,8 @@ auth.post('/login', loginLimit, async (req, res) => {
   }
 
   const { rows } = await query(
-    'SELECT id, username, password_hash, role, extra FROM users WHERE lower(username) = lower($1)',
+    `SELECT id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, password_hash, role, extra
+       FROM users WHERE lower(username) = lower($1)`,
     [username]
   );
   const user = rows[0];
@@ -44,7 +45,7 @@ auth.post('/login', loginLimit, async (req, res) => {
 
   res.json({
     token,
-    user: { id: user.id, username: user.username, role: user.role, extra: user.extra }
+    user: { id: user.id, username: user.username, name: user.name, role: user.role, extra: user.extra }
   });
 });
 
@@ -96,7 +97,8 @@ auth.patch('/me', requireAuth, async (req, res) => {
   if (!fields.length) return res.json(req.user);
 
   const { rows } = await query(
-    `UPDATE users SET ${fields.join(', ')} WHERE id = $1 RETURNING id, username, role, extra`,
+    `UPDATE users SET ${fields.join(', ')} WHERE id = $1
+     RETURNING id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, role, extra`,
     params
   );
   res.json(rows[0]);
