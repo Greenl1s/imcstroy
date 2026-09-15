@@ -29,7 +29,7 @@ async function busyIntervals(dateIso, userIds, ignoreIds = []) {
          JOIN cal_event_guests g ON g.event_id = e.id
         WHERE e.event_date = $1 AND e.start_min IS NOT NULL
      )
-     SELECT m.id, m.start_min, m.end_min, m.user_id, u.username
+     SELECT m.id, m.start_min, m.end_min, m.user_id, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name
        FROM mine m
        JOIN users u ON u.id = m.user_id
       WHERE m.user_id = ANY($2::bigint[])
@@ -94,7 +94,7 @@ export async function checkBusy({ dateIso, start, end, userIds, ignoreIds = [] }
   const intervals = await busyIntervals(dateIso, ids, ignoreIds);
   const conflicts = intervals
     .filter((i) => overlaps({ start, end }, i))
-    .map((i) => ({ user_id: i.user_id, username: i.username, start_min: i.start_min, end_min: i.end_min }));
+    .map((i) => ({ user_id: i.user_id, name: i.name, start_min: i.start_min, end_min: i.end_min }));
 
   if (!conflicts.length) return { free: true, conflicts: [], suggestions: [] };
 

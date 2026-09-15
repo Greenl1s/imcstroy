@@ -29,7 +29,7 @@ export async function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, SECRET);
-    const { rows } = await query('SELECT id, username, role FROM users WHERE id = $1', [payload.sub]);
+    const { rows } = await query(`SELECT u.id, u.username, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name, u.role FROM users u WHERE u.id = $1`, [payload.sub]);
     if (!rows.length) return res.status(401).json({ error: 'Пользователь не найден' });
     req.user = rows[0];
     next();
