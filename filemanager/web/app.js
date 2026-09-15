@@ -474,8 +474,8 @@ function initialsFor(name) {
 
 function renderProfileCard() {
   const p = currentUser || {};
-  els.profileInitials.textContent = initialsFor(p.username);
-  els.profileName.textContent = p.username || "—";
+  els.profileInitials.textContent = initialsFor(p.name || p.username);
+  els.profileName.textContent = p.name || p.username || "—";
   els.profileRole.textContent = p.role === "admin" ? "Администратор" : "Сотрудник";
 }
 
@@ -1444,7 +1444,7 @@ els.profileBtn.addEventListener("click", () => {
     showSection("settings", true);
     return;
   }
-  alert(`Пользователь: ${currentUser?.username || "—"}\nРоль: сотрудник`);
+  alert(`Пользователь: ${currentUser?.name || currentUser?.username || "—"}\nРоль: сотрудник`);
 });
 
 /* ---------- Доступ к папкам/файлам в "Дела" (только для админа) ---------- */
@@ -1465,7 +1465,7 @@ async function loadFolderPermUsersList() {
     const { users } = await apiFetch("/api/users");
     folderPermUsersCache = users;
     els.folderPermUserSelect.innerHTML = users
-      .map((u) => `<option value="${u.id}">${escapeHtml(u.username)}</option>`)
+      .map((u) => `<option value="${u.id}">${escapeHtml(u.name)}</option>`)
       .join("");
   } catch (err) {
     els.folderPermUserSelect.innerHTML = "";
@@ -1495,12 +1495,12 @@ function renderFolderPermRules(list) {
     const row = document.createElement("div");
     row.className = "user-row";
     row.innerHTML = `
-      <span class="user-name">${escapeHtml(perm.username)}</span>
+      <span class="user-name">${escapeHtml(perm.name)}</span>
       <span class="role-badge">${escapeHtml(FOLDER_ACCESS_LABEL[perm.access] || perm.access)}</span>
       <button class="delete-btn" title="Убрать правило" aria-label="Убрать правило">${svgTrash}</button>
     `;
     row.querySelector(".delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Убрать это правило доступа для «${perm.username}»?`)) return;
+      if (!confirm(`Убрать это правило доступа для «${perm.name}»?`)) return;
       try {
         await apiFetch(`/api/folder-permissions/${perm.id}`, { method: "DELETE" });
         loadFolderPermRules();
@@ -1916,10 +1916,15 @@ const SECTION_RIGHTS = [
 
    Это не право, а роль в проектах: человек может иметь полный доступ к
    «Делам» и при этом не значиться ни руководителем проектов, ни
-   специалистом. Поэтому отдельной группой, а не рядом с разделами. */
+   специалистом.
+
+   Живут эти две галочки на вкладке «Справочники», в общей таблице, а не
+   в карточке каждого человека. Причина простая: решение это не про
+   одного, а про всех сразу — «кто у нас вообще руководители». В карточке
+   пришлось бы обойти шестерых, чтобы просто увидеть список. */
 const JOURNAL_ROLES = [
-  ["can_be_manager", "Может быть руководителем проекта", "Попадает в список «Руководитель» в журнале и в карточке проекта"],
-  ["can_be_expert", "Может быть специалистом / экспертом", "Попадает в список «Специалисты / Эксперты»"],
+  ["can_be_manager", "Руководитель проекта"],
+  ["can_be_expert", "Специалист / эксперт"],
 ];
 
 const ACCESS_LABEL = { read: "Только смотреть", write: "Смотреть и менять", none: "Закрыто" };
@@ -2006,7 +2011,7 @@ async function reloadPeople() {
 function drawPeopleList() {
   document.getElementById("accessPeople").innerHTML = peopleCache.map((u) => `
     <button type="button" class="access-person" data-person="${u.id}">
-      <span class="access-person-name">${escapeHtml(u.username)}</span>
+      <span class="access-person-name">${escapeHtml(u.name)}</span>
       <span class="access-person-sub">${u.role === "admin"
         ? "администратор — видит всё"
         : sectionSummary(u) + (u.folder_rules ? ` · папок: ${u.folder_rules}` : "")}</span>
@@ -2040,7 +2045,7 @@ async function showPersonDetail(userId) {
 
   box.innerHTML = `
     <div class="access-head">
-      <h2 class="access-title">${escapeHtml(user.username)}</h2>
+      <h2 class="access-title">${escapeHtml(user.name)}</h2>
       <label class="settings-inline">Роль
         <select data-role ${isMe ? "disabled" : ""}>
           <option value="employee"${!isAdmin ? " selected" : ""}>Сотрудник</option>
@@ -2057,15 +2062,6 @@ async function showPersonDetail(userId) {
         <label class="access-right">
           <input type="checkbox" data-right="${key}" ${user[key] ? "checked" : ""} ${isAdmin ? "disabled" : ""}>
           <span><b>${label}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
-        </label>`).join("")}
-    </div>
-
-    <h3 class="access-sub">В журнале регистрации</h3>
-    <div class="access-rights">
-      ${JOURNAL_ROLES.map(([key, label, hint]) => `
-        <label class="access-right">
-          <input type="checkbox" data-right="${key}" ${user[key] ? "checked" : ""}>
-          <span><b>${escapeHtml(label)}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
         </label>`).join("")}
     </div>
 
@@ -2093,15 +2089,23 @@ async function showPersonDetail(userId) {
            что открыто всем. Правила заводятся в самой папке: «Дела» → «…» у строки →
            «Доступ к папке».</p>`}
 
+    <h3 class="access-sub">Имя</h3>
+    <div class="settings-row">
+      <input type="text" data-new-name value="${escapeHtml(user.name)}" autocomplete="off">
+      <button type="button" class="upload-btn" data-set-name>Сменить имя</button>
+    </div>
+    <p class="access-note">Так человека зовут: это имя видят все и везде — в журнале
+    регистрации, в задачах, в «Учёте оборудования». Имена не должны повторяться: в
+    проектах специалисты записаны именами, и двух одинаковых там не различить.</p>
+
     <h3 class="access-sub">Логин и пароль</h3>
     <div class="settings-row">
       <input type="text" data-new-login value="${escapeHtml(user.username)}" autocomplete="off" spellcheck="false">
       <button type="button" class="upload-btn" data-set-login>Сменить логин</button>
     </div>
-    <p class="access-note">Логин — то, что человек набирает при входе, один на все три
-    системы. После смены входить надо новым: предупредите его. Всё, что он делал раньше,
-    в истории остаётся под прежним именем — это запись о том, что было, а не справка о том,
-    как его зовут сейчас.</p>
+    <p class="access-note">Логин человек набирает при входе, один на все три системы.
+    Больше он нигде не показывается — знаете его только вы и сам хозяин учётной записи.
+    После смены входить надо новым: предупредите его.</p>
     <div class="settings-row">
       <input type="text" data-new-password placeholder="Новый пароль" autocomplete="off">
       <button type="button" class="upload-btn" data-set-password>Сменить пароль</button>
@@ -2184,6 +2188,36 @@ function wirePersonDetail(box, user, isAdmin, isMe) {
     });
   });
 
+  const nameBtn = box.querySelector("[data-set-name]");
+  if (nameBtn) {
+    nameBtn.addEventListener("click", async () => {
+      const field = box.querySelector("[data-new-name]");
+      const full_name = field.value.trim();
+      if (!full_name) return showToast("Имя не может быть пустым");
+      if (full_name === user.name) return showToast("Имя то же самое — менять нечего");
+      try {
+        const res = await apiFetch(`/api/users/${user.id}`, {
+          method: "PATCH", body: JSON.stringify({ full_name }),
+        });
+        // В проектах специалисты записаны именами, и их пришлось
+        // переписать. Говорим, сколько: человек должен видеть, что
+        // правка задела не только эту карточку.
+        const fixed = res && res.renamed ? res.renamed.cases : 0;
+        showToast(fixed ? `Имя изменено, поправлено проектов: ${fixed}` : "Имя изменено");
+        if (currentUser && currentUser.id === user.id) {
+          currentUser.name = full_name;
+          renderProfileCard();
+        }
+        forgetLookups();
+        accessUserId = user.id;
+        await reloadPeople();
+      } catch (err) {
+        field.value = user.name;
+        settingsError(err);
+      }
+    });
+  }
+
   const loginBtn = box.querySelector("[data-set-login]");
   if (loginBtn) {
     loginBtn.addEventListener("click", async () => {
@@ -2194,18 +2228,11 @@ function wirePersonDetail(box, user, isAdmin, isMe) {
       if (!confirm(`Сменить логин «${user.username}» на «${username}»?\n\n` +
         "Входить он будет уже новым. Скажите ему об этом.")) return;
       try {
-        const res = await apiFetch(`/api/users/${user.id}`, {
+        await apiFetch(`/api/users/${user.id}`, {
           method: "PATCH", body: JSON.stringify({ username }),
         });
-        const fixed = res && res.renamed ? res.renamed.cases : 0;
-        showToast(fixed
-          ? `Логин изменён, поправлено проектов: ${fixed}`
-          : "Логин изменён");
-        // Себя переименовали — имя в панели должно смениться сразу.
-        if (currentUser && currentUser.id === user.id) {
-          currentUser.username = username;
-          renderProfileCard();
-        }
+        showToast("Логин изменён");
+        if (currentUser && currentUser.id === user.id) currentUser.username = username;
         accessUserId = user.id;
         await reloadPeople();
       } catch (err) {
@@ -2236,7 +2263,7 @@ function wirePersonDetail(box, user, isAdmin, isMe) {
   const delBtn = box.querySelector("[data-delete-person]");
   if (delBtn) {
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Удалить сотрудника «${user.username}»? Это необратимо.`)) return;
+      if (!confirm(`Удалить сотрудника «${user.name}»? Это необратимо.`)) return;
       try {
         await apiFetch(`/api/users/${user.id}`, { method: "DELETE" });
         showToast("Сотрудник удалён");
@@ -2258,8 +2285,14 @@ function renderAddPersonForm() {
     человек войдёт и в ИСУ, и в «Учёт оборудования», и в «Календарь».</p>
     <form class="settings-form" id="addPersonForm">
       <label class="settings-field">
+        <span class="settings-label">Имя</span>
+        <input name="full_name" autocomplete="off" required>
+        <span class="settings-hint">Как человека зовут. Это имя увидят все.</span>
+      </label>
+      <label class="settings-field">
         <span class="settings-label">Логин</span>
         <input name="username" autocomplete="off" required>
+        <span class="settings-hint">Что он набирает при входе. Больше нигде не показывается.</span>
       </label>
       <label class="settings-field">
         <span class="settings-label">Пароль</span>
@@ -2284,16 +2317,6 @@ function renderAddPersonForm() {
             </label>`).join("")}
         </div>
       </div>
-      <div>
-        <span class="settings-label">В журнале регистрации</span>
-        <div class="access-rights" style="margin-top:8px;">
-          ${JOURNAL_ROLES.map(([key, label, hint]) => `
-            <label class="access-right">
-              <input type="checkbox" name="${key}" checked>
-              <span><b>${escapeHtml(label)}</b><br><span class="access-hint">${escapeHtml(hint)}</span></span>
-            </label>`).join("")}
-        </div>
-      </div>
       <div class="settings-actions">
         <button class="primary" type="submit">Создать</button>
         <button class="upload-btn" type="button" id="addPersonCancel">Отмена</button>
@@ -2311,20 +2334,20 @@ function renderAddPersonForm() {
     e.preventDefault();
     const form = e.target;
     const username = form.username.value.trim();
+    const full_name = form.full_name.value.trim();
     const password = form.password.value;
+    if (!full_name) return showToast("Укажите имя");
     if (!username) return showToast("Укажите логин");
     if (password.length < 8) return showToast("Пароль короче восьми знаков — так нельзя");
     try {
       const created = await apiFetch("/api/users", {
         method: "POST",
         body: JSON.stringify({
-          username, password, role: form.role.value,
+          username, full_name, password, role: form.role.value,
           can_tools: form.can_tools.checked,
           can_db: form.can_db.checked,
           can_cases: form.can_cases.checked,
           can_manage: form.can_manage.checked,
-          can_be_manager: form.can_be_manager.checked,
-          can_be_expert: form.can_be_expert.checked,
         }),
       });
       showToast("Сотрудник заведён");
@@ -2350,9 +2373,12 @@ function renderAddPersonForm() {
    группу он уходит в Planfix и какие задачи ставятся по стадиям. Тип,
    заведённый в справочнике, система просто не знала бы, как обслужить.
 
-   Руководителей и специалистов здесь тоже нет: это свойство человека, и
-   правится оно там, где живёт человек, — во вкладке «Сотрудники». Здесь
-   только видно, кто в списках сейчас. */
+   Руководители и специалисты — четвёртым списком, только устроенным
+   иначе: людей не заводят, они уже есть, отмечают лишь, кто в каком
+   списке участвует. Держим их здесь, рядом с остальными списками
+   журнала, а не в карточке каждого: «кто у нас руководители» — вопрос
+   про всех разом, и отвечать на него, обходя карточки по одной, значит
+   не иметь ответа вовсе. */
 
 const LOOKUP_LISTS = [
   {
@@ -2411,18 +2437,47 @@ async function renderListsTab() {
 
     <section class="settings-card" style="margin-top:20px;">
       <h2 class="access-title">Руководители и специалисты</h2>
-      <p class="access-note">Кто сейчас попадает в выпадающие списки журнала. Меняется
-      во вкладке «Сотрудники»: это свойство человека, и правится оно там, где человек.</p>
-      <table class="access-rules">
-        <thead><tr><th>Сотрудник</th><th>Руководитель проекта</th><th>Специалист / эксперт</th></tr></thead>
+      <p class="access-note">Кто попадает в выпадающие списки журнала. Отметьте галочкой —
+      сохраняется сразу, отдельной кнопки нет. Снятая галочка убирает человека из списка,
+      но там, где он уже записан, он остаётся: проекты задним числом не переписываются.</p>
+      <table class="access-rules roles-table">
+        <thead><tr><th>Сотрудник</th>${JOURNAL_ROLES.map(([, label]) =>
+          `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
         <tbody>${(people.users || []).map((u) => `
           <tr>
-            <td class="access-path">${escapeHtml(u.username)}</td>
-            <td>${u.can_be_manager ? "да" : "—"}</td>
-            <td>${u.can_be_expert ? "да" : "—"}</td>
+            <td class="access-path">${escapeHtml(u.name)}</td>
+            ${JOURNAL_ROLES.map(([key, label]) => `
+              <td class="roles-cell">
+                <label class="roles-box">
+                  <input type="checkbox" data-journal-role="${key}" data-user="${u.id}"
+                         ${u[key] ? "checked" : ""}
+                         aria-label="${escapeHtml(u.name)} — ${escapeHtml(label)}">
+                  <span></span>
+                </label>
+              </td>`).join("")}
           </tr>`).join("")}</tbody>
       </table>
     </section>`;
+
+  // Галочки сохраняем поштучно: человек отмечает одного, а не заполняет
+  // всю таблицу и жмёт «Сохранить». Сорвалось — галочку возвращаем на
+  // место, чтобы на экране не осталось то, чего нет в базе.
+  settingsPane().querySelectorAll("[data-journal-role]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const { journalRole: key, user: userId } = input.dataset;
+      try {
+        await apiFetch(`/api/users/${userId}`, {
+          method: "PATCH", body: JSON.stringify({ [key]: input.checked }),
+        });
+        // Журнал держит списки в памяти — иначе снятый человек остался
+        // бы в выпадающем списке до перезагрузки страницы.
+        forgetLookups();
+      } catch (err) {
+        input.checked = !input.checked;
+        settingsError(err);
+      }
+    });
+  });
 
   settingsPane().querySelectorAll("[data-add]").forEach((form) => {
     form.addEventListener("submit", async (e) => {
@@ -4374,7 +4429,7 @@ function renderBindings(data) {
       <tbody>${(data.bindings || []).map((b) => `
         <tr data-user="${b.id}">
           <td>
-            <span class="task-title">${escapeHtml(b.username)}</span>
+            <span class="task-title">${escapeHtml(b.name)}</span>
             ${b.role === "admin" ? '<span class="task-project-type">администратор</span>' : ""}
           </td>
           <td>
@@ -4811,7 +4866,7 @@ function fillExpertsBox(boxId, hiddenId, current, people) {
   const box = document.getElementById(boxId);
   const hidden = document.getElementById(hiddenId);
   const chosen = new Set(String(current || "").split(",").map((x) => x.trim()).filter(Boolean));
-  const known = (people || []).map((p) => p.username);
+  const known = (people || []).map((p) => p.name);
   const strangers = [...chosen].filter((n) => !known.includes(n));
 
   box.innerHTML = (known.length || strangers.length)
@@ -5007,7 +5062,7 @@ async function openProjectForm() {
   fillFromLookup(document.getElementById("pfYear"), lists.years, "", "Не выбран");
   // Руководителем может стать не всякий, а кто отмечен в настройках.
   fillSelect(document.getElementById("pfManager"),
-    (lists.managers || []).map((u) => ({ value: u.id, label: u.username })), "", "Не выбран");
+    (lists.managers || []).map((u) => ({ value: u.id, label: u.name })), "", "Не выбран");
 
   els.projectFormOverlay.classList.remove("hidden");
 }
@@ -5095,7 +5150,7 @@ async function openCaseEdit(project) {
     project.expertise_type, "Не выбран");
   fillFromLookup(document.getElementById("ceYear"), lists.years, project.year, "Не выбран");
   fillSelect(document.getElementById("ceManager"),
-    (lists.managers || []).map((u) => ({ value: u.id, label: u.username })),
+    (lists.managers || []).map((u) => ({ value: u.id, label: u.name })),
     project.manager_id, "Не выбран");
   fillExpertsBox("ceExpertsBox", "ceExperts", project.experts, lists.experts);
 }
@@ -5472,7 +5527,7 @@ function fillJournalOptions() {
   fill("jrOrg", journalData.organizations || []);
   fill("jrExpType", journalData.expertise_types || []);
   fill("jrYear", journalData.years || []);
-  fill("jrManager", (journalData.managers || []).map((m) => ({ value: m.id, label: m.username })));
+  fill("jrManager", (journalData.managers || []).map((m) => ({ value: m.id, label: m.name })));
 }
 
 function journalFiltered() {
@@ -5738,7 +5793,7 @@ function journalEditOptions(kind, row) {
   }
   if (kind === "manager") {
     return `<option value="">не назначен</option>` + (journalData.managers || [])
-      .map((m) => `<option value="${m.id}"${String(row.manager_id || "") === String(m.id) ? " selected" : ""}>${escapeHtml(m.username)}</option>`)
+      .map((m) => `<option value="${m.id}"${String(row.manager_id || "") === String(m.id) ? " selected" : ""}>${escapeHtml(m.name)}</option>`)
       .join("");
   }
   if (kind.startsWith("list:")) {
@@ -5771,10 +5826,10 @@ function openExpertsPicker(row, cell) {
   const people = journalData.experts || [];
   // Кто записан, но специалистом больше не значится, — показываем, а не
   // выбрасываем: сначала человек должен увидеть, что снимает.
-  const strangers = [...chosen].filter((name) => !people.some((p) => p.username === name));
+  const strangers = [...chosen].filter((name) => !people.some((p) => p.name === name));
 
   box.innerHTML = (people.length || strangers.length)
-    ? [...people.map((p) => [p.username, chosen.has(p.username), ""]),
+    ? [...people.map((p) => [p.name, chosen.has(p.name), ""]),
        ...strangers.map((n) => [n, true, " — не значится специалистом"])]
         .map(([name, on, note]) => `
           <label class="picker-item">
@@ -5865,7 +5920,7 @@ async function commitJournalEdit(rawValue) {
     Object.assign(row, saved);
     if (key === "manager_id") {
       const manager = (journalData.managers || []).find((m) => String(m.id) === value);
-      row.manager_name = manager ? manager.username : null;
+      row.manager_name = manager ? manager.name : null;
     }
     const column = JOURNAL_COLUMNS.find((c) => c.key === key);
     const shown = journalValue(row, key);

@@ -2524,6 +2524,19 @@ a.upload-btn { text-decoration: none; }
 .access-path { color: var(--text-primary); font-weight: 500; }
 .access-rules select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); font: inherit; font-size: var(--fs-body); }
 
+/* Галочки «кто в списках журнала». Квадратик крупнее обычного и с
+   заметной областью нажатия: по нему целятся мышью в таблице, где
+   строки идут вплотную, и промах стоил бы чужой отметки. */
+.roles-table th:not(:first-child),
+.roles-table .roles-cell { text-align: center; width: 190px; }
+.roles-table .roles-cell { vertical-align: middle; }
+.roles-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; cursor: pointer; border-radius: 8px;
+}
+.roles-box:hover { background: var(--hover-bg, rgba(0, 0, 0, .04)); }
+.roles-box input { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: var(--accent); }
+
 .link-btn {
   border: none; background: none; padding: 0; cursor: pointer;
   font: inherit; font-size: var(--fs-body); color: var(--danger);
