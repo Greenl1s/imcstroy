@@ -13,7 +13,10 @@ export function logEvent(client, { instrument, action, actor, targetName = null,
       instrument.name,
       action,
       actor.id,
-      actor.username,
+      // Имя, а не логин: журнал читают люди. Имя сохраняется копией на
+      // момент события — потом его могут сменить, но запись о том, что
+      // было, должна остаться такой, какой была.
+      actor.name || actor.username,
       targetName,
       place,
       extra,

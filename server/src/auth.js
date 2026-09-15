@@ -64,7 +64,7 @@ export async function requireAuth(req, res, next) {
     // Сверяемся с базой: вдруг пользователя удалили или понизили в правах,
     // пока его старый токен ещё жив.
     const { rows } = await query(
-      'SELECT id, username, role, extra FROM users WHERE id = $1',
+      `SELECT id, username, COALESCE(NULLIF(btrim(full_name), ''), username) AS name, role, extra FROM users WHERE id = $1`,
       [payload.sub]
     );
     if (!rows.length) return res.status(401).json({ error: 'Пользователь не найден' });
