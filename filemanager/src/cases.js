@@ -134,7 +134,7 @@ function validateName(type, name) {
 // Удалённые проекты (папку убрали в корзину) в списках не показываем:
 // запись остаётся в базе ради истории, но выбирать её больше нельзя.
 const CASE_LIST_QUERY = `
-  SELECT c.*, u.username AS manager_name
+  SELECT c.*, ${db.nameSql("u")} AS manager_name
   FROM cases c
   LEFT JOIN users u ON u.id = c.manager_id
   WHERE c.deleted_at IS NULL
@@ -452,7 +452,7 @@ async function visibleForUser(user, rows) {
 
 async function journalRows(user) {
   const { rows } = await db.query(
-    `SELECT ${JOURNAL_FIELDS}, u.username AS manager_name
+    `SELECT ${JOURNAL_FIELDS}, ${db.nameSql("u")} AS manager_name
        FROM cases c
        LEFT JOIN users u ON u.id = c.manager_id
       WHERE c.deleted_at IS NULL
@@ -1355,16 +1355,16 @@ async function checkLookupFields(body, existing = null) {
   if (body.manager_id !== undefined && String(body.manager_id || "").trim()
       && !unchanged("manager_id")) {
     if (!managers.some((m) => String(m.id) === String(body.manager_id))) {
-      return "Этот сотрудник не значится руководителем проектов. Отметьте его в «Настройки → Сотрудники».";
+      return "Этот сотрудник не значится руководителем проектов. Отметьте его в «Настройки → Справочники → Руководители и специалисты».";
     }
   }
   if (body.experts !== undefined && String(body.experts || "").trim()
       && !unchanged("experts")) {
-    const allowed = new Set(experts.map((e) => e.username));
+    const allowed = new Set(experts.map((e) => e.name));
     const unknown = String(body.experts).split(",").map((x) => x.trim()).filter(Boolean)
       .filter((name) => !allowed.has(name));
     if (unknown.length) {
-      return `Не значатся специалистами: ${unknown.join(", ")}. Отметьте их в «Настройки → Сотрудники».`;
+      return `Не значатся специалистами: ${unknown.join(", ")}. Отметьте их в «Настройки → Справочники → Руководители и специалисты».`;
     }
   }
   return null;
@@ -1996,7 +1996,7 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
         [kase.id]
       ),
       db.query(
-        `SELECT h.id, h.action, h.note, h.created_at, u.username AS actor_name
+        `SELECT h.id, h.action, h.note, h.created_at, ${db.nameSql("u")} AS actor_name
            FROM case_history h
            LEFT JOIN users u ON u.id = h.actor_id
           WHERE h.case_id = $1
@@ -2004,7 +2004,7 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
           LIMIT 20`,
         [kase.id]
       ),
-      db.query("SELECT username FROM users WHERE id = $1", [kase.manager_id || 0]),
+      db.query(`SELECT ${db.nameSql("u")} AS name FROM users u WHERE u.id = $1`, [kase.manager_id || 0]),
     ]);
 
     const me = req.user.planfix_user_id || null;
@@ -2021,7 +2021,7 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
     res.json({
       project: {
         ...courtCase.decorateCase(kase),
-        manager_name: manager.rows.length ? manager.rows[0].username : null,
+        manager_name: manager.rows.length ? manager.rows[0].name : null,
         // Ссылка на карточку проекта в самом Planfix. Собирается из
         // PLANFIX_BASE_URL на сервере, чтобы адрес аккаунта не был вшит
         // в интерфейс и следовал настройке.
@@ -2052,7 +2052,7 @@ cases.get("/:id(\\d+)/card", loadCase, async (req, res) => {
 /** История проекта — читаемая версия case_history. */
 cases.get("/:id/history", loadCase, async (req, res) => {
   const { rows } = await db.query(
-    `SELECT h.*, u.username AS actor_name
+    `SELECT h.*, ${db.nameSql("u")} AS actor_name
        FROM case_history h
        LEFT JOIN users u ON u.id = h.actor_id
       WHERE h.case_id = $1

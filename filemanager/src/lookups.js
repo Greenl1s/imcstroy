@@ -141,16 +141,20 @@ async function has(kind, rawValue) {
  */
 async function people() {
   const { rows } = await db.query(
-    `SELECT u.id, u.username,
+    `SELECT u.id, ${db.nameSql("u")} AS name,
             COALESCE(p.can_be_manager, true) AS can_be_manager,
             COALESCE(p.can_be_expert, true)  AS can_be_expert
        FROM users u
        LEFT JOIN fm_permissions p ON p.user_id = u.id
-      ORDER BY u.username ASC`
+      ORDER BY ${db.nameSql("u")} ASC`
   );
+  // Отдаём ИМЯ, а не логин: логин набирают при входе, и выставлять его
+  // в списках журнала незачем. Именно это имя и записано в проектах
+  // текстом в столбце «Специалисты / Эксперты».
+  const shown = (r) => ({ id: r.id, name: r.name });
   return {
-    managers: rows.filter((r) => r.can_be_manager).map((r) => ({ id: r.id, username: r.username })),
-    experts: rows.filter((r) => r.can_be_expert).map((r) => ({ id: r.id, username: r.username })),
+    managers: rows.filter((r) => r.can_be_manager).map(shown),
+    experts: rows.filter((r) => r.can_be_expert).map(shown),
   };
 }
 

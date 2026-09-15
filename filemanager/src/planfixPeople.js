@@ -108,17 +108,17 @@ async function peopleSyncedAt() {
  */
 async function listBindings() {
   const { rows } = await db.query(
-    `SELECT u.id, u.username, u.role,
+    `SELECT u.id, ${db.nameSql("u")} AS name, u.role,
             u.planfix_user_id, u.planfix_bound_at,
             p.name  AS planfix_name,
             p.email AS planfix_email,
             p.is_active AS planfix_active,
-            b.username AS bound_by_name,
+            ${db.nameSql("b")} AS bound_by_name,
             u.planfix_name AS legacy_name
        FROM users u
        LEFT JOIN planfix_people p ON p.id = u.planfix_user_id
        LEFT JOIN users b ON b.id = u.planfix_bound_by
-      ORDER BY (u.planfix_user_id IS NOT NULL), lower(u.username)`
+      ORDER BY (u.planfix_user_id IS NOT NULL), lower(${db.nameSql("u")})`
   );
   return rows;
 }
@@ -150,10 +150,11 @@ async function setBinding(userId, planfixUserId, actorId) {
   }
 
   const { rows: taken } = await db.query(
-    "SELECT username FROM users WHERE planfix_user_id = $1 AND id <> $2", [target, userId]);
+    `SELECT ${db.nameSql("u")} AS name FROM users u
+      WHERE u.planfix_user_id = $1 AND u.id <> $2`, [target, userId]);
   if (taken.length) {
     throw new Error(
-      `Сотрудник «${people[0].name}» уже привязан к пользователю «${taken[0].username}». ` +
+      `Сотрудник «${people[0].name}» уже привязан к пользователю «${taken[0].name}». ` +
       "Сначала снимите ту привязку."
     );
   }
@@ -175,7 +176,7 @@ async function setBinding(userId, planfixUserId, actorId) {
 function actorOf(user) {
   const id = toNumericId(user?.planfix_user_id);
   if (!id) return null;
-  return { id, name: user.planfix_name || user.username };
+  return { id, name: user.planfix_name || user.name };
 }
 
 /**

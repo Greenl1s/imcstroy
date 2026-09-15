@@ -185,6 +185,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       user: {
         username: user.username,
+        name: user.name || user.username,
         role: user.role,
         can_tools: perms.can_tools,
         can_db: perms.can_db,
@@ -207,6 +208,7 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
   res.json({
     user: {
       username: req.user.username,
+      name: req.user.name,
       role: req.user.role,
       can_tools: req.user.can_tools,
       can_db: req.user.can_db,
@@ -454,13 +456,13 @@ app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
 
 app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    const { username, password, role, can_tools, can_db, can_cases, can_manage,
+    const { username, password, full_name, role, can_tools, can_db, can_cases, can_manage,
       can_be_manager, can_be_expert } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ message: "Укажите логин и пароль" });
     }
     const user = await users.createUser({
-      username, password, role, can_tools, can_db, can_cases, can_manage,
+      username, password, full_name, role, can_tools, can_db, can_cases, can_manage,
       can_be_manager, can_be_expert,
     });
     res.json({ user });

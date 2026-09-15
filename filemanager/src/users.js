@@ -9,7 +9,7 @@ const db = require("./db");
  */
 
 const SELECT_JOINED = `
-  SELECT u.id, u.username, u.role,
+  SELECT u.id, u.username, u.full_name, ${db.nameSql("u")} AS name, u.role,
          COALESCE(p.can_tools, false) AS can_tools,
          COALESCE(p.can_db, false) AS can_db,
          COALESCE(p.can_cases, false) AS can_cases,
@@ -38,17 +38,21 @@ async function countAdmins() {
   return res.rows[0].c;
 }
 
-async function createUser({ username, password, role, can_tools, can_db, can_cases, can_manage,
-  can_be_manager = true, can_be_expert = true }) {
+async function createUser({ username, password, full_name, role, can_tools, can_db, can_cases,
+  can_manage, can_be_manager = true, can_be_expert = true }) {
   const hash = await bcrypt.hash(password, 12);
+  // Имя не задали — берём логин. Человек без имени выглядел бы на экране
+  // пустым местом, а это хуже, чем служебное слово вместо имени.
+  const name = String(full_name || "").trim() || String(username || "").trim();
+  await checkNameFree(name, null);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `INSERT INTO users (username, password_hash, role)
-       VALUES ($1, $2, $3)
-       RETURNING id, username, role`,
-      [username, hash, role === "admin" ? "admin" : "employee"]
+      `INSERT INTO users (username, full_name, password_hash, role)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, username, full_name, full_name AS name, role`,
+      [username, name, hash, role === "admin" ? "admin" : "employee"]
     );
     const user = rows[0];
     await client.query(
@@ -83,9 +87,13 @@ async function createUser({ username, password, role, can_tools, can_db, can_cas
  * проверка справочников сказала бы «не значится специалистом» про
  * человека, который в списке есть.
  *
- * История действий (fm_events, history) НЕ трогается нарочно: там запись
- * о том, кто что сделал в тот день, под тем именем, которое тогда было.
- * Переписать её значило бы подделать журнал.
+ * Речь именно об ИМЕНИ (full_name), а не о логине: в проектах записано
+ * то, что видно на экране. Смена логина этих строк не касается вовсе —
+ * логин теперь нигде, кроме входа, и не показывается.
+ *
+ * История «Учёта оборудования» НЕ трогается: там имя сохранено копией на
+ * момент события — запись о том, что было, а не справка о том, как
+ * человека зовут сейчас.
  */
 async function renameInCases(client, oldName, newName) {
   const { rows } = await client.query(
@@ -103,14 +111,38 @@ async function renameInCases(client, oldName, newName) {
   return touched;
 }
 
+/**
+ * Имя должно быть одно на всю контору.
+ *
+ * Причина не в аккуратности, а в устройстве данных: специалисты проекта
+ * записаны строкой через запятую — ИМЕНАМИ. Два человека с одинаковым
+ * именем в этой строке неразличимы, и никто — ни человек, ни система —
+ * не скажет, который из них в проекте.
+ *
+ * Сравниваем без учёта регистра: «Иванов» и «иванов» для человека одно
+ * и то же лицо, и разрешить такую пару значило бы сделать вид, что нет.
+ */
+async function checkNameFree(name, exceptId) {
+  const { rows } = await db.query(
+    `SELECT ${db.nameSql("u")} AS name FROM users u
+      WHERE lower(${db.nameSql("u")}) = lower($1) AND u.id <> $2 LIMIT 1`,
+    [name, exceptId || 0]
+  );
+  if (rows.length) {
+    const err = new Error(
+      `Имя «${rows[0].name}» уже занято. Имена должны различаться: в проектах ` +
+      "специалисты записаны именами, и двух одинаковых там не различить."
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
 async function updateUser(id, fields) {
   const userSets = [];
   const userValues = [];
   let i = 1;
 
-  // Переименование делаем отдельно и до всего остального: нужно старое
-  // имя, а после UPDATE его уже не спросишь.
-  let renamed = null;
   if (fields.username !== undefined) {
     const clean = String(fields.username).trim();
     if (!clean) {
@@ -123,16 +155,36 @@ async function updateUser(id, fields) {
       err.status = 400;
       throw err;
     }
-    const { rows: before } = await db.query("SELECT username FROM users WHERE id = $1", [id]);
-    if (before.length && before[0].username !== clean) {
-      renamed = { from: before[0].username, to: clean };
-    }
     fields = { ...fields, username: clean };
+  }
+
+  // Смену имени делаем отдельно и до всего остального: нужно старое имя,
+  // а после UPDATE его уже не спросишь.
+  let renamed = null;
+  if (fields.full_name !== undefined) {
+    const clean = String(fields.full_name).trim();
+    if (!clean) {
+      const err = new Error("Имя не может быть пустым");
+      err.status = 400;
+      throw err;
+    }
+    await checkNameFree(clean, id);
+    const { rows: before } = await db.query(
+      `SELECT ${db.nameSql("u")} AS name FROM users u WHERE u.id = $1`, [id]
+    );
+    if (before.length && before[0].name !== clean) {
+      renamed = { from: before[0].name, to: clean };
+    }
+    fields = { ...fields, full_name: clean };
   }
 
   if (fields.username !== undefined) {
     userSets.push(`username = $${i++}`);
     userValues.push(fields.username);
+  }
+  if (fields.full_name !== undefined) {
+    userSets.push(`full_name = $${i++}`);
+    userValues.push(fields.full_name);
   }
   if (fields.password) {
     userSets.push(`password_hash = $${i++}`);

@@ -18,14 +18,15 @@ const TOKEN_TTL = "12h";
 
 async function verifyLogin(username, password) {
   const res = await db.query(
-    "SELECT id, username, password_hash, role FROM users WHERE lower(username) = lower($1)",
+    `SELECT u.id, u.username, ${db.nameSql("u")} AS name, u.password_hash, u.role
+       FROM users u WHERE lower(u.username) = lower($1)`,
     [username]
   );
   const user = res.rows[0];
   if (!user) return null;
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return null;
-  return { id: user.id, username: user.username, role: user.role };
+  return { id: user.id, username: user.username, name: user.name, role: user.role };
 }
 
 // Форма токена та же, что у "Учёта оборудования" (sub/username/role) —
@@ -95,11 +96,15 @@ async function requireAuth(req, res, next) {
     // причине берём отсюда и роль: снятые права должны действовать
     // сразу, а не когда истечёт чужая сессия.
     const { rows: nameRows } = await db.query(
-      "SELECT username, role, planfix_name, planfix_user_id FROM users WHERE id = $1", [userId]);
+      `SELECT u.username, ${db.nameSql("u")} AS name, u.role, u.planfix_name, u.planfix_user_id
+         FROM users u WHERE u.id = $1`, [userId]);
     const live = nameRows[0] || {};
     req.user = {
       id: userId,
       username: live.username || identity.username,
+      // Имя — то, что видно людям. Логин остаётся рядом: он нужен входу
+      // и настройкам администратора, но на экранах ему делать нечего.
+      name: live.name || live.username || identity.username,
       role: live.role || identity.role,
       can_tools: perms.can_tools,
       can_db: perms.can_db,
