@@ -2268,6 +2268,64 @@ a.upload-btn { text-decoration: none; }
   border-bottom: 1px solid var(--border-strong); border-right: 1px solid var(--border);
 }
 .jr-table thead tr:nth-child(2) th { top: 33px; }
+
+/* Шапка столбца, по которому можно отбирать, — она же кнопка. Раньше
+   отборы стояли отдельным рядом полей над таблицей, и глазами надо было
+   сопоставить поле со столбцом. Теперь отбор там, где столбец. */
+.jr-th-btn {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: none; background: none; padding: 0; margin: -2px 0;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+  color: inherit; cursor: pointer; text-align: left;
+}
+.jr-th-btn:hover .jr-th-title { text-decoration: underline; }
+.jr-th-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.jr-th-caret {
+  flex: none; width: 0; height: 0; margin-top: 1px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid currentColor; opacity: .5;
+}
+.jr-th-btn:hover .jr-th-caret, .jr-th-btn.open .jr-th-caret { opacity: 1; }
+.jr-th-btn.open .jr-th-caret { transform: rotate(180deg); }
+/* Столбец, по которому сейчас отбирают, виден сразу: иначе пустая
+   таблица выглядит поломкой, а не следствием отбора. */
+.jr-th-btn.on { color: var(--accent); }
+.jr-th-btn.on .jr-th-title { text-decoration: underline; text-underline-offset: 3px; }
+.jr-th-btn.on .jr-th-caret { opacity: 1; }
+
+/* Сам список. Лежит на body, а не в ячейке: у таблицы своя прокрутка и
+   overflow, внутри неё список обрезался бы по краю шапки. */
+.jr-menu {
+  position: fixed; z-index: 60; max-height: 320px; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); box-shadow: 0 10px 28px rgba(0, 0, 0, .16);
+  padding: 4px; display: flex; flex-direction: column;
+}
+.jr-menu-item {
+  border: none; background: none; text-align: left; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--text-primary);
+  padding: 7px 10px; border-radius: 6px; white-space: nowrap;
+}
+.jr-menu-item:hover { background: var(--bg-subtle); }
+.jr-menu-item.on { background: var(--accent-bg); color: var(--accent-on-tint); font-weight: 600; }
+.jr-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Поиск не растягиваем на всю ширину: рядом должна помещаться подсказка
+   про то, что остальные отборы живут в шапке. */
+.jr-filters .jr-f.jr-grow { flex: 0 1 460px; }
+.jr-filters-hint { align-self: center; font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+
+/* Отборы для узкого экрана. На широком их не видно: там они в шапке
+   таблицы, и двух одинаковых средств рядом быть не должно. */
+.jr-colfilters { display: none; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.jr-colf {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border-strong); background: var(--bg-card);
+  border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 13px;
+  color: var(--text-primary); cursor: pointer;
+}
+.jr-colf.on { border-color: var(--accent); color: var(--accent); }
+.jr-colf b { font-weight: 600; }
 .jr-table th.jr-group { background: #dceae2; text-align: center; }
 .jr-table td {
   padding: 7px 10px; vertical-align: top; max-width: 300px;
@@ -2323,6 +2381,10 @@ a.upload-btn { text-decoration: none; }
   .jr-tablebox { max-height: none; border: 0; background: transparent; overflow: visible; }
   .jr-table, .jr-table tbody, .jr-table tr, .jr-table td { display: block; width: auto; }
   .jr-table thead { display: none; }
+  /* Шапки на телефоне нет — подсказка про неё только сбивала бы с толку,
+     а сами отборы переезжают в кнопки над таблицей. */
+  .jr-filters-hint { display: none; }
+  .jr-colfilters { display: flex; }
   .jr-table tr {
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius-sm); margin-bottom: 8px; padding: 10px 12px;

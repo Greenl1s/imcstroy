@@ -5475,14 +5475,14 @@ const journalFilters = {
  * в ячейке — для учётных полей, а не для переездов.
  */
 const JOURNAL_COLUMNS = [
-  { key: "stage",             title: "Стадия",                 edit: null,   sticky: 1, width: 116 },
+  { key: "stage",             title: "Стадия",                 edit: null,   sticky: 1, width: 116, filter: "stage" },
   { key: "name",              title: "Условное наименование",  edit: null,   sticky: 2, width: 230 },
-  { key: "organization",      title: "Структура",              edit: "list:organizations", width: 200 },
-  { key: "type",              title: "Тип проекта",            edit: "type", width: 190 },
-  { key: "expertise_type",    title: "Тип экспертизы",         edit: "list:expertise_types", width: 180 },
-  { key: "year",              title: "Год",                    edit: "list:years", width: 76 },
+  { key: "organization",      title: "Структура",              edit: "list:organizations", width: 200, filter: "org" },
+  { key: "type",              title: "Тип проекта",            edit: "type", width: 190, filter: "type" },
+  { key: "expertise_type",    title: "Тип экспертизы",         edit: "list:expertise_types", width: 180, filter: "expType" },
+  { key: "year",              title: "Год",                    edit: "list:years", width: 76, filter: "year" },
   { key: "description",       title: "Описание",               edit: "text", width: 240 },
-  { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150 },
+  { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150, filter: "manager" },
   { key: "experts",           title: "Специалисты / Эксперты", edit: "experts", width: 200 },
   { key: "court_or_customer", title: "Заказчик",               edit: "text", width: 230 },
   { key: "case_number",       title: "№ дела или договора",    edit: "text", width: 160 },
@@ -5511,24 +5511,57 @@ async function loadJournal(force = false) {
     box.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось загрузить журнал: ${escapeHtml(err.message)}</div>`;
     return;
   }
-  fillJournalOptions();
   renderJournal();
 }
 
-/** Списки фильтров заполняем из ответа сервера, а не из видимых строк. */
-function fillJournalOptions() {
-  const fill = (id, values, format = (v) => v) => {
-    const select = document.getElementById(id);
-    const keep = select.value;
-    select.innerHTML = '<option value="any">Все</option>' +
-      values.map((v) => `<option value="${escapeHtml(String(v.value ?? v))}">${escapeHtml(format(v.label ?? v))}</option>`).join("");
-    select.value = [...select.options].some((o) => o.value === keep) ? keep : "any";
-  };
-  fill("jrOrg", journalData.organizations || []);
-  fill("jrExpType", journalData.expertise_types || []);
-  fill("jrYear", journalData.years || []);
-  fill("jrManager", (journalData.managers || []).map((m) => ({ value: m.id, label: m.name })));
+/**
+ * Что предлагает фильтр столбца.
+ *
+ * Списки берём из ответа сервера, а не из видимых строк: иначе стоит
+ * один раз отобрать по году — и в списке «Руководитель» останутся только
+ * те, у кого есть проект за этот год, а человек решит, что остальных
+ * удалили. Фильтры должны показывать, из чего вообще можно выбирать.
+ *
+ * Возвращает [{ value, label }], где value === "any" — это «Все».
+ */
+function journalFilterOptions(key) {
+  const all = [{ value: "any", label: "Все" }];
+  const plain = (values) => all.concat(values.map((v) => ({ value: String(v), label: String(v) })));
+  if (key === "stage") {
+    return all.concat([["plan", "План"], ["active", "Активный"], ["control", "Контроль"]]
+      .map(([value, label]) => ({ value, label })));
+  }
+  if (key === "outcome") {
+    return all.concat([["done", "Завершён"], ["cancelled", "Отменён"]]
+      .map(([value, label]) => ({ value, label })));
+  }
+  if (key === "type") {
+    return all.concat([["expertise", "Экспертизы"], ["research", "Независимые исследования"],
+      ["none", "Без типа"]].map(([value, label]) => ({ value, label })));
+  }
+  if (key === "org") return plain(journalData?.organizations || []);
+  if (key === "expType") return plain(journalData?.expertise_types || []);
+  if (key === "year") return plain(journalData?.years || []);
+  if (key === "manager") {
+    return all.concat((journalData?.managers || []).map((m) => ({ value: String(m.id), label: m.name })));
+  }
+  return all;
 }
+
+/** Подпись выбранного значения — для плашек «что отобрано». */
+function journalFilterLabel(key, value) {
+  const found = journalFilterOptions(key).find((o) => o.value === String(value));
+  return found ? found.label : String(value);
+}
+
+/**
+ * Какой фильтр живёт в столбце «Стадия».
+ *
+ * В архиве стадия у всех одна из двух, и отбирать по ней бессмысленно —
+ * там в этом же столбце спрашивается «чем кончилось». Столбец один,
+ * вопрос по смыслу тот же, поэтому и место одно.
+ */
+const journalStageFilterKey = () => (journalTab === "archive" ? "outcome" : "stage");
 
 function journalFiltered() {
   const rows = (journalData?.rows || []).filter((r) =>
@@ -5580,12 +5613,8 @@ function renderJournal() {
   document.getElementById("jrCountCurrent").textContent = all.filter((r) => !journalIsArchive(r)).length;
   document.getElementById("jrCountArchive").textContent = all.filter(journalIsArchive).length;
 
-  // В архиве стадия у всех одна из двух — фильтр стадии там бесполезен,
-  // вместо него «чем кончилось».
-  document.getElementById("jrStageWrap").classList.toggle("hidden", journalTab === "archive");
-  document.getElementById("jrOutcomeWrap").classList.toggle("hidden", journalTab !== "archive");
-
   journalRowsShown = journalFiltered();
+  renderJournalColFilters();
   renderJournalApplied();
 
   const box = document.getElementById("journalTableBox");
@@ -5600,7 +5629,7 @@ function renderJournal() {
   const head = JOURNAL_COLUMNS.map((c) => {
     if (c.court) return "";
     const st = c.sticky ? ` jr-sticky jr-sticky${c.sticky}` : "";
-    return `<th class="${st.trim()}" rowspan="2" style="min-width:${c.width}px">${escapeHtml(c.title)}</th>`;
+    return `<th class="${st.trim()}" rowspan="2" style="min-width:${c.width}px">${journalHeadHtml(c)}</th>`;
   }).join("");
   const courtCols = JOURNAL_COLUMNS.filter((c) => c.court);
 
@@ -5623,8 +5652,136 @@ function renderJournal() {
       <tbody>${body}</tbody>
     </table>`;
 
+  wireJournalFilterButtons(box);
   wireJournalCells(box);
   renderJournalFoot();
+}
+
+/**
+ * Шапка столбца. Там, где по столбцу можно отбирать, она же и кнопка
+ * фильтра: отбор живёт в том самом столбце, к которому относится, а не
+ * в отдельном ряду полей над таблицей, где ещё надо угадать, какое поле
+ * какому столбцу соответствует.
+ */
+function journalHeadHtml(col) {
+  const key = col.filter === "stage" ? journalStageFilterKey() : col.filter;
+  if (!key) return escapeHtml(col.title);
+  const active = journalFilters[key] !== "any";
+  return `<button type="button" class="jr-th-btn${active ? " on" : ""}" data-jr-filter="${key}"
+            aria-haspopup="listbox" title="${escapeHtml(active
+              ? `Отобрано: ${journalFilterLabel(key, journalFilters[key])}`
+              : "Отобрать по этому столбцу")}">
+      <span class="jr-th-title">${escapeHtml(col.title)}</span>
+      <span class="jr-th-caret" aria-hidden="true"></span>
+    </button>`;
+}
+
+/**
+ * Список значений столбца.
+ *
+ * Открывается с первого нажатия и закрывается сразу после выбора: это
+ * отбор, а не форма, — отдельной кнопки «применить» тут быть не должно.
+ */
+let journalMenuAnchor = null;
+
+function openJournalFilterMenu(button) {
+  const key = button.dataset.jrFilter;
+  closeJournalFilterMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "jr-menu";
+  menu.id = "jrFilterMenu";
+  menu.setAttribute("role", "listbox");
+  menu.innerHTML = journalFilterOptions(key).map((o) => `
+    <button type="button" role="option" class="jr-menu-item${
+      journalFilters[key] === o.value ? " on" : ""}" data-jr-pick="${escapeHtml(o.value)}"
+      aria-selected="${journalFilters[key] === o.value}">${escapeHtml(o.label)}</button>`).join("");
+  document.body.appendChild(menu);
+
+  journalMenuAnchor = button;
+  placeJournalFilterMenu();
+
+  button.classList.add("open");
+  menu.querySelectorAll("[data-jr-pick]").forEach((item) => {
+    item.addEventListener("click", () => {
+      const value = item.dataset.jrPick;
+      closeJournalFilterMenu();
+      setJournalFilter(key, value);
+    });
+  });
+  (menu.querySelector(".jr-menu-item.on") || menu.querySelector(".jr-menu-item"))?.focus();
+}
+
+/**
+ * Держим список под своей кнопкой.
+ *
+ * Лежит он на body, а не в таблице (у таблицы своя прокрутка и overflow —
+ * внутри список обрезался бы по краю шапки), поэтому за кнопкой он сам
+ * не ездит: при прокрутке пересчитываем. Закрывать на любую прокрутку
+ * нельзя — браузер подкручивает страницу сам, и список успевал бы
+ * закрыться раньше, чем человек до него дотянется.
+ */
+function placeJournalFilterMenu() {
+  const menu = document.getElementById("jrFilterMenu");
+  if (!menu || !journalMenuAnchor || !journalMenuAnchor.isConnected) return closeJournalFilterMenu();
+  const box = journalMenuAnchor.getBoundingClientRect();
+  // Кнопку увезли прокруткой за пределы экрана — списку висеть не над чем.
+  if (box.bottom < 0 || box.top > window.innerHeight || box.right < 0 || box.left > window.innerWidth) {
+    return closeJournalFilterMenu();
+  }
+  menu.style.minWidth = `${Math.max(box.width, 190)}px`;
+  const left = Math.min(box.left, window.innerWidth - menu.offsetWidth - 12);
+  menu.style.left = `${Math.max(8, left)}px`;
+  // Снизу не помещается — открываем вверх.
+  menu.style.top = (box.bottom + menu.offsetHeight + 12 > window.innerHeight && box.top > menu.offsetHeight)
+    ? `${box.top - menu.offsetHeight - 4}px`
+    : `${box.bottom + 4}px`;
+}
+
+function closeJournalFilterMenu() {
+  document.getElementById("jrFilterMenu")?.remove();
+  document.querySelectorAll(".jr-th-btn.open, .jr-colf.open").forEach((b) => b.classList.remove("open"));
+  journalMenuAnchor = null;
+}
+
+// Щелчок мимо списка и Escape закрывают его. Вешаем один раз на
+// документ: списки создаются и исчезают, а обработчик остаётся.
+document.addEventListener("mousedown", (e) => {
+  if (!document.getElementById("jrFilterMenu")) return;
+  if (e.target.closest("#jrFilterMenu") || e.target.closest(".jr-th-btn")) return;
+  closeJournalFilterMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("jrFilterMenu")) closeJournalFilterMenu();
+});
+// Таблица прокручивается вбок — список едет за своей кнопкой.
+window.addEventListener("scroll", placeJournalFilterMenu, true);
+window.addEventListener("resize", placeJournalFilterMenu);
+
+function wireJournalFilterButtons(root) {
+  root.querySelectorAll("[data-jr-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      // Повторное нажатие по той же кнопке закрывает список — иначе
+      // открытый список нечем убрать, кроме как выбрать что-нибудь.
+      if (button.classList.contains("open")) return closeJournalFilterMenu();
+      openJournalFilterMenu(button);
+    });
+  });
+}
+
+/** Те же отборы для узкого экрана, где шапки таблицы не видно. */
+function renderJournalColFilters() {
+  const node = document.getElementById("journalColFilters");
+  node.innerHTML = JOURNAL_COLUMNS.filter((c) => c.filter).map((c) => {
+    const key = c.filter === "stage" ? journalStageFilterKey() : c.filter;
+    const active = journalFilters[key] !== "any";
+    const title = key === "outcome" ? "Чем кончилось" : c.title;
+    return `<button type="button" class="jr-colf${active ? " on" : ""}" data-jr-filter="${key}">
+      ${escapeHtml(title)}${active ? `: <b>${escapeHtml(journalFilterLabel(key, journalFilters[key]))}</b>` : ""}
+      <span class="jr-th-caret" aria-hidden="true"></span>
+    </button>`;
+  }).join("");
+  wireJournalFilterButtons(node);
 }
 
 function journalCellHtml(row, col) {
@@ -5657,7 +5814,7 @@ function renderJournalFoot() {
   document.getElementById("journalFoot").innerHTML = `
     <span>${shown === total ? `Строк: ${total}` : `Показано ${shown} из ${total}`}</span>
     <span class="jr-foot-hint">Таблица прокручивается вбок — там поля судебных экспертиз${
-      journalTab === "archive" ? "" : ". Двойной щелчок по ячейке — правка"}</span>`;
+      journalTab === "archive" ? "" : ". Щелчок по ячейке — правка, Esc — отмена"}</span>`;
 }
 
 function journalHasFilters() {
@@ -5670,19 +5827,18 @@ function journalHasFilters() {
 function renderJournalApplied() {
   const node = document.getElementById("journalApplied");
   const items = [];
-  const label = (id, value) => {
-    const select = document.getElementById(id);
-    const option = select && [...select.options].find((o) => o.value === value);
-    return option ? option.textContent : value;
+  const add = (key, title) => {
+    if (journalFilters[key] === "any") return;
+    items.push([key, title, journalFilterLabel(key, journalFilters[key])]);
   };
   if (journalFilters.q.trim()) items.push(["q", "Поиск", journalFilters.q.trim()]);
-  if (journalTab === "current" && journalFilters.stage !== "any") items.push(["stage", "Стадия", label("jrStage", journalFilters.stage)]);
-  if (journalTab === "archive" && journalFilters.outcome !== "any") items.push(["outcome", "Чем кончилось", label("jrOutcome", journalFilters.outcome)]);
-  if (journalFilters.type !== "any") items.push(["type", "Тип", label("jrType", journalFilters.type)]);
-  if (journalFilters.org !== "any") items.push(["org", "Структура", journalFilters.org]);
-  if (journalFilters.expType !== "any") items.push(["expType", "Тип экспертизы", journalFilters.expType]);
-  if (journalFilters.year !== "any") items.push(["year", "Год", journalFilters.year]);
-  if (journalFilters.manager !== "any") items.push(["manager", "Руководитель", label("jrManager", journalFilters.manager)]);
+  if (journalTab === "current") add("stage", "Стадия");
+  else add("outcome", "Чем кончилось");
+  add("type", "Тип");
+  add("org", "Структура");
+  add("expType", "Тип экспертизы");
+  add("year", "Год");
+  add("manager", "Руководитель");
 
   if (!items.length) return (node.innerHTML = "");
   node.innerHTML = items.map(([key, title, value]) =>
@@ -5696,24 +5852,21 @@ function renderJournalApplied() {
   bind(document.getElementById("jrResetBtn"), "click", resetJournalFilters);
 }
 
-const JOURNAL_FILTER_INPUTS = {
-  q: "jrSearch", stage: "jrStage", outcome: "jrOutcome", type: "jrType",
-  org: "jrOrg", expType: "jrExpType", year: "jrYear", manager: "jrManager",
-};
+/* Своё поле осталось только у поиска: он идёт сразу по девяти столбцам,
+   и столбца, в шапку которого его можно было бы убрать, у него нет.
+   Остальные отборы живут в шапках своих столбцов. */
 
 function setJournalFilter(key, value) {
   journalFilters[key] = value;
-  const input = document.getElementById(JOURNAL_FILTER_INPUTS[key]);
-  if (input) input.value = value;
+  if (key === "q") document.getElementById("jrSearch").value = value;
   renderJournal();
 }
 
 function resetJournalFilters() {
   for (const key of Object.keys(journalFilters)) {
     journalFilters[key] = key === "q" ? "" : "any";
-    const input = document.getElementById(JOURNAL_FILTER_INPUTS[key]);
-    if (input) input.value = journalFilters[key];
   }
+  document.getElementById("jrSearch").value = "";
   renderJournal();
 }
 
@@ -5729,7 +5882,13 @@ function wireJournalCells(box) {
     });
   });
   box.querySelectorAll("td.jr-editable").forEach((cell) => {
-    cell.addEventListener("dblclick", () => startJournalEdit(cell));
+    // Одного щелчка достаточно. Раньше правка открывалась двойным, и
+    // чтобы добраться до списка, приходилось щёлкать трижды: два раза
+    // по ячейке и ещё раз по появившемуся полю. Список — это выбор из
+    // готового, а не набор текста; прятать его за тремя нажатиями не за
+    // чем. Случайно испортить ничего нельзя: значение, которое не
+    // поменяли, никуда не отправляется, а Esc закрывает правку.
+    cell.addEventListener("click", () => startJournalEdit(cell));
     // С клавиатуры — Enter: иначе до правки не добраться без мыши.
     cell.addEventListener("keydown", (e) => {
       // Только с самой ячейки: Enter внутри уже открытого поля ввода
@@ -5771,6 +5930,20 @@ function startJournalEdit(cell) {
   const input = cell.querySelector(".jr-input");
   input.focus();
   if (input.select) input.select();
+  // Список раскрываем сразу, тем же нажатием, которым открыли ячейку.
+  // showPicker умеет не всякий браузер — если не умеет, останется
+  // раскрытое поле с наведённым курсором, то есть на одно нажатие
+  // меньше, чем было.
+  if (input.tagName === "SELECT" && typeof input.showPicker === "function") {
+    try { input.showPicker(); } catch (err) { /* браузер не разрешил — не беда */ }
+  }
+
+  // Выбор в списке — это уже решение: требовать после него ещё и Enter
+  // значило бы добавить нажатие ради нажатия. У поля ввода иначе: там
+  // человек ещё набирает, и решение — это Enter или уход из поля.
+  if (input.tagName === "SELECT") {
+    input.addEventListener("change", () => commitJournalEdit(input.value));
+  }
 
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== "Escape") return;
@@ -5990,8 +6163,7 @@ document.querySelectorAll("[data-jr-tab]").forEach((tab) => {
     // переключении сбрасываем обе, иначе список молча оказался бы пуст.
     journalFilters.stage = "any";
     journalFilters.outcome = "any";
-    document.getElementById("jrStage").value = "any";
-    document.getElementById("jrOutcome").value = "any";
+    closeJournalFilterMenu();
     renderJournal();
   });
 });
@@ -6000,14 +6172,6 @@ bind(document.getElementById("jrSearch"), "input", debounce((e) => {
   journalFilters.q = e.target.value;
   renderJournal();
 }, 250));
-
-for (const [key, id] of Object.entries(JOURNAL_FILTER_INPUTS)) {
-  if (key === "q") continue;
-  bind(document.getElementById(id), "change", (e) => {
-    journalFilters[key] = e.target.value;
-    renderJournal();
-  });
-}
 
 bind(document.getElementById("journalExportSelBtn"), "click", (e) => {
   if (!journalRowsShown.length) return showToast("Нечего выгружать — под эти условия ничего не подходит");

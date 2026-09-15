@@ -582,38 +582,21 @@
       <button class="jr-tab" type="button" data-jr-tab="archive">Архив <i id="jrCountArchive">—</i></button>
     </div>
 
+    <!-- Осталось одно поле: поиск идёт сразу по девяти столбцам, и
+         столбца, в шапку которого его можно было бы убрать, у него нет.
+         Все остальные отборы — в шапках своих столбцов. -->
     <div class="jr-filters" id="journalFilters">
       <label class="jr-f jr-grow">Поиск
         <input type="text" id="jrSearch" placeholder="Название, заказчик, номер дела, эксперт…">
       </label>
-      <label class="jr-f" id="jrStageWrap">Стадия
-        <select id="jrStage">
-          <option value="any">Все</option>
-          <option value="plan">План</option>
-          <option value="active">Активный</option>
-          <option value="control">Контроль</option>
-        </select>
-      </label>
-      <label class="jr-f hidden" id="jrOutcomeWrap">Чем кончилось
-        <select id="jrOutcome">
-          <option value="any">Все</option>
-          <option value="done">Завершён</option>
-          <option value="cancelled">Отменён</option>
-        </select>
-      </label>
-      <label class="jr-f">Тип проекта
-        <select id="jrType">
-          <option value="any">Все</option>
-          <option value="expertise">Экспертизы</option>
-          <option value="research">Независимые исследования</option>
-          <option value="none">Без типа</option>
-        </select>
-      </label>
-      <label class="jr-f">Структура<select id="jrOrg"><option value="any">Все</option></select></label>
-      <label class="jr-f">Тип экспертизы<select id="jrExpType"><option value="any">Все</option></select></label>
-      <label class="jr-f">Год<select id="jrYear"><option value="any">Все</option></select></label>
-      <label class="jr-f">Руководитель<select id="jrManager"><option value="any">Все</option></select></label>
+      <p class="jr-filters-hint">Остальные отборы — в шапке таблицы: нажмите на название столбца</p>
     </div>
+
+    <!-- На телефоне шапки у таблицы нет (строка разворачивается
+         карточкой), поэтому там те же отборы показываются кнопками
+         здесь. Список и обработчик у них общие с шапкой — это одно и то
+         же средство, просто в двух местах для двух размеров экрана. -->
+    <div class="jr-colfilters" id="journalColFilters"></div>
 
     <div class="jr-applied" id="journalApplied"></div>
     <div class="jr-tablebox" id="journalTableBox"></div>
