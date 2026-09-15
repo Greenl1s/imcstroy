@@ -2108,6 +2108,7 @@ async function loadSettings() {
   try {
     if (settingsTab === "people") await renderPeopleTab();
     else if (settingsTab === "lists") await renderListsTab();
+    else if (settingsTab === "template") await renderTemplateTab();
     else await renderPlanfixTab();
   } catch (err) {
     pane.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`;
@@ -2697,6 +2698,133 @@ const ORIGIN_NOTE = {
   // значит написать одно и то же дважды подряд.
   default: "",
 };
+
+/* ---------- Вкладка «Шаблон ГП» ----------
+
+   Шаблон письма правится здесь же, настоящими страницами Word: тем же
+   редактором, которым в системе открываются документы. Раньше поправить
+   в письме запятую можно было только пересборкой образа.
+
+   Две вещи, без которых это было бы опасно:
+
+   1. Метки вида {{CASE_NUMBER}} — места, куда подставляются данные.
+      Убрал метку — письмо перестало собираться. Поэтому после правки
+      сразу видно, все ли метки на месте, а не в день отправки в суд.
+   2. Возврат. Есть и «как было до последней правки», и «как было
+      изначально»: первое чаще нужно, второе надёжнее. */
+
+let gpTemplateEditor = null;
+
+async function renderTemplateTab() {
+  const state = await apiFetch("/api/admin/gp-template");
+  settingsPane().innerHTML = `
+    <p class="access-note">Это сам файл письма — тот, из которого собирается каждое ГП.
+    Правьте как обычный документ Word: текст, отступы, колонтитулы. Сохранение в редакторе
+    сразу становится новым шаблоном.</p>
+
+    ${templateStateHtml(state)}
+
+    <div class="settings-row" style="margin:12px 0;">
+      <button type="button" class="upload-btn" id="gpTplRecheck">Проверить метки заново</button>
+      <button type="button" class="upload-btn" id="gpTplBack" ${state.hasBackup ? "" : "disabled"}>
+        Вернуть, как было до правки
+      </button>
+      <button type="button" class="link-btn" id="gpTplReset">Вернуть исходный шаблон</button>
+    </div>
+
+    <div class="tpl-editor" id="gpTplEditor"></div>
+
+    <details class="tpl-tokens">
+      <summary>Что такое метки и какие бывают</summary>
+      <p class="access-note">Метка — место, куда система подставляет данные проекта. Её текст
+      менять нельзя, а вот двигать, переносить в другое место письма и оформлять — можно.</p>
+      <table class="access-rules">
+        <thead><tr><th>Метка</th><th>Что подставляется</th></tr></thead>
+        <tbody>${[...state.required, ...state.optional].map((r) => `
+          <tr><td class="access-path">${escapeHtml(r.token)}</td><td>${escapeHtml(r.what)}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </details>`;
+
+  bind(document.getElementById("gpTplRecheck"), "click", () => renderTemplateTab().catch(settingsError));
+  bind(document.getElementById("gpTplBack"), "click", () => resetGpTemplate("backup"));
+  bind(document.getElementById("gpTplReset"), "click", () => resetGpTemplate("original"));
+
+  await openGpTemplateEditor();
+}
+
+/** Состояние шаблона словами: чего не хватает и чем это грозит. */
+function templateStateHtml(state) {
+  if (state.broken) {
+    return `<p class="error-text">Файл шаблона повреждён: ${escapeHtml(state.message || "не читается")}.
+      Нажмите «Вернуть исходный шаблон».</p>`;
+  }
+  if (!state.ok) {
+    return `<div class="tpl-warn">
+      <b>Письмо сейчас не соберётся.</b> В шаблоне не хватает меток:
+      <ul>${state.missing.map((m) => `<li><code>${escapeHtml(m.token)}</code> — ${escapeHtml(m.what)}</li>`).join("")}</ul>
+      Верните их в текст или нажмите «Вернуть исходный шаблон».
+    </div>`;
+  }
+  const optionalMissing = (state.missingOptional || []).length;
+  return `<div class="tpl-ok">Все обязательные метки на месте — письмо соберётся.${
+    optionalMissing ? ` Необязательных не хватает: ${optionalMissing} (окончания слов будут одинаковыми для одного и нескольких).` : ""
+  }</div>`;
+}
+
+/**
+ * Встроенный редактор.
+ *
+ * Тот же OnlyOffice, что и для остальных документов, только открытый
+ * прямо в окне настроек: человек листает страницы письма и правит их на
+ * месте, а не ходит за файлом в папку.
+ */
+async function openGpTemplateEditor() {
+  const box = document.getElementById("gpTplEditor");
+  box.innerHTML = '<div class="empty-hint">Открываем редактор…</div>';
+  try {
+    const { config, scriptUrl } = await apiFetch("/api/admin/gp-template/editor");
+    if (!window.DocsAPI) await loadExternalScript(scriptUrl);
+    box.innerHTML = '<div id="gpTplEditorMount"></div>';
+    // Старый редактор закрываем: два открытых на один файл спорят за
+    // право сохранить, и выигрывает тот, кто закрылся последним.
+    if (gpTemplateEditor && gpTemplateEditor.destroyEditor) {
+      try { gpTemplateEditor.destroyEditor(); } catch (err) { /* уже закрыт */ }
+    }
+    gpTemplateEditor = new window.DocsAPI.DocEditor("gpTplEditorMount", config);
+  } catch (err) {
+    // Редактор — не единственный способ жить: кнопки возврата работают и
+    // без него, поэтому не роняем всю вкладку.
+    box.innerHTML = `<div class="empty-hint">Не удалось открыть редактор: ${escapeHtml(err.message)}.<br>
+      Проверьте, что сервер документов (OnlyOffice) запущен.</div>`;
+  }
+}
+
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("не загрузился скрипт редактора"));
+    document.body.appendChild(script);
+  });
+}
+
+async function resetGpTemplate(to) {
+  const question = to === "backup"
+    ? "Вернуть шаблон к тому, каким он был до последней правки?"
+    : "Вернуть исходный шаблон? Ваши правки уйдут в копию «до последней правки».";
+  if (!confirm(question)) return;
+  try {
+    await apiFetch("/api/admin/gp-template/reset", {
+      method: "POST", body: JSON.stringify({ to }),
+    });
+    showToast(to === "backup" ? "Шаблон возвращён к прежней правке" : "Исходный шаблон возвращён");
+    await renderTemplateTab();
+  } catch (err) {
+    settingsError(err);
+  }
+}
 
 async function renderPlanfixTab() {
   const { settings: list } = await apiFetch("/api/admin/settings?group=planfix");
