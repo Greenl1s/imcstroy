@@ -264,7 +264,7 @@ async function boot() {
 
   document.getElementById('shell').classList.remove('hidden');
   document.getElementById('userBadge').textContent =
-    `${state.me.username} · ${state.me.role === 'admin' ? 'администратор' : 'сотрудник'}`;
+    `${state.me.name} · ${state.me.role === 'admin' ? 'администратор' : 'сотрудник'}`;
 
   state.people = await api.people().catch(() => []);
   wireTopbar();

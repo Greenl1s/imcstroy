@@ -93,11 +93,11 @@ export function showEventForm(state, { event = null, date = null, start = null }
   const drawPeople = () => {
     const free = state.people.filter((p) => !guests.some((g) => Number(g.id) === Number(p.id)));
     peopleBox.innerHTML = `
-      ${personChip({ id: state.me.id, username: `${state.me.username} · вы` }, false)}
+      ${personChip({ id: state.me.id, name: `${state.me.name} · вы` }, false)}
       ${guests.map((g) => personChip(g)).join('')}
       ${free.length ? `<select id="addPerson" style="width: auto; min-height: 34px; font-size: 13px;">
         <option value="">+ добавить</option>
-        ${free.map((p) => `<option value="${p.id}">${escapeHtml(p.username)}</option>`).join('')}
+        ${free.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
       </select>` : '<span class="task-sub">Больше некого позвать</span>'}`;
 
     peopleBox.querySelectorAll('[data-drop-person]').forEach((btn) => {
@@ -162,7 +162,7 @@ export function showEventForm(state, { event = null, date = null, start = null }
 
     const who = result.conflicts
       .filter((c) => Number(c.user_id) !== Number(state.me.id))
-      .map((c) => `${escapeHtml(c.username)} — занято ${hhmm(c.start_min)} — ${hhmm(c.end_min)}`);
+      .map((c) => `${escapeHtml(c.name)} — занято ${hhmm(c.start_min)} — ${hhmm(c.end_min)}`);
     const meBusy = result.conflicts.some((c) => Number(c.user_id) === Number(state.me.id));
 
     notice.innerHTML = `
@@ -289,7 +289,7 @@ function showGuestView(state, event) {
       ${event.note ? `<div><span class="section-title">Заметка</span><div>${escapeHtml(event.note)}</div></div>` : ''}
       <div>
         <span class="section-title">Позвал</span>
-        <div class="people-box">${personChip({ id: event.owner_id, username: event.owner_name }, false)}</div>
+        <div class="people-box">${personChip({ id: event.owner_id, name: event.owner_name }, false)}</div>
       </div>
     </div>
     <div class="modal-foot">

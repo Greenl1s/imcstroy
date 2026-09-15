@@ -171,7 +171,7 @@ export function renderDayPanel(state, day) {
         <div class="hour-slot">
           ${here.map((e) => `
             <button class="block ${e.guests?.length ? 'meet' : ''}" type="button" data-event="${e.id}">
-              <b>${escapeHtml(e.title)}${e.guests?.length ? ` · с ${escapeHtml(e.guests.map((g) => g.username).join(', '))}` : ''}</b>
+              <b>${escapeHtml(e.title)}${e.guests?.length ? ` · с ${escapeHtml(e.guests.map((g) => g.name).join(', '))}` : ''}</b>
               <span>${hhmm(e.start_min)} — ${hhmm(e.end_min)}${e.place ? ` · ${escapeHtml(e.place)}` : ''}</span>
             </button>`).join('')}
           <button class="slot-add" type="button" data-add-at="${hhmm(h)}">+ добавить на ${hhmm(h)}</button>
@@ -238,8 +238,8 @@ export function renderTodayBar(state) {
 /** Кружок с инициалами — участник встречи. */
 export const personChip = (person, removable = true) => `
   <span class="person">
-    <span class="ava" style="background: ${personColor(person.username)};">${escapeHtml(initials(person.username))}</span>
-    ${escapeHtml(person.username)}
+    <span class="ava" style="background: ${personColor(person.name)};">${escapeHtml(initials(person.name))}</span>
+    ${escapeHtml(person.name)}
     ${removable ? `<button type="button" data-drop-person="${person.id}" aria-label="Убрать"
         style="background: transparent; padding: 0; min-height: 0;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
