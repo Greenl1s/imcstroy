@@ -20,6 +20,7 @@ const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
 const expertsLib = require("./experts");
 const expertInfo = require("./expertInfo");
+const gpTemplate = require("./gpTemplate");
 const docxImages = require("./docxImages");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
@@ -1003,6 +1004,76 @@ app.post("/api/experts/:name/scans", auth.requireAuth, upload.single("file"),
   }
 });
 
+/* ---------- Шаблон гарантийного письма ----------
+
+   Шаблон правится прямо на сайте, в настройках, тем же редактором
+   OnlyOffice, которым в системе открываются остальные документы: это
+   настоящие страницы Word со всем оформлением, колонтитулами и
+   отступами, а не поле для текста.
+
+   Рабочий файл лежит в хранилище (см. gpTemplate.js), поэтому правки
+   переживают пересборку. Эталон остаётся в образе — вернуться к нему
+   можно одной кнопкой. */
+
+app.get("/api/admin/gp-template", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const state = await gpTemplate.inspectWorking(filesLib.safeResolve);
+    res.json({
+      ...state,
+      required: gpTemplate.REQUIRED,
+      optional: gpTemplate.OPTIONAL,
+      hasBackup: await gpTemplate.hasBackup(filesLib.safeResolve),
+      path: gpTemplate.WORKING_PATH,
+    });
+  } catch (err) {
+    console.error("Не удалось прочитать шаблон ГП:", err);
+    res.status(500).json({ message: "Не удалось прочитать шаблон письма" });
+  }
+});
+
+/**
+ * Настройки редактора для шаблона.
+ *
+ * Отдельно от общего /api/onlyoffice/config: тот отвечает за файлы в
+ * колонках и проверяет права по папкам, а шаблон лежит вне колонок и
+ * правится только администратором. Смешивать эти две проверки — значит
+ * однажды открыть шаблон тому, кому открыт всего лишь раздел «Файлы».
+ */
+app.get("/api/admin/gp-template/editor", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    await gpTemplate.ensureWorking(filesLib.safeResolve);
+    const { config, scriptUrl } = onlyoffice.buildEditorConfig({
+      relPath: gpTemplate.WORKING_PATH,
+      fileName: gpTemplate.FILE_NAME,
+      userId: req.user.id,
+      userName: req.user.name || req.user.username,
+      canEdit: true,
+    });
+    res.json({ config, scriptUrl });
+  } catch (err) {
+    console.error("Не удалось открыть шаблон ГП:", err);
+    res.status(400).json({ message: err.message });
+  }
+});
+
+app.post("/api/admin/gp-template/reset", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const previous = String(req.body?.to || "original");
+    if (previous === "backup") await gpTemplate.restoreBackup(filesLib.safeResolve);
+    else await gpTemplate.resetToOriginal(filesLib.safeResolve);
+    events.log(req.user, "settings_change", {
+      path: gpTemplate.WORKING_PATH,
+      name: previous === "backup" ? "Шаблон ГП: возврат к прежней правке" : "Шаблон ГП: возврат к исходному",
+    });
+    const state = await gpTemplate.inspectWorking(filesLib.safeResolve);
+    res.json({ ok: true, ...state, hasBackup: await gpTemplate.hasBackup(filesLib.safeResolve) });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось вернуть шаблон ГП:", err);
+    res.status(status).json({ message: status === 500 ? "Не удалось вернуть шаблон" : err.message });
+  }
+});
+
 app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
   try {
     const body = req.body || {};
@@ -1099,7 +1170,18 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       experts,
     };
 
-    const built = gpGenerate.generateGP(data);
+    // Шаблон берём рабочий — тот, что правят в настройках.
+    const templateBuffer = await gpTemplate.readWorking(filesLib.safeResolve);
+    const templateState = gpTemplate.inspect(templateBuffer);
+    if (!templateState.ok) {
+      return res.status(400).json({
+        message: "Шаблон письма испорчен: не хватает " +
+          templateState.missing.map((m) => m.token).join(", ") +
+          ". Откройте «Настройки → Шаблон ГП» и верните метки на место " +
+          "или нажмите «Вернуть исходный шаблон».",
+      });
+    }
+    const built = gpGenerate.generateGP(data, templateBuffer);
 
     const safeCaseNumber = String(body.caseNumber || "без номера").replace(/[\\/]/g, "-");
     const fileName = `ГП по делу № ${safeCaseNumber}.docx`;
@@ -1809,6 +1891,14 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
         throw new Error(`не удалось скачать сохранённый файл у OnlyOffice, HTTP ${response.status}`);
       }
       const buffer = Buffer.from(await response.arrayBuffer());
+      // Шаблон письма — особый файл: его правят люди, и испортить его
+      // проще всего. Копию «как было» делаем ровно здесь, перед самой
+      // перезаписью. Делать её при открытии редактора нельзя: открыл
+      // вкладку дважды, ничего не поправив, — и копия стала равна
+      // текущему, возвращаться некуда.
+      if (req.query.path === gpTemplate.WORKING_PATH) {
+        await gpTemplate.backup(filesLib.safeResolve);
+      }
       await fs.promises.writeFile(abs, buffer);
       console.log(`OnlyOffice callback: файл "${req.query.path}" успешно сохранён (${buffer.length} байт)`);
       // Кто именно правил документ, OnlyOffice сообщает в users — берём первого.

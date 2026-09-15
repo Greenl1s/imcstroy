@@ -1,8 +1,39 @@
 const AdmZip = require("adm-zip");
 const path = require("path");
 const docxImages = require("./docxImages");
+const docxPlaceholders = require("./docxPlaceholders");
 
 const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "gp-template.docx");
+
+/**
+ * Метки шаблона — места, куда подставляются данные.
+ *
+ * Список живёт здесь, рядом с подстановкой: разъедься он с ней, и
+ * настройки говорили бы «всё на месте» про шаблон, по которому письмо
+ * не собирается.
+ *
+ * REQUIRED — без них письмо не имеет смысла или не соберётся вовсе.
+ * OPTIONAL — без них соберётся, но окончания слов будут одинаковыми
+ * для одного эксперта и для нескольких.
+ */
+const REQUIRED = [
+  { token: "{{COURT_HEADER}}", what: "шапка письма — кому адресовано" },
+  { token: "{{CASE_NUMBER}}", what: "номер дела" },
+  { token: "{{COURT_GENITIVE}}", what: "суд в родительном падеже" },
+  { token: "{{EXPERTISE_TYPE}}", what: "вид экспертизы" },
+  { token: "{{QUESTION_TEXT}}", what: "строка вопроса (размножается по числу вопросов)" },
+  { token: "{{COST_TEXT}}", what: "стоимость" },
+  { token: "{{TERM_TEXT}}", what: "срок" },
+  { token: "{{EXPERT_NAME}}", what: "имя эксперта (размножается по числу экспертов)" },
+  { token: "{{EXPERT_DESC_LINE}}", what: "строка сведений эксперта" },
+];
+
+const OPTIONAL = [
+  { token: "{{Q_SUFFIX_ADJ}}", what: "окончание «по вопрос(ам/у)»" },
+  { token: "{{Q_SUFFIX_NOUN}}", what: "окончание «вопрос(ам/у)»" },
+  { token: "{{EXPERT_SUFFIX_INFO}}", what: "окончание «об эксперт(ах/е)»" },
+  { token: "{{EXPERT_SUFFIX_ASSIGN}}", what: "окончание «эксперт(ам/у)»" },
+];
 
 // Экранирует спецсимволы XML и превращает переносы строк внутри значения
 // в настоящие переносы строки в Word (<w:br/>), а не в кракозябры.
@@ -27,7 +58,14 @@ function decodeXmlEntities(s) {
 function findParagraph(xml, token) {
   const tokenIdx = xml.indexOf(token);
   if (tokenIdx === -1) {
-    throw new Error(`Плейсхолдер ${token} не найден в шаблоне ГП — шаблон повреждён`);
+    // Человек правит шаблон сам, поэтому сообщение должно говорить, что
+    // делать, а не только что случилось.
+    const err = new Error(
+      `В шаблоне письма не хватает метки ${token}. Откройте «Настройки → Шаблон ГП»: ` +
+      "верните метку на место или нажмите «Вернуть исходный шаблон»."
+    );
+    err.status = 400;
+    throw err;
   }
   const pStart = xml.lastIndexOf("<w:p ", tokenIdx);
   if (pStart === -1) {
@@ -80,23 +118,45 @@ function extractParagraphTexts(docxBuffer) {
  * одного скана: пустое «Приложение» на отдельном листе — это обещание,
  * которое документ не выполняет.
  */
-function generateGP(data) {
+function generateGP(data, templateBuffer) {
   return {
-    plain: buildGP(data, false),
-    withAttachments: countScans(data) ? buildGP(data, true) : null,
+    plain: buildGP(data, false, templateBuffer),
+    withAttachments: countScans(data) ? buildGP(data, true, templateBuffer) : null,
   };
 }
 
 const countScans = (data) =>
   (data.experts || []).reduce((sum, e) => sum + (e.scans || []).length, 0);
 
-function buildGP(data, withAttachments) {
-  const zip = new AdmZip(TEMPLATE_PATH);
+function buildGP(data, withAttachments, templateBuffer) {
+  // Шаблон приходит буфером: он лежит в хранилище и правится людьми.
+  // Без него берём эталон из образа — на случай, если рабочего файла
+  // ещё нет (первый запуск) или его читал не тот, кто умеет.
+  const zip = new AdmZip(templateBuffer || TEMPLATE_PATH);
   const docEntry = zip.getEntry("word/document.xml");
   if (!docEntry) {
     throw new Error("Шаблон ГП повреждён (нет word/document.xml)");
   }
-  let xml = docEntry.getData().toString("utf8");
+  // Собираем плейсхолдеры, разорванные редактором на куски. Без этого
+  // первое же сохранение шаблона на сайте оставило бы в письме
+  // «{{CASE_NUMBER}}» вместо номера дела — и заметили бы это в суде.
+  let xml = docxPlaceholders.heal(docEntry.getData().toString("utf8"));
+
+  // Проверяем ДО подстановки и все метки разом. Раньше отсутствие
+  // «простой» метки проходило молча: подстановка просто не находила,
+  // что менять, и письмо уходило без номера дела — а заметить это
+  // можно было только вычитав готовый документ.
+  const present = new Set(docxPlaceholders.listPlaceholders(xml));
+  const missing = REQUIRED.filter((r) => !present.has(r.token));
+  if (missing.length) {
+    const err = new Error(
+      "В шаблоне письма не хватает меток: " + missing.map((m) => m.token).join(", ") +
+      ". Откройте «Настройки → Шаблон ГП»: верните их в текст или нажмите " +
+      "«Вернуть исходный шаблон»."
+    );
+    err.status = 400;
+    throw err;
+  }
 
   const questionCount = data.questions.length;
   const expertCount = data.experts.length;
@@ -192,4 +252,4 @@ const titleParagraph = (text) =>
   `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/><w:rPr>${FONT_RPR}<w:b/></w:rPr></w:pPr>` +
   `<w:r><w:rPr>${FONT_RPR}<w:b/></w:rPr><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r></w:p>`;
 
-module.exports = { generateGP, extractParagraphTexts };
+module.exports = { generateGP, extractParagraphTexts, REQUIRED, OPTIONAL };
