@@ -2272,14 +2272,25 @@ a.upload-btn { text-decoration: none; }
 /* Шапка столбца, по которому можно отбирать, — она же кнопка. Раньше
    отборы стояли отдельным рядом полей над таблицей, и глазами надо было
    сопоставить поле со столбцом. Теперь отбор там, где столбец. */
+/* Отступы ячейки отданы кнопке, и кнопка занимает ячейку целиком:
+   нажимать надо на всю ячейку, а не попадать в надпись. Полоска в
+   восемь пикселей вокруг текста, по которой «не открывается», — это
+   ровно то место, куда чаще всего и попадают. */
+.jr-table th.jr-th-pick { padding: 0; }
 .jr-th-btn {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  border: none; background: none; padding: 0; margin: -2px 0;
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; height: 100%; min-height: 100%;
+  border: none; background: none; padding: 8px 10px; margin: 0;
   font: inherit; letter-spacing: inherit; text-transform: inherit;
   color: inherit; cursor: pointer; text-align: left;
 }
+/* Ячейка целиком отзывается на наведение — видно, что нажимается вся. */
+.jr-table th.jr-th-pick { cursor: pointer; }
+.jr-table th.jr-th-pick:hover, .jr-table th.jr-th-pick:has(.jr-th-btn.open) {
+  background: #d9e8df;
+}
 .jr-th-btn:hover .jr-th-title { text-decoration: underline; }
-.jr-th-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.jr-th-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .jr-th-caret {
   flex: none; width: 0; height: 0; margin-top: 1px;
   border-left: 4px solid transparent; border-right: 4px solid transparent;

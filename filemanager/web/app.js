@@ -5629,7 +5629,10 @@ function renderJournal() {
   const head = JOURNAL_COLUMNS.map((c) => {
     if (c.court) return "";
     const st = c.sticky ? ` jr-sticky jr-sticky${c.sticky}` : "";
-    return `<th class="${st.trim()}" rowspan="2" style="min-width:${c.width}px">${journalHeadHtml(c)}</th>`;
+    // jr-th-pick снимает у ячейки отступы и отдаёт их кнопке: нажимать
+    // надо на всю ячейку, а не выцеливать надпись.
+    const pick = c.filter ? " jr-th-pick" : "";
+    return `<th class="${(st + pick).trim()}" rowspan="2" style="min-width:${c.width}px">${journalHeadHtml(c)}</th>`;
   }).join("");
   const courtCols = JOURNAL_COLUMNS.filter((c) => c.court);
 
@@ -5760,8 +5763,14 @@ window.addEventListener("resize", placeJournalFilterMenu);
 
 function wireJournalFilterButtons(root) {
   root.querySelectorAll("[data-jr-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      // Повторное нажатие по той же кнопке закрывает список — иначе
+    // Слушаем ЯЧЕЙКУ целиком, а не кнопку внутри неё. Растянуть кнопку
+    // на всю ячейку одной вёрсткой не выходит: высоту ячейке задаёт
+    // соседний ряд шапки, и height:100% внутри неё ни на что не
+    // опирается. А целиться в надпись, когда вокруг неё поля, которые
+    // «не нажимаются», — худшее, что можно сделать с кнопкой.
+    const target = button.closest("th") || button;
+    target.addEventListener("click", () => {
+      // Повторное нажатие по той же ячейке закрывает список — иначе
       // открытый список нечем убрать, кроме как выбрать что-нибудь.
       if (button.classList.contains("open")) return closeJournalFilterMenu();
       openJournalFilterMenu(button);
