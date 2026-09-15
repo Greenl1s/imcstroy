@@ -1060,7 +1060,7 @@ async function uploadToInstrumentFolder(instrumentId, fileList, kind) {
 function showTakeForm(item) {
   openModal('Взять прибор', `
     <form id="takeForm" class="form-grid">
-      ${field('Кто берёт', state.currentUser.username)}
+      ${field('Кто берёт', state.currentUser.name)}
       ${input('taken_where', 'Место использования', '')}
       ${input('taken_extra', 'Доп. данные', state.currentUser.extra || '')}
       ${input('taken_at', 'Дата', today(), 'date')}
@@ -1091,7 +1091,7 @@ function showTransferForm(item) {
 
   openModal('Передать прибор', `
     <form id="transferForm" class="form-grid">
-      ${select('to_user_id', 'Новый пользователь', '', others.map((u) => [u.id, u.username]))}
+      ${select('to_user_id', 'Новый пользователь', '', others.map((u) => [u.id, u.name]))}
       ${input('taken_where', 'Место использования', item.taken_where || '')}
       ${input('taken_extra', 'Доп. данные', extraByUserId[others[0].id] || '')}
       <p class="row-subtitle">Прибор перейдёт к новому пользователю только после того, как он сам подтвердит приём.</p>
@@ -1120,7 +1120,7 @@ function showTransferForm(item) {
 function showBookForm(item) {
   openModal('Забронировать прибор', `
     <form id="bookForm" class="form-grid">
-      ${field('Кто бронирует', state.currentUser.username)}
+      ${field('Кто бронирует', state.currentUser.name)}
       ${input('booked_where', 'Куда бронируем (место использования)', '')}
       ${input('booked_for', 'Дата бронирования', today(), 'date', true)}
       ${input('booked_extra', 'Доп. информация', state.currentUser.extra || '')}

@@ -529,7 +529,7 @@ function showBulkTransferForm() {
     <form id="bulkTransferForm" class="form-grid">
       <label>Новый пользователь
         <select name="to_user_id" required>
-          ${others.map((u) => `<option value="${u.id}">${escapeHtml(u.username)}</option>`).join('')}
+          ${others.map((u) => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('')}
         </select>
       </label>
       <label>Место использования<input name="taken_where"></label>
@@ -613,7 +613,7 @@ function showBulkTakeForm() {
 
   openModal(`Взять приборы (${ids.length})`, `
     <form id="bulkTakeForm" class="form-grid">
-      <p>Кто берёт: ${escapeHtml(state.currentUser.username)}</p>
+      <p>Кто берёт: ${escapeHtml(state.currentUser.name)}</p>
       <label>Место использования<input name="taken_where"></label>
       <label>Доп. данные<input name="taken_extra" value="${escapeHtml(state.currentUser.extra || '')}"></label>
       <label>Дата<input name="taken_at" type="date" value="${today()}"></label>
@@ -640,7 +640,7 @@ function showBulkBookForm() {
 
   openModal(`Забронировать приборы (${ids.length})`, `
     <form id="bulkBookForm" class="form-grid">
-      <p>Кто бронирует: ${escapeHtml(state.currentUser.username)}</p>
+      <p>Кто бронирует: ${escapeHtml(state.currentUser.name)}</p>
       <label>Куда бронируем (место использования)<input name="booked_where"></label>
       <label>Дата бронирования<input name="booked_for" type="date" value="${today()}" required></label>
       <label>Доп. информация<input name="booked_extra" value="${escapeHtml(state.currentUser.extra || '')}"></label>

@@ -40,4 +40,4 @@ export async function refresh() {
 export const isAdmin = () => state.currentUser?.role === 'admin';
 
 export const userName = (id) =>
-  state.users.find((u) => u.id === id)?.username || '';
+  state.users.find((u) => u.id === id)?.name || '';

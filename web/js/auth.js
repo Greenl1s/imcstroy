@@ -15,7 +15,7 @@ export async function showUsersManager() {
   const rows = state.users.map((u) => `
     <div class="row panel">
       <div>
-        <div class="row-title">${escapeHtml(u.username)}</div>
+        <div class="row-title">${escapeHtml(u.name)}</div>
         <div class="row-subtitle">
           ${u.role === 'admin' ? 'Администратор' : 'Пользователь'}${u.extra ? ' · ' + escapeHtml(u.extra) : ''}
         </div>
@@ -55,7 +55,7 @@ export async function showUsersManager() {
         if (parts.length) warning = '\n\nВместе с ним в ИСУ пропадут: ' + parts.join('; ') + '.';
       } catch { /* не смогли спросить — удаляем как раньше, без подсказки */ }
 
-      if (!confirm(`Удалить пользователя «${user.username}»?${warning}`)) return;
+      if (!confirm(`Удалить пользователя «${user.name}»?${warning}`)) return;
       const result = await run(() => api.deleteUser(user.id), {
         button: event.currentTarget,
         success: 'Пользователь удалён'
@@ -80,6 +80,14 @@ export function showUserForm(user = null) {
 
   openModal(isEdit ? (isSelf ? 'Профиль' : 'Изменить пользователя') : 'Добавить пользователя', `
     <form id="userForm" class="form-grid">
+      ${isEdit
+        // Имя показываем, но не правим: оно общее для всех трёх систем и
+        // живёт там, где заведены сотрудники, — в настройках ИСУ. Две
+        // формы для одного поля рано или поздно разойдутся.
+        ? `<div class="field"><div class="field-label">Имя</div>
+           <div class="field-value">${escapeHtml(user?.name || '')}</div>
+           <div class="field-hint">Меняется в ИСУ: «Настройки → Сотрудники».</div></div>`
+        : ''}
       ${admin
         ? input('username', 'Логин', user?.username || '', 'text', !isEdit)
         : `<div class="field"><div class="field-label">Логин</div>
@@ -136,5 +144,5 @@ export function showUserForm(user = null) {
 export function badgeText() {
   const user = state.currentUser;
   if (!user) return '';
-  return user.role === 'admin' ? `${user.username} · администратор` : user.username;
+  return user.role === 'admin' ? `${user.name} · администратор` : user.name;
 }
