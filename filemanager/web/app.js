@@ -745,6 +745,8 @@ const EVENT_KINDS = {
   task_deleted:{ label: "Задача удалена",      tone: "del",   text: (e) => `удалил задачу ${b(e.target_name)}` },
   // Настройки задевают всех, поэтому их правка попадает в историю. Имя
   // настройки пишем, значение — никогда: там может лежать токен.
+  user_rename: { label: "Логин изменён",       tone: "stage", text: (e) => `переименовал ${b(e.details.from)} → ${b(e.target_name)}${
+                   e.details.cases ? ` (поправлено проектов: ${e.details.cases})` : ""}` },
   settings:    { label: "Настройки",           tone: "stage", text: (e) => (e.details && e.details.cleared
                    ? `вернул настройку ${b(e.target_name)} к прежнему значению`
                    : `изменил настройку ${b(e.target_name)}`) },
@@ -1396,9 +1398,9 @@ async function uploadOneFile(file, targetPath, saveAs) {
    Сервис живёт на том же домене (/instruments/), поэтому открываем его
    в этой же вкладке: общий вход уже действует, повторно входить не надо. */
 
-bind(document.getElementById("instrumentsBtn"), "click", () => {
-  location.href = INSTRUMENTS_URL;
-});
+/* «Учёт оборудования» — обычная ссылка в разметке: она открывается в
+   новой вкладке сама, и перехватывать щелчок незачем. Раньше здесь был
+   переход текущей вкладкой. */
 
 /* ---------- Login ---------- */
 
@@ -1532,16 +1534,10 @@ els.folderPermCloseBtn.addEventListener("click", () => {
   els.folderPermOverlay.classList.add("hidden");
 });
 
-/* Адрес соседнего сервиса «Учёт оборудования».
-
-   Записан относительным путём, а не полным адресом: оба сервиса живут на
-   одном домене (files.<домен>), общий вход действует на обоих, и переход
-   не требует повторной авторизации. Полный адрес пришлось бы менять при
-   каждом переезде домена.
-
-   Раньше эта ссылка была первой строкой во всплывающем списке «Ссылки».
-   Список из панели убран — остался один этот переход, и он стал кнопкой. */
-const INSTRUMENTS_URL = "/instruments/";
+/* Адрес соседнего сервиса «Учёт оборудования» остался в разметке
+   (href у пункта панели): ссылка должна быть ссылкой, чтобы работали
+   средняя кнопка мыши и «открыть в новой вкладке». Здесь он больше не
+   нужен — и не должен лежать в двух местах сразу. */
 
 // Состояние каждой из файловых колонок: что сейчас показываем (обычный
 // список или результаты поиска) и откуда брать данные.
@@ -2097,7 +2093,15 @@ async function showPersonDetail(userId) {
            что открыто всем. Правила заводятся в самой папке: «Дела» → «…» у строки →
            «Доступ к папке».</p>`}
 
-    <h3 class="access-sub">Пароль и учётная запись</h3>
+    <h3 class="access-sub">Логин и пароль</h3>
+    <div class="settings-row">
+      <input type="text" data-new-login value="${escapeHtml(user.username)}" autocomplete="off" spellcheck="false">
+      <button type="button" class="upload-btn" data-set-login>Сменить логин</button>
+    </div>
+    <p class="access-note">Логин — то, что человек набирает при входе, один на все три
+    системы. После смены входить надо новым: предупредите его. Всё, что он делал раньше,
+    в истории остаётся под прежним именем — это запись о том, что было, а не справка о том,
+    как его зовут сейчас.</p>
     <div class="settings-row">
       <input type="text" data-new-password placeholder="Новый пароль" autocomplete="off">
       <button type="button" class="upload-btn" data-set-password>Сменить пароль</button>
@@ -2179,6 +2183,37 @@ function wirePersonDetail(box, user, isAdmin, isMe) {
       }
     });
   });
+
+  const loginBtn = box.querySelector("[data-set-login]");
+  if (loginBtn) {
+    loginBtn.addEventListener("click", async () => {
+      const field = box.querySelector("[data-new-login]");
+      const username = field.value.trim();
+      if (!username) return showToast("Логин не может быть пустым");
+      if (username === user.username) return showToast("Логин тот же самый — менять нечего");
+      if (!confirm(`Сменить логин «${user.username}» на «${username}»?\n\n` +
+        "Входить он будет уже новым. Скажите ему об этом.")) return;
+      try {
+        const res = await apiFetch(`/api/users/${user.id}`, {
+          method: "PATCH", body: JSON.stringify({ username }),
+        });
+        const fixed = res && res.renamed ? res.renamed.cases : 0;
+        showToast(fixed
+          ? `Логин изменён, поправлено проектов: ${fixed}`
+          : "Логин изменён");
+        // Себя переименовали — имя в панели должно смениться сразу.
+        if (currentUser && currentUser.id === user.id) {
+          currentUser.username = username;
+          renderProfileCard();
+        }
+        accessUserId = user.id;
+        await reloadPeople();
+      } catch (err) {
+        field.value = user.username;
+        settingsError(err);
+      }
+    });
+  }
 
   const passBtn = box.querySelector("[data-set-password]");
   if (passBtn) {

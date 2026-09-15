@@ -2405,11 +2405,18 @@ a.upload-btn { text-decoration: none; }
    На узком экране вкладки ложатся в строку сверху.
    ============================================================ */
 
-.settings-body { display: flex; gap: 24px; align-items: flex-start; padding: 0 0 40px; }
+/* Раздел занимает ровно высоту окна, а прокручивается то, что внутри.
+   Раньше карточка сотрудника росла вниз сколько угодно и уезжала за
+   нижний край: страница целиком не прокручивалась, потому что .app-screen
+   ростом ровно в окно. */
+.settings-body {
+  display: flex; gap: 24px; align-items: stretch;
+  flex: 1; min-height: 0; padding: 0;
+}
 
 .settings-tabs {
   display: flex; flex-direction: column; gap: 2px;
-  flex: 0 0 220px; position: sticky; top: 16px;
+  flex: 0 0 220px; align-self: flex-start;
 }
 .settings-tab {
   text-align: left; border: none; background: transparent; cursor: pointer;
@@ -2420,7 +2427,12 @@ a.upload-btn { text-decoration: none; }
 .settings-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
 .settings-tab.active { background: var(--accent-bg); color: var(--accent-on-tint); font-weight: 600; }
 
-.settings-pane { flex: 1; min-width: 0; }
+/* Прокручивается содержимое вкладки, а не окно: вкладки слева должны
+   оставаться на месте, к какому бы месту списка человек ни спустился. */
+.settings-pane {
+  flex: 1; min-width: 0; min-height: 0;
+  overflow-y: auto; padding-bottom: 24px;
+}
 
 .settings-block + .settings-block { margin-top: 32px; }
 
@@ -2437,12 +2449,17 @@ a.upload-btn { text-decoration: none; }
 
 /* --- «Сотрудники»: люди слева, подробности справа --- */
 
-.access-layout { display: flex; gap: 20px; align-items: flex-start; }
-.access-side { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; }
+/* Список людей и подробности прокручиваются каждый сам по себе: искать
+   человека, у которого уехала карточка соседа, — не дело. */
+.access-layout { display: flex; gap: 20px; align-items: stretch; height: 100%; min-height: 0; }
+.access-side {
+  flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; min-height: 0;
+}
 .access-people {
   display: flex; flex-direction: column; gap: 2px;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 6px;
+  min-height: 0; overflow-y: auto;
 }
 /* «Добавить» — под списком, а не над: список читают сверху вниз, и
    действие логично стоит там, где он кончается. */
@@ -2481,7 +2498,7 @@ a.upload-btn { text-decoration: none; }
 .access-person-sub { font-size: var(--fs-meta); color: var(--text-muted); }
 
 .access-detail {
-  flex: 1; min-width: 0;
+  flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 18px 20px;
 }
@@ -2552,9 +2569,12 @@ a.upload-btn { text-decoration: none; }
 
 @media (max-width: 900px) {
   .settings-body { flex-direction: column; }
-  .settings-tabs { flex-direction: row; flex: none; position: static; width: 100%; overflow-x: auto; }
-  .access-layout { flex-direction: column; }
+  .settings-tabs { flex-direction: row; flex: none; width: 100%; overflow-x: auto; }
+  /* В столбик у каждого блока своя прокрутка была бы мучением —
+     прокручивается вкладка целиком. */
+  .access-layout { flex-direction: column; height: auto; }
   .access-side { flex: none; width: 100%; }
+  .access-people, .access-detail { overflow-y: visible; max-height: none; }
 }
 
 /* Справочники: три коротких списка рядом, а не в столбик — так видно
