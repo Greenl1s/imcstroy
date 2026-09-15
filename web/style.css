@@ -466,6 +466,8 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
 }
 .field-value { margin-top: 6px; font-size: 15px; overflow-wrap: anywhere; }
 .field-value a { color: var(--primary); }
+/* Подпись под нередактируемым полем: откуда оно берётся. */
+.field-hint { margin-top: 4px; font-size: 13px; color: var(--muted); }
 
 .photo-box { text-align: center; margin-bottom: 16px; color: var(--muted); font-size: 14px; }
 .photo-box img {
