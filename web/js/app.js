@@ -8,6 +8,7 @@ import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { renderKits, renderKitCard, showKitForm } from './kits.js';
 import { displayNo, verificationBadge, verificationText, today, verificationInfo,
   VERIFICATION_SOON_DAYS } from './utils.js';
+import { sheetGeometry } from './qr-sheet.js';
 
 // ---------- Тема ----------
 
@@ -793,6 +794,10 @@ function renderQrPng(item) {
  * ними. Заполнение по порядку — сначала левый верхний, дальше по строке.
  * Если приборов больше 16 — начинается новая страница. Под каждым QR —
  * номер прибора. Картинки обычные, их можно менять/удалять прямо в Word.
+ *
+ * Сетка занимает лист целиком и разложена под готовую самоклейку 105×74 мм
+ * («8 на лист»): печатают на заранее нарезанной бумаге, и линии обязаны
+ * попадать в рез. Все размеры и причины — в qr-sheet.js.
  */
 async function downloadSelectedQrAsWord() {
   const ids = selectedIds();
@@ -805,21 +810,20 @@ async function downloadSelectedQrAsWord() {
 
   const {
     Document, Packer, Table, TableRow, TableCell, Paragraph, ImageRun, TextRun,
-    AlignmentType, BorderStyle, WidthType, PageOrientation, HeightRule, VerticalAlign, PageBreak
+    AlignmentType, BorderStyle, WidthType, PageOrientation, HeightRule, VerticalAlign
   } = docx;
 
-  // Параметры листа A4 (книжная ориентация) и сетки подобраны и проверены
-  // вручную (визуальным рендером), чтобы 4 строки гарантированно помещались
-  // на одной странице и картинки нигде не заезжали на красные линии.
-  const PAGE_W = 11906, PAGE_H = 16838, MARGIN = 400;
-  const usableW = PAGE_W - MARGIN * 2;
-  const COLS = 4, ROWS = 4;
-  const PER_PAGE = COLS * ROWS;
-  const COL_WIDTH = Math.floor(usableW / COLS);
-  const ROW_HEIGHT = 2450;
+  // Вся арифметика листа — в qr-sheet.js: там же объяснено, почему полей
+  // нет, почему шаг обязан быть точным и почему подрезана последняя строка.
+  const {
+    pageWidth: PAGE_W, pageHeight: PAGE_H, margin: MARGIN, usableWidth: usableW,
+    cols: COLS, rows: ROWS, perPage: PER_PAGE,
+    colWidth: COL_WIDTH, rowHeight: ROW_HEIGHT, lastRowHeight: LAST_ROW_HEIGHT,
+    borderSize: BORDER_SZ, tailTwips: TAIL_TW,
+  } = sheetGeometry();
   const QR_SIZE_PX = 90;
 
-  const red = { style: BorderStyle.SINGLE, size: 16, color: 'FF0000' };
+  const red = { style: BorderStyle.SINGLE, size: BORDER_SZ, color: 'FF0000' };
   const none = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
 
   async function buildCell(item, colIndex) {
@@ -863,22 +867,42 @@ async function downloadSelectedQrAsWord() {
   }
 
   try {
-    const children = [];
-    for (let page = 0; page * PER_PAGE < items.length; page++) {
+    // Таблица одна на весь файл, даже если страниц несколько. Раньше на
+    // каждую страницу делалась своя, а между ними ставился разрыв страницы —
+    // теперь строки заполняют лист целиком, и абзац с разрывом сам не влезал
+    // бы: он уезжал на следующий лист и утаскивал разрыв за собой, оставляя
+    // пустые страницы. Строка, которой не хватило места, и так переходит на
+    // новый лист — этого достаточно.
+    const pages = Math.max(1, Math.ceil(items.length / PER_PAGE));
+    const rows = [];
+    for (let page = 0; page < pages; page++) {
       const pageItems = items.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
-      const rows = [];
       for (let r = 0; r < ROWS; r++) {
         const cells = [];
         for (let c = 0; c < COLS; c++) {
           cells.push(await buildCell(pageItems[r * COLS + c] || null, c));
         }
-        rows.push(new TableRow({ children: cells, height: { value: ROW_HEIGHT, rule: HeightRule.EXACT } }));
-      }
-      children.push(new Table({ rows, width: { size: usableW, type: WidthType.DXA }, columnWidths: Array(COLS).fill(COL_WIDTH) }));
-      if ((page + 1) * PER_PAGE < items.length) {
-        children.push(new Paragraph({ children: [new PageBreak()] }));
+        rows.push(new TableRow({
+          children: cells,
+          cantSplit: true,
+          height: {
+            value: r === ROWS - 1 ? LAST_ROW_HEIGHT : ROW_HEIGHT,
+            rule: HeightRule.EXACT,
+          },
+        }));
       }
     }
+    const children = [
+      new Table({
+        rows,
+        width: { size: usableW, type: WidthType.DXA },
+        columnWidths: Array(COLS).fill(COL_WIDTH),
+      }),
+      // Абзац после таблицы обязателен по формату документа. Обычный съел бы
+      // полсантиметра и утащил последнюю строку на новый лист — поэтому он
+      // здесь микроскопический.
+      new Paragraph({ spacing: { before: 0, after: 0, line: TAIL_TW, lineRule: 'exact' } }),
+    ];
 
     const wordDoc = new Document({
       sections: [{
