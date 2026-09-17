@@ -817,11 +817,12 @@ async function downloadSelectedQrAsWord() {
   // нет, почему шаг обязан быть точным и почему подрезана последняя строка.
   const {
     pageWidth: PAGE_W, pageHeight: PAGE_H, margin: MARGIN, usableWidth: usableW,
+    header: HEADER_TW, footer: FOOTER_TW,
     cols: COLS, rows: ROWS, perPage: PER_PAGE,
     colWidth: COL_WIDTH, rowHeight: ROW_HEIGHT, lastRowHeight: LAST_ROW_HEIGHT,
     borderSize: BORDER_SZ, tailTwips: TAIL_TW,
+    qrSizePx: QR_SIZE_PX, cellTopPad: CELL_TOP_PAD,
   } = sheetGeometry();
-  const QR_SIZE_PX = 90;
 
   const red = { style: BorderStyle.SINGLE, size: BORDER_SZ, color: 'FF0000' };
   const none = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
@@ -849,9 +850,13 @@ async function downloadSelectedQrAsWord() {
 
     return new TableCell({
       width: { size: COL_WIDTH, type: WidthType.DXA },
-      verticalAlign: VerticalAlign.CENTER,
+      // Код прижат к ВЕРХУ строки и отодвинут вниз на постоянный отступ.
+      // Не по центру ячейки: у последней строки низ подрезан, и при
+      // центровке код в нижнем ряду поехал бы вверх относительно наклейки.
+      // Верх строки — это верх наклейки, и от него считать надёжно.
+      verticalAlign: VerticalAlign.TOP,
       borders: { top: red, bottom: red, left: leftBorder, right: rightBorder },
-      margins: { top: 60, bottom: 60, left: 50, right: 50 },
+      margins: { top: CELL_TOP_PAD, bottom: 0, left: 50, right: 50 },
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -909,7 +914,13 @@ async function downloadSelectedQrAsWord() {
         properties: {
           page: {
             size: { orientation: PageOrientation.PORTRAIT, width: PAGE_W, height: PAGE_H },
-            margin: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+            // header и footer — обязательно: без них библиотека ставит свои
+            // 1,25 см, Word держит под колонтитулы место, и на лист влезает
+            // ТРИ ряда вместо четырёх. Именно из-за этого таблица разъезжалась.
+            margin: {
+              top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN,
+              header: HEADER_TW, footer: FOOTER_TW,
+            },
           },
         },
         children,
