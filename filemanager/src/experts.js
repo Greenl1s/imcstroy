@@ -147,7 +147,59 @@ async function createExpert(safeResolve, { name }) {
   return { name: clean, path: expertPath(clean) };
 }
 
+/**
+ * Переименование эксперта.
+ *
+ * Имя эксперта — это имя его папки и часть имён обоих файлов сведений;
+ * внутри файлов оно тоже стоит первой строкой. Поэтому файлы не
+ * переименовываются, а собираются заново из пунктов.
+ *
+ * ПРОЕКТЫ ЭТО НЕ ЗАДЕВАЕТ, и так и должно быть. Столбец «Специалисты /
+ * Эксперты» в журнале заполняется ПОЛЬЗОВАТЕЛЯМИ системы — теми, у кого
+ * стоит галочка в справочниках. Папка «Эксперты» — другой справочник,
+ * он про то, кого включать в гарантийное письмо. Списки разные, и
+ * переписывать один по другому значило бы подменять данные по
+ * случайному совпадению написания: строка в проекте перестала бы
+ * проходить проверку, и карточку стало бы нельзя сохранить.
+ *
+ * Уже созданные гарантийные письма тоже не трогаются: это готовые
+ * документы, они лежат файлами.
+ */
+async function renameExpert(safeResolve, { rebuildDocs, readItems }, oldName, rawNewName) {
+  const from = String(oldName || "").trim();
+  const to = normalizeName(rawNewName);
+  if (from === to) return { renamed: false, from, to };
+
+  const fromAbs = safeResolve(expertPath(from));
+  const toAbs = safeResolve(expertPath(to));
+  try {
+    await fs.promises.access(fromAbs);
+  } catch {
+    throw badRequest(`Эксперта «${from}» нет в папке экспертов`);
+  }
+  // Проверяем занятость только для по-настоящему другого имени:
+  // «Иванов И.И» → «Иванов И. И.» переименовать можно, а занять чужую
+  // папку — нет.
+  if (from.toLowerCase() !== to.toLowerCase() && fs.existsSync(toAbs)) {
+    const err = new Error(`Эксперт «${to}» уже есть`);
+    err.status = 409;
+    throw err;
+  }
+
+  await fs.promises.rename(fromAbs, toAbs);
+
+  const dir = expertPath(to);
+  for (const stale of [`Сведения ${from}.docx`, `Сведения ${from} с документами.docx`, INFO_FILENAME]) {
+    try { await fs.promises.unlink(safeResolve(`${dir}/${stale}`)); } catch { /* не было */ }
+  }
+  const { items } = await readItems(safeResolve, dir);
+  if (items.length) await rebuildDocs(safeResolve, dir, to, items);
+
+  return { renamed: true, from, to };
+}
+
 module.exports = {
+  renameExpert,
   EXPERTS_DIR,
   INFO_FILENAME,
   ATTACH_DIRNAME,

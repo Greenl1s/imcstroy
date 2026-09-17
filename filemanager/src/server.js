@@ -879,6 +879,114 @@ async function expertDirOr404(name, res) {
   return { name: clean, dir };
 }
 
+/**
+ * Переименовать эксперта.
+ *
+ * Отдельным действием, а не полем в общем сохранении: это правка,
+ * которая задевает проекты, и подтверждать её надо осознанно.
+ */
+app.patch("/api/experts/:name", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    const result = await expertsLib.renameExpert(filesLib.safeResolve, {
+      rebuildDocs: expertInfo.rebuildDocs,
+      readItems: expertInfo.read,
+    }, found.name, req.body?.name);
+
+    if (result.renamed) {
+      events.log(req.user, "rename", {
+        path: expertsLib.expertPath(result.to),
+        name: `Эксперт «${result.from}» → «${result.to}»`,
+      });
+    }
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось переименовать эксперта:", err);
+    res.status(status).json({
+      message: status === 500 ? "Не удалось переименовать эксперта" : err.message,
+    });
+  }
+});
+
+/** Все сканы эксперта и то, к каким пунктам они прикреплены. */
+app.get("/api/experts/:name/scans", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    const stored = await expertInfo.read(filesLib.safeResolve, found.dir);
+    const usedBy = new Map();
+    stored.items.forEach((item, i) => {
+      for (const file of item.files) {
+        if (!usedBy.has(file)) usedBy.set(file, []);
+        usedBy.get(file).push(i + 1);
+      }
+    });
+    const scans = await expertsLib.listAttachments(filesLib.safeResolve, found.name);
+    res.json({
+      scans: scans.map((s) => ({ name: s.name, path: s.path, items: usedBy.get(s.name) || [] })),
+    });
+  } catch (err) {
+    console.error("Не удалось прочитать приложения эксперта:", err);
+    res.status(500).json({ message: "Не удалось прочитать приложения" });
+  }
+});
+
+/**
+ * Убрать скан с диска.
+ *
+ * В корзину, а не насовсем: сканы — подтверждающие документы, и вернуть
+ * ошибочно удалённый должно быть можно. Из пунктов ссылка на него
+ * убирается здесь же, иначе следующее сохранение собрало бы документ с
+ * дырой на месте картинки.
+ */
+app.delete("/api/experts/:name/scans/:file", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    const fileName = path.basename(String(req.params.file));
+    const relPath = `${found.dir}/${expertInfo.ATTACH_DIRNAME}/${fileName}`;
+    await trash.moveToTrash(relPath, req.user.id);
+
+    const stored = await expertInfo.read(filesLib.safeResolve, found.dir);
+    const items = stored.items.map((item) => ({
+      ...item, files: item.files.filter((f) => f !== fileName),
+    }));
+    if (items.length) {
+      await expertInfo.write(filesLib.safeResolve, found.dir, items);
+      await expertInfo.rebuildDocs(filesLib.safeResolve, found.dir, found.name, items);
+    }
+    events.log(req.user, "delete", { path: relPath, name: fileName });
+    res.json({ ok: true, items });
+  } catch (err) {
+    console.error("Не удалось убрать скан:", err);
+    res.status(400).json({ message: "Не удалось убрать скан: " + err.message });
+  }
+});
+
+/** Удалить эксперта целиком — папку со всем содержимым, в корзину. */
+app.delete("/api/experts/:name", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireExpertsAccess(req, res)) return;
+    const found = await expertDirOr404(req.params.name, res);
+    if (!found) return;
+
+    await trash.moveToTrash(found.dir, req.user.id);
+    events.log(req.user, "delete", { path: found.dir, name: found.name });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Не удалось удалить эксперта:", err);
+    res.status(400).json({ message: "Не удалось удалить эксперта: " + err.message });
+  }
+});
+
 app.get("/api/experts/:name/info", auth.requireAuth, async (req, res) => {
   try {
     if (!requireExpertsAccess(req, res)) return;
@@ -1004,73 +1112,134 @@ app.post("/api/experts/:name/scans", auth.requireAuth, upload.single("file"),
   }
 });
 
-/* ---------- Шаблон гарантийного письма ----------
+/* ---------- Образцы гарантийного письма ----------
 
-   Шаблон правится прямо на сайте, в настройках, тем же редактором
-   OnlyOffice, которым в системе открываются остальные документы: это
-   настоящие страницы Word со всем оформлением, колонтитулами и
-   отступами, а не поле для текста.
+   Образцы правятся прямо на сайте тем же редактором OnlyOffice, которым
+   в системе открываются остальные документы: это настоящие страницы
+   Word со всем оформлением, колонтитулами и отступами.
 
-   Рабочий файл лежит в хранилище (см. gpTemplate.js), поэтому правки
-   переживают пересборку. Эталон остаётся в образе — вернуться к нему
-   можно одной кнопкой. */
+   Заводить, править, скачивать и удалять образцы может только
+   администратор. ВЫБИРАТЬ образец при создании письма — любой, кто это
+   письмо создаёт: иначе смысл теряется. Поэтому список отдаётся двумя
+   разными адресами с разными правами. */
 
-app.get("/api/admin/gp-template", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+/** Короткий список для формы создания ГП — без состояния меток. */
+app.get("/api/gp/templates", auth.requireAuth, async (req, res) => {
   try {
-    const state = await gpTemplate.inspectWorking(filesLib.safeResolve);
-    res.json({
-      ...state,
-      required: gpTemplate.REQUIRED,
-      optional: gpTemplate.OPTIONAL,
-      hasBackup: await gpTemplate.hasBackup(filesLib.safeResolve),
-      path: gpTemplate.WORKING_PATH,
-    });
+    const { items, defaultId } = await gpTemplate.listSamples(filesLib.safeResolve, { withState: false });
+    res.json({ items: items.map((i) => ({ id: i.id, name: i.name, isDefault: i.isDefault })), defaultId });
   } catch (err) {
-    console.error("Не удалось прочитать шаблон ГП:", err);
-    res.status(500).json({ message: "Не удалось прочитать шаблон письма" });
+    console.error("Не удалось прочитать список образцов ГП:", err);
+    res.status(500).json({ message: "Не удалось прочитать список образцов" });
+  }
+});
+
+app.get("/api/admin/gp-templates", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const list = await gpTemplate.listSamples(filesLib.safeResolve);
+    res.json({ ...list, required: gpTemplate.REQUIRED, optional: gpTemplate.OPTIONAL });
+  } catch (err) {
+    console.error("Не удалось прочитать образцы ГП:", err);
+    res.status(500).json({ message: "Не удалось прочитать образцы писем" });
+  }
+});
+
+app.post("/api/admin/gp-templates", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const created = await gpTemplate.createSample(filesLib.safeResolve, {
+      name: req.body?.name,
+      fromId: req.body?.fromId,
+    });
+    events.log(req.user, "settings_change", {
+      path: gpTemplate.fileOf(created.id), name: `Образец ГП «${created.name}» заведён`,
+    });
+    res.status(201).json({ ok: true, ...created });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось завести образец ГП:", err);
+    res.status(status).json({ message: status === 500 ? "Не удалось завести образец" : err.message });
+  }
+});
+
+app.patch("/api/admin/gp-templates/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    if (req.body?.name !== undefined) {
+      await gpTemplate.renameSample(filesLib.safeResolve, req.params.id, req.body.name);
+    }
+    if (req.body?.isDefault) {
+      await gpTemplate.setDefault(filesLib.safeResolve, req.params.id);
+    }
+    res.json({ ok: true, ...(await gpTemplate.listSamples(filesLib.safeResolve)) });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось изменить образец ГП:", err);
+    res.status(status).json({ message: status === 500 ? "Не удалось изменить образец" : err.message });
+  }
+});
+
+app.delete("/api/admin/gp-templates/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const removed = await gpTemplate.removeSample(filesLib.safeResolve, req.params.id);
+    events.log(req.user, "settings_change", {
+      path: gpTemplate.fileOf(removed.id), name: `Образец ГП «${removed.name}» удалён`,
+    });
+    res.json({ ok: true, ...(await gpTemplate.listSamples(filesLib.safeResolve)) });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось удалить образец ГП:", err);
+    res.status(status).json({ message: status === 500 ? "Не удалось удалить образец" : err.message });
+  }
+});
+
+app.post("/api/admin/gp-templates/:id/reset", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const to = String(req.body?.to || "original");
+    if (to === "backup") await gpTemplate.restoreBackup(filesLib.safeResolve, req.params.id);
+    else await gpTemplate.resetToOriginal(filesLib.safeResolve, req.params.id);
+    res.json({ ok: true, ...(await gpTemplate.listSamples(filesLib.safeResolve)) });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 500) console.error("Не удалось вернуть образец ГП:", err);
+    res.status(status).json({ message: status === 500 ? "Не удалось вернуть образец" : err.message });
   }
 });
 
 /**
- * Настройки редактора для шаблона.
+ * Настройки редактора для образца.
  *
  * Отдельно от общего /api/onlyoffice/config: тот отвечает за файлы в
- * колонках и проверяет права по папкам, а шаблон лежит вне колонок и
- * правится только администратором. Смешивать эти две проверки — значит
+ * колонках и проверяет права по папкам, а образцы лежат вне колонок и
+ * правятся только администратором. Смешивать две проверки — значит
  * однажды открыть шаблон тому, кому открыт всего лишь раздел «Файлы».
  */
-app.get("/api/admin/gp-template/editor", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+app.get("/api/admin/gp-templates/:id/editor", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    await gpTemplate.ensureWorking(filesLib.safeResolve);
+    const { item } = await gpTemplate.find(filesLib.safeResolve, req.params.id);
     const { config, scriptUrl } = onlyoffice.buildEditorConfig({
-      relPath: gpTemplate.WORKING_PATH,
-      fileName: gpTemplate.FILE_NAME,
+      relPath: gpTemplate.fileOf(item.id),
+      fileName: `${item.name}.docx`,
       userId: req.user.id,
       userName: req.user.name || req.user.username,
       canEdit: true,
     });
     res.json({ config, scriptUrl });
   } catch (err) {
-    console.error("Не удалось открыть шаблон ГП:", err);
-    res.status(400).json({ message: err.message });
+    console.error("Не удалось открыть образец ГП:", err);
+    res.status(err.status || 400).json({ message: err.message });
   }
 });
 
-app.post("/api/admin/gp-template/reset", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+/** Скачать образец — только администратору: это рабочий документ конторы. */
+app.get("/api/admin/gp-templates/:id/download", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
-    const previous = String(req.body?.to || "original");
-    if (previous === "backup") await gpTemplate.restoreBackup(filesLib.safeResolve);
-    else await gpTemplate.resetToOriginal(filesLib.safeResolve);
-    events.log(req.user, "settings_change", {
-      path: gpTemplate.WORKING_PATH,
-      name: previous === "backup" ? "Шаблон ГП: возврат к прежней правке" : "Шаблон ГП: возврат к исходному",
-    });
-    const state = await gpTemplate.inspectWorking(filesLib.safeResolve);
-    res.json({ ok: true, ...state, hasBackup: await gpTemplate.hasBackup(filesLib.safeResolve) });
+    const { item, buffer } = await gpTemplate.readSample(filesLib.safeResolve, req.params.id);
+    res.setHeader("Content-Type",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(item.name + ".docx")}`);
+    res.send(buffer);
   } catch (err) {
-    const status = err.status || 500;
-    if (status === 500) console.error("Не удалось вернуть шаблон ГП:", err);
-    res.status(status).json({ message: status === 500 ? "Не удалось вернуть шаблон" : err.message });
+    res.status(err.status || 400).json({ message: err.message });
   }
 });
 
@@ -1170,12 +1339,13 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
       experts,
     };
 
-    // Шаблон берём рабочий — тот, что правят в настройках.
-    const templateBuffer = await gpTemplate.readWorking(filesLib.safeResolve);
+    // Образец — тот, что выбрали в форме; не выбрали — основной.
+    const { item: sample, buffer: templateBuffer } =
+      await gpTemplate.readSample(filesLib.safeResolve, body.templateId);
     const templateState = gpTemplate.inspect(templateBuffer);
     if (!templateState.ok) {
       return res.status(400).json({
-        message: "Шаблон письма испорчен: не хватает " +
+        message: `Образец «${sample.name}» испорчен: не хватает ` +
           templateState.missing.map((m) => m.token).join(", ") +
           ". Откройте «Настройки → Шаблон ГП» и верните метки на место " +
           "или нажмите «Вернуть исходный шаблон».",
@@ -1891,20 +2061,20 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
         throw new Error(`не удалось скачать сохранённый файл у OnlyOffice, HTTP ${response.status}`);
       }
       const buffer = Buffer.from(await response.arrayBuffer());
-      // Шаблон письма — особый файл: его правят люди, и испортить его
+      // Образец письма — особый файл: его правят люди, и испортить его
       // проще всего. Копию «как было» делаем ровно здесь, перед самой
       // перезаписью. Делать её при открытии редактора нельзя: открыл
       // вкладку дважды, ничего не поправив, — и копия стала равна
       // текущему, возвращаться некуда.
-      if (req.query.path === gpTemplate.WORKING_PATH) {
-        await gpTemplate.backup(filesLib.safeResolve);
-      }
+      const sampleId = gpTemplate.idByPath(req.query.path);
+      if (sampleId) await gpTemplate.backup(filesLib.safeResolve, sampleId);
       await fs.promises.writeFile(abs, buffer);
       console.log(`OnlyOffice callback: файл "${req.query.path}" успешно сохранён (${buffer.length} байт)`);
       // Кто именно правил документ, OnlyOffice сообщает в users — берём первого.
       const editorId = Array.isArray(req.body.users) && req.body.users.length ? req.body.users[0] : null;
       const editor = await auth.userForEvent(editorId);
       events.log(editor, "office_save", { path: req.query.path });
+      if (sampleId) await gpTemplate.touch(filesLib.safeResolve, sampleId);
     } catch (err) {
       console.error("Не удалось сохранить документ из OnlyOffice:", err);
       return res.json({ error: 1 });
