@@ -255,9 +255,15 @@
           <span>Добавить эксперта</span>
         </button>
         <button class="upload-btn hidden" id="expertInfoBtn" type="button"
-                title="Сведения об эксперте: пункты биографии и подтверждающие их сканы">
+                title="ФИО, сведения и приложения эксперта">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-          <span>Сведения об эксперте</span>
+          <span>Редактировать эксперта</span>
+        </button>
+        <!-- Та же форма, но сразу про того эксперта, в чьей папке стоим. -->
+        <button class="create-btn hidden" id="expertInfoThisBtn" type="button"
+                title="ФИО, сведения и приложения этого эксперта">
+          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          <span>Редактировать этого эксперта</span>
         </button>
         <button class="upload-btn" id="uploadTriggerBtn" type="button">
           <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
@@ -846,16 +852,28 @@
 <div id="expertInfoOverlay" class="modal-overlay hidden">
   <div class="modal-panel" style="max-width:760px;">
     <div class="modal-header">
-      <span>Сведения об эксперте</span>
+      <span id="expertInfoHead">Редактировать эксперта</span>
       <button class="back-btn" id="expertInfoCloseBtn" type="button">
         <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
         Закрыть
       </button>
     </div>
     <div style="display:flex; flex-direction:column; gap:14px; max-height:72vh; overflow-y:auto; padding-right:4px;">
-      <label>Эксперт
+      <!-- Выбор эксперта прячется, когда форму открыли из папки самого
+           эксперта: там уже понятно, о ком речь, и лишний список только
+           даёт повод случайно уехать не туда. -->
+      <label id="expertInfoWhoWrap">Эксперт
         <select id="expertInfoWho"></select>
         <span class="field-hint">Список — это папки в «Базе данных / Эксперты».</span>
+      </label>
+
+      <label>ФИО эксперта
+        <span class="settings-row">
+          <input type="text" id="expertInfoName" maxlength="120" autocomplete="off">
+          <button type="button" class="upload-btn" id="expertInfoRename">Переименовать</button>
+        </span>
+        <span class="field-hint">Так эксперт подписан в гарантийном письме и так называется
+        его папка. Уже созданные письма не меняются — они лежат готовыми файлами.</span>
       </label>
 
       <p class="access-note" id="expertInfoImported" style="display:none;"></p>
@@ -874,12 +892,36 @@
       Сохранение пересобирает оба файла в папке эксперта, поэтому править их в Word смысла нет:
       следующее сохранение перепишет.</p>
 
+      <!-- Все сканы папки, включая те, что ни к одному пункту не
+           прикреплены: иначе забытый файл лежал бы вечно, и никто бы о
+           нём не знал. -->
+      <details class="ei-scans" id="expertInfoScansBox">
+        <summary>Приложения эксперта — все сканы в папке</summary>
+        <div id="expertInfoScans"></div>
+      </details>
+
       <p class="error-text" id="expertInfoError"></p>
       <div class="modal-actions">
         <button class="primary" type="button" id="expertInfoSaveBtn">Сохранить сведения</button>
+        <button class="link-btn" type="button" id="expertInfoDelete">Удалить эксперта</button>
       </div>
     </div>
   </div>
+</div>
+
+<!-- Редактор образца письма во весь экран. Раньше он жил окошком
+     внутри вкладки настроек — править страницу Word в щели высотой в
+     треть экрана неудобно. -->
+<div id="tplFullscreen" class="tpl-full hidden">
+  <div class="tpl-full-bar">
+    <span class="tpl-full-title" id="tplFullTitle">Образец письма</span>
+    <span class="tpl-full-hint">Правки сохраняет сам редактор</span>
+    <button type="button" class="tpl-full-close" id="tplFullClose">
+      <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      Закрыть
+    </button>
+  </div>
+  <div class="tpl-full-mount" id="tplFullMount"></div>
 </div>
 
 <div id="gpOverlay" class="modal-overlay hidden">
@@ -897,6 +939,12 @@
           <select id="gpCaseSelect" required>
             <option value="">Выберите проект…</option>
           </select>
+        </label>
+      </div>
+      <div class="add-user-row">
+        <label style="flex:1 1 100%;">Образец письма
+          <select id="gpTemplateSelect"></select>
+          <span class="field-hint" id="gpTemplateHint">Образцы правятся в «Настройки → Шаблон ГП».</span>
         </label>
       </div>
       <p class="row-subtitle" style="margin:-6px 0 0;">Файл сохранится прямо в этот проект («Планирование проекта / ГП»). Суд и номер дела подставятся из карточки проекта — их можно поправить вручную.</p>

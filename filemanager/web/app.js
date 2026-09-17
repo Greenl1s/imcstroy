@@ -126,6 +126,7 @@ const els = {
   addExpertBtn: document.getElementById("addExpertBtn"),
   gpForm: document.getElementById("gpForm"),
   gpCaseSelect: document.getElementById("gpCaseSelect"),
+  gpTemplateSelect: document.getElementById("gpTemplateSelect"),
   gpCourtHeader: document.getElementById("gpCourtHeader"),
   gpCaseNumber: document.getElementById("gpCaseNumber"),
   gpCourtGenitive: document.getElementById("gpCourtGenitive"),
@@ -1263,12 +1264,27 @@ async function uploadInstrumentFiles(instrumentId, fileList, kind) {
 const EXPERTS_PATH = DB_PATH + "/Эксперты";
 
 /** Кнопка нужна ровно в одной папке — в самой папке «Эксперты». */
+/**
+ * Какие кнопки экспертов уместны в этой папке.
+ *
+ * В самой папке «Эксперты» — завести нового и поправить любого (форма
+ * спросит, кого). В папке конкретного эксперта — сразу его: спрашивать
+ * «кого правим», стоя в его папке, незачем.
+ */
 function updateExpertButton(path) {
   if (!els.addExpertBtn) return;
-  const here = path === EXPERTS_PATH;
-  els.addExpertBtn.classList.toggle("hidden", !here);
-  document.getElementById("expertInfoBtn").classList.toggle("hidden", !here);
+  const inRoot = path === EXPERTS_PATH;
+  const insideExpert = path.startsWith(EXPERTS_PATH + "/") &&
+    path.slice(EXPERTS_PATH.length + 1).indexOf("/") === -1;
+
+  els.addExpertBtn.classList.toggle("hidden", !inRoot);
+  document.getElementById("expertInfoBtn").classList.toggle("hidden", !inRoot);
+  document.getElementById("expertInfoThisBtn").classList.toggle("hidden", !insideExpert);
 }
+
+/** Имя эксперта из пути его папки. */
+const expertNameFromPath = (path) =>
+  path.startsWith(EXPERTS_PATH + "/") ? path.slice(EXPERTS_PATH.length + 1).split("/")[0] : null;
 
 bind(els.addExpertBtn, "click", () => openExpertForm());
 bind(document.getElementById("expertCloseBtn"), "click", closeExpertForm);
@@ -1336,16 +1352,28 @@ bind(els.expertForm, "submit", async (e) => {
 
 let expertInfoState = { name: null, items: [] };
 let expertInfoWanted = null;
+// Имя эксперта, если форму открыли из его папки: тогда переключаться
+// между экспертами нельзя — форма про него одного.
+let expertInfoOnly = null;
 
 bind(document.getElementById("expertInfoBtn"), "click", () => openExpertInfo());
+bind(document.getElementById("expertInfoThisBtn"), "click", () => {
+  const name = expertNameFromPath(currentPath);
+  if (name) openExpertInfo(name, { only: true });
+});
 bind(document.getElementById("expertInfoCloseBtn"), "click", () => {
   document.getElementById("expertInfoOverlay").classList.add("hidden");
 });
 
-async function openExpertInfo(preselect) {
+async function openExpertInfo(preselect, { only = false } = {}) {
   const overlay = document.getElementById("expertInfoOverlay");
   const who = document.getElementById("expertInfoWho");
   document.getElementById("expertInfoError").textContent = "";
+  expertInfoOnly = only ? preselect : null;
+  // Из папки эксперта список «кого правим» не нужен: и так понятно.
+  document.getElementById("expertInfoWhoWrap").classList.toggle("hidden", Boolean(expertInfoOnly));
+  document.getElementById("expertInfoHead").textContent = expertInfoOnly
+    ? `Эксперт: ${expertInfoOnly}` : "Редактировать эксперта";
   // Пока список грузится, показывать прошлого человека нельзя: можно
   // успеть набрать в его пунктах и не понять, чьи они.
   document.getElementById("expertInfoItems").innerHTML =
@@ -1389,6 +1417,9 @@ async function loadExpertInfo(name) {
   const data = await apiFetch(`/api/experts/${encodeURIComponent(name)}/info`);
   if (expertInfoWanted !== name) return;
   expertInfoState = { name, items: data.items.length ? data.items : [{ text: "", files: [] }] };
+
+  document.getElementById("expertInfoName").value = name;
+  loadExpertScans(name).catch(() => { /* список сканов не главное */ });
 
   const note = document.getElementById("expertInfoImported");
   if (data.imported) {
@@ -1481,8 +1512,107 @@ function renderExpertInfoItems() {
       }
     }
     renderExpertInfoItems();
+    if (expertInfoState.name) loadExpertScans(expertInfoState.name).catch(() => {});
   });
 })();
+
+/**
+ * Все сканы папки эксперта — и те, что ни к одному пункту не прикреплены.
+ *
+ * Забытый файл иначе лежал бы вечно: в пунктах его нет, в папку никто не
+ * заглядывает, а в письмо он не попадает. Здесь он виден и помечен.
+ */
+async function loadExpertScans(name) {
+  const box = document.getElementById("expertInfoScans");
+  box.innerHTML = '<p class="empty-hint">Загрузка…</p>';
+  const { scans } = await apiFetch(`/api/experts/${encodeURIComponent(name)}/scans`);
+  if (!scans.length) {
+    box.innerHTML = '<p class="empty-hint">Сканов пока нет — прикрепите их к пунктам выше.</p>';
+    return;
+  }
+  box.innerHTML = `
+    <table class="access-rules">
+      <tbody>${scans.map((s) => `
+        <tr>
+          <td class="access-path">${escapeHtml(s.name)}</td>
+          <td>${s.items.length
+            ? `в пункт${s.items.length > 1 ? "ах" : "е"} ${s.items.join(", ")}`
+            : '<span class="ei-orphan">ни к чему не прикреплён</span>'}</td>
+          <td><button type="button" class="link-btn" data-ei-drop-scan="${escapeHtml(s.name)}">Удалить</button></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <p class="access-note">Удаление уносит файл в корзину и убирает его из пунктов.
+    Оттуда его можно вернуть, как любой файл.</p>`;
+
+  box.querySelectorAll("[data-ei-drop-scan]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const file = btn.dataset.eiDropScan;
+      if (!confirm(`Убрать «${file}» в корзину? Из пунктов он тоже пропадёт.`)) return;
+      try {
+        const res = await apiFetch(
+          `/api/experts/${encodeURIComponent(expertInfoState.name)}/scans/${encodeURIComponent(file)}`,
+          { method: "DELETE" });
+        if (Array.isArray(res.items)) expertInfoState.items = res.items;
+        renderExpertInfoItems();
+        showToast("Скан убран в корзину");
+        await loadExpertScans(expertInfoState.name);
+      } catch (err) {
+        settingsError(err);
+      }
+    });
+  });
+}
+
+/**
+ * Переименование эксперта.
+ *
+ * Отдельной кнопкой, а не вместе с сохранением сведений: это правка,
+ * которая задевает проекты, и делать её заодно, между делом, нельзя.
+ */
+bind(document.getElementById("expertInfoRename"), "click", async () => {
+  const field = document.getElementById("expertInfoName");
+  const next = field.value.trim();
+  const was = expertInfoState.name;
+  if (!next) return showToast("Укажите ФИО");
+  if (next === was) return showToast("Имя то же самое — менять нечего");
+  if (!confirm(`Переименовать «${was}» в «${next}»?\n\n` +
+    "Поменяется имя папки и оба файла сведений. Уже созданные письма не изменятся — " +
+    "они лежат готовыми файлами.")) return;
+
+  try {
+    const res = await apiFetch(`/api/experts/${encodeURIComponent(was)}`, {
+      method: "PATCH", body: JSON.stringify({ name: next }),
+    });
+    showToast(`Эксперт переименован в «${res.to || next}»`);
+    forgetLookups();
+    await openExpertInfo(res.to || next, { only: Boolean(expertInfoOnly) });
+    if (currentPath.startsWith(EXPERTS_PATH)) {
+      // Стояли в папке эксперта — её больше нет под прежним именем.
+      renderFolder(expertInfoOnly ? `${EXPERTS_PATH}/${res.to || next}` : currentPath);
+    }
+  } catch (err) {
+    field.value = was;
+    settingsError(err);
+  }
+});
+
+bind(document.getElementById("expertInfoDelete"), "click", async () => {
+  const name = expertInfoState.name;
+  if (!name) return;
+  if (!confirm(`Удалить эксперта «${name}»?\n\n` +
+    "Папка со сведениями и сканами уйдёт в корзину — оттуда её можно вернуть. " +
+    "Проекты, где он записан в специалистах, не меняются.")) return;
+  try {
+    await apiFetch(`/api/experts/${encodeURIComponent(name)}`, { method: "DELETE" });
+    showToast(`Эксперт «${name}» убран в корзину`);
+    document.getElementById("expertInfoOverlay").classList.add("hidden");
+    forgetLookups();
+    renderFolder(EXPERTS_PATH);
+  } catch (err) {
+    settingsError(err);
+  }
+});
 
 async function uploadExpertScan(expertName, file) {
   const form = new FormData();
@@ -2701,38 +2831,48 @@ const ORIGIN_NOTE = {
 
 /* ---------- Вкладка «Шаблон ГП» ----------
 
-   Шаблон письма правится здесь же, настоящими страницами Word: тем же
-   редактором, которым в системе открываются документы. Раньше поправить
-   в письме запятую можно было только пересборкой образа.
+   Письма похожи, но не одинаковы: одному делу нужно письмо с
+   приложением, другому короче и без стоимости. Поэтому образцов
+   несколько, и при создании ГП выбирают, по какому собрать.
 
-   Две вещи, без которых это было бы опасно:
+   Редактор открывается НА ВЕСЬ ЭКРАН, а не окошком внутри вкладки:
+   правя страницу письма в щели высотой в треть экрана, ошибиться
+   проще, чем не ошибиться.
 
-   1. Метки вида {{CASE_NUMBER}} — места, куда подставляются данные.
-      Убрал метку — письмо перестало собираться. Поэтому после правки
-      сразу видно, все ли метки на месте, а не в день отправки в суд.
-   2. Возврат. Есть и «как было до последней правки», и «как было
-      изначально»: первое чаще нужно, второе надёжнее. */
+   Метки вида {{CASE_NUMBER}} — места, куда подставляются данные. Убрал
+   метку — письмо перестало собираться, поэтому состояние каждого
+   образца видно сразу, а не в день отправки в суд. */
 
 let gpTemplateEditor = null;
+let gpTemplateState = { items: [], defaultId: null, max: 5 };
 
 async function renderTemplateTab() {
-  const state = await apiFetch("/api/admin/gp-template");
+  const data = await apiFetch("/api/admin/gp-templates");
+  gpTemplateState = data;
+  const left = data.max - data.items.length;
+
   settingsPane().innerHTML = `
-    <p class="access-note">Это сам файл письма — тот, из которого собирается каждое ГП.
-    Правьте как обычный документ Word: текст, отступы, колонтитулы. Сохранение в редакторе
-    сразу становится новым шаблоном.</p>
+    <p class="access-note">Образец — это сам файл письма. Правится как обычный документ Word:
+    текст, отступы, колонтитулы. Сохранение в редакторе сразу становится новым образцом.
+    При создании ГП выбирают, по какому собрать.</p>
 
-    ${templateStateHtml(state)}
-
-    <div class="settings-row" style="margin:12px 0;">
-      <button type="button" class="upload-btn" id="gpTplRecheck">Проверить метки заново</button>
-      <button type="button" class="upload-btn" id="gpTplBack" ${state.hasBackup ? "" : "disabled"}>
-        Вернуть, как было до правки
-      </button>
-      <button type="button" class="link-btn" id="gpTplReset">Вернуть исходный шаблон</button>
+    <div class="row-between">
+      <b>Образцы писем</b>
+      <span class="access-hint">Занято ${data.items.length} из ${data.max}</span>
     </div>
 
-    <div class="tpl-editor" id="gpTplEditor"></div>
+    <div class="tpl-samples">
+      ${data.items.map((item) => tplSampleHtml(item)).join("")}
+    </div>
+
+    <div class="settings-row" style="margin-top:12px;">
+      <button type="button" class="upload-btn" id="tplAdd" ${left ? "" : "disabled"}>
+        + Добавить образец${left ? ` (осталось ${left})` : " — больше пяти не бывает"}
+      </button>
+    </div>
+
+    <p class="access-note">Заводить, править, скачивать и удалять образцы может только
+    администратор. Выбирать образец при создании письма — любой, кто письмо создаёт.</p>
 
     <details class="tpl-tokens">
       <summary>Что такое метки и какие бывают</summary>
@@ -2740,65 +2880,175 @@ async function renderTemplateTab() {
       менять нельзя, а вот двигать, переносить в другое место письма и оформлять — можно.</p>
       <table class="access-rules">
         <thead><tr><th>Метка</th><th>Что подставляется</th></tr></thead>
-        <tbody>${[...state.required, ...state.optional].map((r) => `
+        <tbody>${[...data.required, ...data.optional].map((r) => `
           <tr><td class="access-path">${escapeHtml(r.token)}</td><td>${escapeHtml(r.what)}</td></tr>`).join("")}
         </tbody>
       </table>
     </details>`;
 
-  bind(document.getElementById("gpTplRecheck"), "click", () => renderTemplateTab().catch(settingsError));
-  bind(document.getElementById("gpTplBack"), "click", () => resetGpTemplate("backup"));
-  bind(document.getElementById("gpTplReset"), "click", () => resetGpTemplate("original"));
-
-  await openGpTemplateEditor();
+  wireTemplateTab();
 }
 
-/** Состояние шаблона словами: чего не хватает и чем это грозит. */
-function templateStateHtml(state) {
-  if (state.broken) {
-    return `<p class="error-text">Файл шаблона повреждён: ${escapeHtml(state.message || "не читается")}.
-      Нажмите «Вернуть исходный шаблон».</p>`;
+function tplSampleHtml(item) {
+  const state = item.state || {};
+  const problem = state.broken
+    ? "файл повреждён"
+    : !state.ok
+      ? `нет меток: ${state.missing.map((m) => m.token).join(", ")}`
+      : "";
+  return `
+    <section class="tpl-sample${item.isDefault ? " on" : ""}${problem ? " bad" : ""}" data-tpl="${escapeHtml(item.id)}">
+      <div class="tpl-sample-head">
+        <span class="tpl-name">${escapeHtml(item.name)}</span>
+        ${item.isDefault ? '<span class="tpl-badge">Основной</span>' : ""}
+        <span class="access-hint">${item.updatedAt
+          ? "правлено " + new Date(item.updatedAt).toLocaleDateString("ru-RU")
+          : ""}</span>
+      </div>
+      ${problem
+        ? `<p class="tpl-bad-note">Письмо по этому образцу не соберётся: ${escapeHtml(problem)}.</p>`
+        : '<p class="tpl-ok-note">Все обязательные метки на месте.</p>'}
+      <div class="settings-row tpl-actions">
+        <button type="button" class="primary" data-tpl-open="${escapeHtml(item.id)}">
+          ⛶ Открыть во весь экран
+        </button>
+        <button type="button" class="upload-btn" data-tpl-download="${escapeHtml(item.id)}">Скачать</button>
+        <button type="button" class="upload-btn" data-tpl-rename="${escapeHtml(item.id)}">Переименовать</button>
+        ${item.isDefault ? "" : `<button type="button" class="upload-btn" data-tpl-default="${escapeHtml(item.id)}">Сделать основным</button>`}
+        <button type="button" class="upload-btn" data-tpl-back="${escapeHtml(item.id)}" ${item.hasBackup ? "" : "disabled"}>
+          Вернуть, как было до правки
+        </button>
+        <button type="button" class="link-btn" data-tpl-reset="${escapeHtml(item.id)}">Вернуть исходный</button>
+        ${gpTemplateState.items.length > 1
+          ? `<button type="button" class="link-btn" data-tpl-remove="${escapeHtml(item.id)}">Удалить образец</button>`
+          : ""}
+      </div>
+    </section>`;
+}
+
+function wireTemplateTab() {
+  const pane = settingsPane();
+  const nameOf = (id) => (gpTemplateState.items.find((i) => i.id === id) || {}).name || "образец";
+
+  pane.querySelectorAll("[data-tpl-open]").forEach((b) =>
+    b.addEventListener("click", () => openTemplateFullscreen(b.dataset.tplOpen)));
+
+  pane.querySelectorAll("[data-tpl-download]").forEach((b) =>
+    b.addEventListener("click", () => {
+      // Обычной ссылкой: файл отдаёт сервер, и проверку прав он делает сам.
+      window.location.href = `/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplDownload)}/download`;
+    }));
+
+  pane.querySelectorAll("[data-tpl-rename]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const id = b.dataset.tplRename;
+      const next = prompt("Название образца:", nameOf(id));
+      if (next === null) return;
+      await templateAction(`/api/admin/gp-templates/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify({ name: next }) }, "Переименовано");
+    }));
+
+  pane.querySelectorAll("[data-tpl-default]").forEach((b) =>
+    b.addEventListener("click", () => templateAction(
+      `/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplDefault)}`,
+      { method: "PATCH", body: JSON.stringify({ isDefault: true }) },
+      "Теперь этот образец предлагается первым")));
+
+  pane.querySelectorAll("[data-tpl-back]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (!confirm(`Вернуть образец «${nameOf(b.dataset.tplBack)}» к тому, каким он был до последней правки?`)) return;
+      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplBack)}/reset`,
+        { method: "POST", body: JSON.stringify({ to: "backup" }) }, "Вернули прежнюю правку");
+    }));
+
+  pane.querySelectorAll("[data-tpl-reset]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (!confirm(`Вернуть исходный вид образца «${nameOf(b.dataset.tplReset)}»?\n\n` +
+        "Нынешний уйдёт в копию «до правки» — вернуться можно.")) return;
+      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplReset)}/reset`,
+        { method: "POST", body: JSON.stringify({ to: "original" }) }, "Исходный образец возвращён");
+    }));
+
+  pane.querySelectorAll("[data-tpl-remove]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (!confirm(`Удалить образец «${nameOf(b.dataset.tplRemove)}»? Это необратимо.`)) return;
+      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplRemove)}`,
+        { method: "DELETE" }, "Образец удалён");
+    }));
+
+  bind(document.getElementById("tplAdd"), "click", async () => {
+    const name = prompt("Название нового образца:", "Новый образец");
+    if (name === null) return;
+    // Новый делаем копией основного: почти всегда его и хотят немного
+    // переделать, а не писать письмо с нуля.
+    await templateAction("/api/admin/gp-templates",
+      { method: "POST", body: JSON.stringify({ name, fromId: gpTemplateState.defaultId }) },
+      "Образец заведён — откройте и поправьте");
+  });
+}
+
+async function templateAction(url, options, okMessage) {
+  try {
+    await apiFetch(url, options);
+    showToast(okMessage);
+    forgetGpTemplates();
+    await renderTemplateTab();
+  } catch (err) {
+    settingsError(err);
   }
-  if (!state.ok) {
-    return `<div class="tpl-warn">
-      <b>Письмо сейчас не соберётся.</b> В шаблоне не хватает меток:
-      <ul>${state.missing.map((m) => `<li><code>${escapeHtml(m.token)}</code> — ${escapeHtml(m.what)}</li>`).join("")}</ul>
-      Верните их в текст или нажмите «Вернуть исходный шаблон».
-    </div>`;
-  }
-  const optionalMissing = (state.missingOptional || []).length;
-  return `<div class="tpl-ok">Все обязательные метки на месте — письмо соберётся.${
-    optionalMissing ? ` Необязательных не хватает: ${optionalMissing} (окончания слов будут одинаковыми для одного и нескольких).` : ""
-  }</div>`;
 }
 
 /**
- * Встроенный редактор.
+ * Редактор во весь экран.
  *
- * Тот же OnlyOffice, что и для остальных документов, только открытый
- * прямо в окне настроек: человек листает страницы письма и правит их на
- * месте, а не ходит за файлом в папку.
+ * Раньше он жил окошком внутри вкладки, и это было неудобно: страница
+ * письма в щели высотой в треть экрана. Теперь поверх всего, как
+ * отдельное приложение, — и закрывается по Escape или кнопкой.
  */
-async function openGpTemplateEditor() {
-  const box = document.getElementById("gpTplEditor");
-  box.innerHTML = '<div class="empty-hint">Открываем редактор…</div>';
+async function openTemplateFullscreen(id) {
+  const item = gpTemplateState.items.find((i) => i.id === id) || { name: "Образец" };
+  const overlay = document.getElementById("tplFullscreen");
+  document.getElementById("tplFullTitle").textContent =
+    `${item.name} — образец гарантийного письма`;
+  const mount = document.getElementById("tplFullMount");
+  mount.innerHTML = '<div class="empty-hint" style="padding:24px;">Открываем редактор…</div>';
+  overlay.classList.remove("hidden");
+  document.body.classList.add("no-scroll");
+
   try {
-    const { config, scriptUrl } = await apiFetch("/api/admin/gp-template/editor");
+    const { config, scriptUrl } = await apiFetch(
+      `/api/admin/gp-templates/${encodeURIComponent(id)}/editor`);
     if (!window.DocsAPI) await loadExternalScript(scriptUrl);
-    box.innerHTML = '<div id="gpTplEditorMount"></div>';
-    // Старый редактор закрываем: два открытых на один файл спорят за
-    // право сохранить, и выигрывает тот, кто закрылся последним.
-    if (gpTemplateEditor && gpTemplateEditor.destroyEditor) {
-      try { gpTemplateEditor.destroyEditor(); } catch (err) { /* уже закрыт */ }
-    }
-    gpTemplateEditor = new window.DocsAPI.DocEditor("gpTplEditorMount", config);
+    mount.innerHTML = '<div id="tplFullEditor"></div>';
+    gpTemplateEditor = new window.DocsAPI.DocEditor("tplFullEditor", config);
   } catch (err) {
-    // Редактор — не единственный способ жить: кнопки возврата работают и
-    // без него, поэтому не роняем всю вкладку.
-    box.innerHTML = `<div class="empty-hint">Не удалось открыть редактор: ${escapeHtml(err.message)}.<br>
+    mount.innerHTML = `<div class="empty-hint" style="padding:24px;">
+      Не удалось открыть редактор: ${escapeHtml(err.message)}.<br>
       Проверьте, что сервер документов (OnlyOffice) запущен.</div>`;
   }
 }
+
+function closeTemplateFullscreen() {
+  const overlay = document.getElementById("tplFullscreen");
+  if (!overlay || overlay.classList.contains("hidden")) return;
+  // Закрываем редактор, а не просто прячем: незакрытый продолжает
+  // держать документ и спорить за право сохранить со следующим.
+  if (gpTemplateEditor && gpTemplateEditor.destroyEditor) {
+    try { gpTemplateEditor.destroyEditor(); } catch (err) { /* уже закрыт */ }
+  }
+  gpTemplateEditor = null;
+  overlay.classList.add("hidden");
+  document.body.classList.remove("no-scroll");
+  document.getElementById("tplFullMount").innerHTML = "";
+  // Пока правили, метки могли пропасть — показываем состояние заново.
+  forgetGpTemplates();
+  if (settingsTab === "template") renderTemplateTab().catch(settingsError);
+}
+
+bind(document.getElementById("tplFullClose"), "click", closeTemplateFullscreen);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTemplateFullscreen();
+});
 
 function loadExternalScript(src) {
   return new Promise((resolve, reject) => {
@@ -2808,22 +3058,6 @@ function loadExternalScript(src) {
     script.onerror = () => reject(new Error("не загрузился скрипт редактора"));
     document.body.appendChild(script);
   });
-}
-
-async function resetGpTemplate(to) {
-  const question = to === "backup"
-    ? "Вернуть шаблон к тому, каким он был до последней правки?"
-    : "Вернуть исходный шаблон? Ваши правки уйдут в копию «до последней правки».";
-  if (!confirm(question)) return;
-  try {
-    await apiFetch("/api/admin/gp-template/reset", {
-      method: "POST", body: JSON.stringify({ to }),
-    });
-    showToast(to === "backup" ? "Шаблон возвращён к прежней правке" : "Исходный шаблон возвращён");
-    await renderTemplateTab();
-  } catch (err) {
-    settingsError(err);
-  }
 }
 
 async function renderPlanfixTab() {
@@ -3091,6 +3325,36 @@ function renderGpExpertsOrder() {
   });
 }
 
+/* Образцы письма для формы создания ГП.
+
+   Держим в памяти: список из пяти строк, а форму открывают по многу раз
+   за день. Сбрасывается, когда образцы правят в настройках. */
+let gpTemplatesCache = null;
+const forgetGpTemplates = () => { gpTemplatesCache = null; };
+
+async function fillGpTemplates() {
+  const select = els.gpTemplateSelect;
+  if (!select) return;
+  select.innerHTML = '<option value="">Загрузка…</option>';
+  try {
+    if (!gpTemplatesCache) gpTemplatesCache = await apiFetch("/api/gp/templates");
+    const { items, defaultId } = gpTemplatesCache;
+    select.innerHTML = items
+      .map((i) => `<option value="${escapeHtml(i.id)}"${i.id === defaultId ? " selected" : ""}>${escapeHtml(i.name)}</option>`)
+      .join("");
+    const hint = document.getElementById("gpTemplateHint");
+    if (hint) {
+      hint.textContent = items.length > 1
+        ? `Заведено образцов: ${items.length}. Правятся в «Настройки → Шаблон ГП».`
+        : "Пока образец один. Ещё заводятся в «Настройки → Шаблон ГП».";
+    }
+  } catch (err) {
+    // Без списка форма всё равно должна работать: сервер возьмёт
+    // основной образец сам.
+    select.innerHTML = '<option value="">Основной образец</option>';
+  }
+}
+
 async function openGpForm() {
   els.gpForm.reset();
   els.gpQuestionsList.innerHTML = "";
@@ -3110,6 +3374,8 @@ async function openGpForm() {
   } catch {
     els.gpCaseSelect.innerHTML = '<option value="">Не удалось загрузить список проектов</option>';
   }
+
+  await fillGpTemplates();
 
   els.gpExpertsList.innerHTML = '<div class="empty-hint">Загрузка списка экспертов…</div>';
   if (els.gpExpertSearch) els.gpExpertSearch.value = "";
@@ -3237,6 +3503,7 @@ els.gpForm.addEventListener("submit", async (e) => {
       method: "POST",
       body: JSON.stringify({
         caseId,
+        templateId: els.gpTemplateSelect ? els.gpTemplateSelect.value : "",
         courtHeader: els.gpCourtHeader.value.trim(),
         caseNumber: els.gpCaseNumber.value.trim(),
         courtGenitive: els.gpCourtGenitive.value.trim(),
