@@ -407,6 +407,58 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
   padding: 16px 18px; margin-top: 11px;
 }
 .card-box.holder { border-color: var(--issued-line); background: var(--issued-bg); }
+
+/* ---------- Наличие: кто сколько держит ---------- */
+.holder-sub {
+  margin: 10px 0 2px; font-size: 12.5px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--muted); font-weight: 600;
+}
+.holder-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--issued-line);
+}
+.holder-line:last-child { border-bottom: 0; }
+.holder-line b { font-weight: 600; }
+
+/* Поле «сколько штук»: кнопки − и + по бокам от числа. Пальцем по ним
+   попасть проще, чем набрать цифру на телефоне у шкафа с приборами. */
+.qty-label { display: flex; flex-direction: column; gap: 4px; }
+.qty-hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+.qty-box { display: inline-flex; align-items: center; }
+.qty-box button {
+  width: 36px; min-width: 36px; height: 36px; padding: 0;
+  font-size: 18px; line-height: 1;
+}
+.qty-box input {
+  width: 66px; text-align: center; height: 36px; margin: 0 6px;
+}
+
+/* ---------- Окно «сколько наклеек печатать» ---------- */
+/* Пояснение переносится по словам: .row-subtitle по умолчанию режет
+   строку многоточием — это правильно в списке приборов и неправильно
+   здесь, где текст надо прочитать целиком. */
+.qr-count-note { margin: 0 0 14px; white-space: normal; overflow: visible; }
+.qr-count-table { width: 100%; border-collapse: collapse; }
+.qr-count-table th, .qr-count-table td {
+  padding: 8px 6px; border-bottom: 1px solid var(--line);
+  text-align: left; vertical-align: middle;
+}
+.qr-count-table th {
+  font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600;
+}
+.qr-count-table .num { text-align: right; white-space: nowrap; }
+.qr-count-table td b { display: block; }
+.qr-count-table .row-subtitle { display: block; }
+.qr-count-table .qty-box { justify-content: flex-end; }
+.qr-count-total { margin-top: 12px; }
+
+@media (max-width: 560px) {
+  /* На телефоне столбец «наличие» уходит: он справочный, а место нужно
+     самому полю с числом. */
+  .qr-count-table th.num:first-of-type, .qr-count-table td.num:first-of-type { display: none; }
+  .qr-count-table th, .qr-count-table td { padding: 8px 2px; }
+}
 .card-box h4 {
   margin: 0 0 12px; font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--muted); font-weight: 600;
