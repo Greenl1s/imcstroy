@@ -18,6 +18,7 @@ const fileLink = require("./fileLink");
 const folderAccess = require("./folderAccess");
 const folderPermissions = require("./folderPermissions");
 const gpGenerate = require("./gpGenerate");
+const gpDraft = require("./gpDraft");
 const expertsLib = require("./experts");
 const expertInfo = require("./expertInfo");
 const gpTemplate = require("./gpTemplate");
@@ -1243,160 +1244,363 @@ app.get("/api/admin/gp-templates/:id/download", auth.requireAuth, auth.requireAd
   }
 });
 
-app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
-  try {
-    const body = req.body || {};
+/* ---------------- Гарантийное письмо ---------------- */
 
-    // ГП теперь всегда привязано к конкретному проекту — сохраняется
-    // прямо в его "Планирование проекта/ГП", а не в общую фиксированную папку.
-    const caseId = Number(body.caseId);
-    if (!caseId) {
-      return res.status(400).json({ message: "Выберите проект, к которому относится ГП" });
+/**
+ * ПОЧЕМУ ПИСЬМО СНАЧАЛА ПОКАЗЫВАЮТ, А ПОТОМ СОХРАНЯЮТ.
+ *
+ * Письмо уходит в суд. Пока оно собиралось сразу в папку дела, ошибку
+ * было видно только там же: в папке оставался файл «вроде не тот», рядом
+ * появлялся второй, и через месяц никто не мог сказать, какой отправляли.
+ *
+ * Теперь письмо собирается в черновик (см. gpDraft.js), показывается
+ * целиком — обоими файлами, с приложением и без, — и переезжает в дело
+ * только по кнопке «Сохранить».
+ *
+ * Проверки у предпросмотра и у сохранения ОДНИ И ТЕ ЖЕ и живут в
+ * prepareGp: два пути, проверяющих «почти одно и то же», однажды
+ * разойдутся, и один начнёт пускать то, что другой не пускает.
+ */
+
+/** Кто имеет право создавать файлы в папке проекта. */
+async function assertCanWriteToCase(req, kase) {
+  if (req.user.role === "admin") return;
+  if (!req.user.can_cases) {
+    const err = new Error("Нет доступа к этому разделу");
+    err.status = 403;
+    throw err;
+  }
+  const rules = await folderAccess.getUserRules(req.user.id);
+  if (folderAccess.resolveAccess(rules, kase.folder_path) !== "write") {
+    const err = new Error("Нет прав на создание файлов в этом проекте");
+    err.status = 403;
+    throw err;
+  }
+}
+
+function gpFail(message, status = 400) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+/**
+ * Эксперты для письма: сведения пунктами и сканы в порядке пунктов.
+ *
+ * Читается заново и при предпросмотре, и при сохранении — намеренно:
+ * между «посмотрел» и «сохранил» сканы могли добавить или удалить, и
+ * письмо должно уйти с тем, что есть сейчас, а не с тем, что было.
+ */
+async function readExpertsForGp(expertPaths) {
+  const experts = [];
+  for (const p of expertPaths) {
+    // Проверяем не только начало пути, но и отсутствие ".." — иначе
+    // "/База данных/Эксперты/../../<чужая папка>" проходило проверку.
+    if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/") || p.split(/[\\/]/).includes("..")) {
+      throw gpFail("Недопустимый путь к папке эксперта");
     }
-    const { rows: caseRows } = await db.query(
-      "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
-    if (!caseRows.length) {
-      return res.status(404).json({ message: "Проект не найден или удалён" });
-    }
-    const kase = caseRows[0];
-    const gpOutputDir = `${kase.folder_path}/Планирование проекта/ГП`;
+    const name = path.basename(p); // имя папки эксперта — как он подписывается в письме
 
-    if (req.user.role !== "admin") {
-      if (!req.user.can_cases) {
-        return res.status(403).json({ message: "Нет доступа к этому разделу" });
-      }
-      const rules = await folderAccess.getUserRules(req.user.id);
-      if (folderAccess.resolveAccess(rules, kase.folder_path) !== "write") {
-        return res.status(403).json({ message: "Нет прав на создание файлов в этом проекте" });
-      }
+    // Сведения берём из пунктов, а не из .docx: в пунктах есть то, чего
+    // в файле нет и быть не может, — какой скан какой пункт
+    // подтверждает. Файл остаётся выгрузкой для чтения.
+    const stored = await expertInfo.read(filesLib.safeResolve, p);
+    let items = stored.items;
+    if (!items.length) {
+      // Эксперт заведён до этой правки: пунктов ещё нет, но текст
+      // лежит в старом файле. Берём его — без сканов, но письмо
+      // должно получиться.
+      const legacy = await expertInfo.importLegacy(
+        filesLib.safeResolve, p, name, gpGenerate.extractParagraphTexts);
+      items = legacy.items;
     }
-
-    const questions = Array.isArray(body.questions) ? body.questions.map((q) => String(q || "").trim()).filter(Boolean) : [];
-    const expertPaths = Array.isArray(body.expertPaths) ? body.expertPaths : [];
-
-    if (!questions.length) {
-      return res.status(400).json({ message: "Добавьте хотя бы один вопрос экспертизы" });
-    }
-    if (!expertPaths.length) {
-      return res.status(400).json({ message: "Выберите хотя бы одного эксперта" });
+    if (!items.length) {
+      throw gpFail(`У эксперта «${name}» не заполнены сведения. ` +
+        "Откройте «Сведения об эксперте» в папке «Эксперты».");
     }
 
-    const experts = [];
-    for (const p of expertPaths) {
-      // Проверяем не только начало пути, но и отсутствие ".." — иначе
-      // "/База данных/Эксперты/../../<чужая папка>" проходило проверку.
-      if (typeof p !== "string" || !p.startsWith(EXPERTS_DIR + "/") || p.split(/[\\/]/).includes("..")) {
-        return res.status(400).json({ message: "Недопустимый путь к папке эксперта" });
-      }
-      const name = path.basename(p); // имя папки эксперта — как он подписывается в письме
-
-      // Сведения берём из пунктов, а не из .docx: в пунктах есть то, чего
-      // в файле нет и быть не может, — какой скан какой пункт
-      // подтверждает. Файл остаётся выгрузкой для чтения.
-      const stored = await expertInfo.read(filesLib.safeResolve, p);
-      let items = stored.items;
-      if (!items.length) {
-        // Эксперт заведён до этой правки: пунктов ещё нет, но текст
-        // лежит в старом файле. Берём его — без сканов, но письмо
-        // должно получиться.
-        const legacy = await expertInfo.importLegacy(
-          filesLib.safeResolve, p, name, gpGenerate.extractParagraphTexts);
-        items = legacy.items;
-      }
-      if (!items.length) {
-        return res.status(400).json({
-          message: `У эксперта «${name}» не заполнены сведения. Откройте «Сведения об эксперте» в папке «Эксперты».`,
-        });
-      }
-
-      // Сканы — в порядке пунктов: первым в биографии стоит диплом,
-      // значит первым подтверждением в приложении будет он же.
-      const scans = [];
-      for (const item of items) {
-        for (const fileName of item.files) {
-          try {
-            scans.push({
-              name: fileName,
-              buffer: await fs.promises.readFile(
-                filesLib.safeResolve(`${p}/${expertInfo.ATTACH_DIRNAME}/${fileName}`)),
-            });
-          } catch {
-            // Скан удалили мимо системы — письмо всё равно должно уйти.
-          }
+    // Сканы — в порядке пунктов: первым в биографии стоит диплом,
+    // значит первым подтверждением в приложении будет он же.
+    const scans = [];
+    for (const item of items) {
+      for (const fileName of item.files) {
+        try {
+          scans.push({
+            name: fileName,
+            buffer: await fs.promises.readFile(
+              filesLib.safeResolve(`${p}/${expertInfo.ATTACH_DIRNAME}/${fileName}`)),
+          });
+        } catch {
+          // Скан удалили мимо системы — письмо всё равно должно уйти.
         }
       }
-      experts.push({ name, descLines: items.map((i) => i.text), scans });
     }
+    experts.push({ name, descLines: items.map((i) => i.text), scans });
+  }
+  return experts;
+}
 
-    const data = {
-      courtHeader: String(body.courtHeader || ""),
-      caseNumber: String(body.caseNumber || ""),
-      courtGenitive: String(body.courtGenitive || ""),
-      expertiseType: String(body.expertiseType || ""),
-      questions,
-      costText: `${body.costAmount || ""} (${body.costWords || ""})`,
-      termText: `${body.termDays || ""} (${body.termWords || ""})`,
-      experts,
-    };
+/** Имена файлов письма. Одно место на всё: их сверяют ещё и на занятость. */
+function gpFileNames(caseNumber) {
+  const safe = String(caseNumber || "без номера").replace(/[\\/]/g, "-");
+  return {
+    plainName: `ГП по делу № ${safe}.docx`,
+    withDocsName: `ГП по делу № ${safe} с приложением.docx`,
+  };
+}
 
-    // Образец — тот, что выбрали в форме; не выбрали — основной.
-    const { item: sample, buffer: templateBuffer } =
-      await gpTemplate.readSample(filesLib.safeResolve, body.templateId);
-    const templateState = gpTemplate.inspect(templateBuffer);
-    if (!templateState.ok) {
-      return res.status(400).json({
-        message: `Образец «${sample.name}» испорчен: не хватает ` +
-          templateState.missing.map((m) => m.token).join(", ") +
-          ". Откройте «Настройки → Шаблон ГП» и верните метки на место " +
-          "или нажмите «Вернуть исходный шаблон».",
-      });
+/** Проверяем ОБА имени разом: иначе одно ляжет, а второе упадёт. */
+function assertNamesFree(destDir, names) {
+  for (const name of names) {
+    if (fs.existsSync(path.join(destDir, name))) {
+      throw gpFail(`Файл «${name}» уже есть в этом проекте`);
     }
-    const built = gpGenerate.generateGP(data, templateBuffer);
+  }
+}
 
-    const safeCaseNumber = String(body.caseNumber || "без номера").replace(/[\\/]/g, "-");
-    const fileName = `ГП по делу № ${safeCaseNumber}.docx`;
-    const fileNameWithDocs = `ГП по делу № ${safeCaseNumber} с приложением.docx`;
-    const destDir = filesLib.safeResolve(gpOutputDir);
+/**
+ * Всё, что нужно для письма: проект, права, данные, образец.
+ * Бросает ошибку с полем status — её и отдают запросы.
+ */
+async function prepareGp(req) {
+  const body = req.body || {};
+
+  // ГП всегда привязано к проекту — сохраняется прямо в его
+  // "Планирование проекта/ГП", а не в общую фиксированную папку.
+  const caseId = Number(body.caseId);
+  if (!caseId) throw gpFail("Выберите проект, к которому относится ГП");
+
+  const { rows: caseRows } = await db.query(
+    "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
+  if (!caseRows.length) throw gpFail("Проект не найден или удалён", 404);
+
+  const kase = caseRows[0];
+  const gpOutputDir = `${kase.folder_path}/Планирование проекта/ГП`;
+  await assertCanWriteToCase(req, kase);
+
+  const questions = Array.isArray(body.questions)
+    ? body.questions.map((q) => String(q || "").trim()).filter(Boolean) : [];
+  const expertPaths = Array.isArray(body.expertPaths) ? body.expertPaths : [];
+  if (!questions.length) throw gpFail("Добавьте хотя бы один вопрос экспертизы");
+  if (!expertPaths.length) throw gpFail("Выберите хотя бы одного эксперта");
+
+  const experts = await readExpertsForGp(expertPaths);
+
+  const data = {
+    courtHeader: String(body.courtHeader || ""),
+    caseNumber: String(body.caseNumber || ""),
+    courtGenitive: String(body.courtGenitive || ""),
+    expertiseType: String(body.expertiseType || ""),
+    questions,
+    costText: `${body.costAmount || ""} (${body.costWords || ""})`,
+    termText: `${body.termDays || ""} (${body.termWords || ""})`,
+    experts,
+  };
+
+  // Образец — тот, что выбрали в форме; не выбрали — основной.
+  const { item: sample, buffer: templateBuffer } =
+    await gpTemplate.readSample(filesLib.safeResolve, body.templateId);
+  const templateState = gpTemplate.inspect(templateBuffer);
+  if (!templateState.ok) {
+    throw gpFail(`Образец «${sample.name}» испорчен: не хватает ` +
+      templateState.missing.map((m) => m.token).join(", ") +
+      ". Откройте «Настройки → Шаблон ГП» и верните метки на место " +
+      "или нажмите «Вернуть исходный шаблон».");
+  }
+
+  return {
+    kase, gpOutputDir, data, experts, expertPaths, templateBuffer,
+    caseId, ...gpFileNames(body.caseNumber),
+  };
+}
+
+/** Письмо прямо в дело, без предпросмотра. */
+app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
+  try {
+    const p = await prepareGp(req);
+    const built = gpGenerate.generateGP(p.data, p.templateBuffer);
+
+    const destDir = filesLib.safeResolve(p.gpOutputDir);
     await fs.promises.mkdir(destDir, { recursive: true });
+    assertNamesFree(destDir, [p.plainName, p.withDocsName]);
 
-    // Проверяем ОБА имени до записи: иначе при повторном создании письмо
-    // без приложений легло бы поверх прежнего, а второе упало на
-    // проверке — и в папке осталась бы пара из нового и старого.
-    for (const name of [fileName, fileNameWithDocs]) {
-      if (fs.existsSync(path.join(destDir, name))) {
-        return res.status(400).json({
-          message: `Файл «${name}» уже есть в этом проекте`,
-        });
-      }
-    }
-
-    await fs.promises.writeFile(path.join(destDir, fileName), built.plain);
-    events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + fileName, name: fileName });
-
-    // Второе письмо — то же самое, но со вшитыми сканами. Отдельные
-    // копии файлов рядом больше не кладём: документы теперь внутри
-    // письма, и папка с их дубликатами только сбивала бы с толку —
-    // непонятно, что из этого отправлять.
-    const written = [fileName];
-    if (built.withAttachments) {
-      await fs.promises.writeFile(path.join(destDir, fileNameWithDocs), built.withAttachments);
-      events.log(req.user, "gp_generate",
-        { path: gpOutputDir + "/" + fileNameWithDocs, name: fileNameWithDocs });
-      written.push(fileNameWithDocs);
-    }
-
-    // Ни у кого из выбранных нет сканов — честно говорим, что второго
-    // файла не будет, вместо пустого «Приложения» на отдельном листе.
-    const noScans = !built.withAttachments;
+    const written = await writeGpFiles(req, p.gpOutputDir, destDir, {
+      plainName: p.plainName, withDocsName: p.withDocsName,
+      plain: built.plain, withAttachments: built.withAttachments,
+    });
 
     res.json({
-      ok: true, name: fileName, path: gpOutputDir + "/" + fileName,
-      caseFolderPath: kase.folder_path,
-      files: written, noScans,
+      ok: true, name: p.plainName, path: p.gpOutputDir + "/" + p.plainName,
+      caseFolderPath: p.kase.folder_path,
+      files: written, noScans: !built.withAttachments,
     });
   } catch (err) {
-    console.error("Не удалось создать ГП:", err);
-    res.status(500).json({ message: "Не удалось создать документ: " + err.message });
+    if (!err.status) console.error("Не удалось создать ГП:", err);
+    res.status(err.status || 500).json({
+      message: err.status ? err.message : "Не удалось создать документ: " + err.message,
+    });
+  }
+});
+
+/** Запись обоих писем и обе записи в журнале — одним местом. */
+async function writeGpFiles(req, gpOutputDir, destDir, { plainName, withDocsName, plain, withAttachments }) {
+  await fs.promises.writeFile(path.join(destDir, plainName), plain);
+  events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + plainName, name: plainName });
+  const written = [plainName];
+
+  // Второе письмо — то же самое, но со вшитыми сканами. Отдельные копии
+  // файлов рядом не кладём: документы теперь внутри письма, и папка с их
+  // дубликатами только сбивала бы с толку — непонятно, что отправлять.
+  if (withAttachments) {
+    await fs.promises.writeFile(path.join(destDir, withDocsName), withAttachments);
+    events.log(req.user, "gp_generate", { path: gpOutputDir + "/" + withDocsName, name: withDocsName });
+    written.push(withDocsName);
+  }
+  return written;
+}
+
+/**
+ * Предпросмотр: собрать письмо в черновик и показать.
+ *
+ * Занятость имён проверяется УЖЕ ЗДЕСЬ, хотя сохранения ещё не было:
+ * узнать, что письмо по этому делу уже есть, лучше до того, как человек
+ * вычитал две страницы.
+ */
+app.post("/api/gp/preview", auth.requireAuth, async (req, res) => {
+  try {
+    const p = await prepareGp(req);
+    const destDir = filesLib.safeResolve(p.gpOutputDir);
+    if (fs.existsSync(destDir)) {
+      assertNamesFree(destDir, [p.plainName, p.withDocsName]);
+    }
+
+    const built = gpGenerate.generateGP(p.data, p.templateBuffer);
+    const draft = await gpDraft.create(filesLib.safeResolve, {
+      userId: req.user.id,
+      plain: built.plain,
+      withAttachments: built.withAttachments,
+      meta: {
+        caseId: p.caseId,
+        caseFolderPath: p.kase.folder_path,
+        gpOutputDir: p.gpOutputDir,
+        plainName: p.plainName,
+        withDocsName: p.withDocsName,
+        expertPaths: p.expertPaths,
+      },
+    });
+
+    res.json({
+      ok: true,
+      draftId: draft.id,
+      plainName: draft.plainName,
+      withDocsName: draft.withDocsName,
+      noScans: draft.noScans,
+      gpOutputDir: draft.gpOutputDir,
+    });
+  } catch (err) {
+    if (!err.status) console.error("Не удалось собрать предпросмотр ГП:", err);
+    res.status(err.status || 500).json({
+      message: err.status ? err.message : "Не удалось собрать письмо: " + err.message,
+    });
+  }
+});
+
+/**
+ * Пересобрать письмо с приложением из текущего текста.
+ *
+ * Вызывается перед тем, как показать его: человек мог только что
+ * поправить текст в редакторе, и показать ему старую редакцию — значит
+ * соврать ровно в том месте, ради которого предпросмотр и сделан.
+ */
+async function rebuildWithDocs(req, meta) {
+  const experts = await readExpertsForGp(meta.expertPaths);
+  const plain = await gpDraft.readPlain(filesLib.safeResolve, meta);
+  const withDocs = gpGenerate.attachScans(plain, experts);
+  if (withDocs) await gpDraft.writeWithDocs(filesLib.safeResolve, meta, withDocs);
+  return { experts, plain, withDocs };
+}
+
+app.post("/api/gp/preview/:id/rebuild", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await gpDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+    const { withDocs } = await rebuildWithDocs(req, meta);
+    res.json({ ok: true, noScans: !withDocs });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+/** Окно редактора для файла черновика. Править можно только текст. */
+app.get("/api/gp/preview/:id/editor", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await gpDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+    const wantDocs = req.query.file === "docs";
+    if (wantDocs && meta.noScans) {
+      throw gpFail("У этого письма нет приложения: ни у одного эксперта нет сканов");
+    }
+    // Письмо с приложением открывается ТОЛЬКО на просмотр: оно
+    // пересобирается из текстового, и правка в нём всё равно пропала бы
+    // при сохранении. Лучше не дать её сделать, чем потерять молча.
+    const { config, scriptUrl } = onlyoffice.buildEditorConfig({
+      relPath: wantDocs ? gpDraft.withDocsPath(meta) : gpDraft.plainPath(meta),
+      fileName: wantDocs ? meta.withDocsName : meta.plainName,
+      userId: req.user.id,
+      userName: req.user.name || req.user.username,
+      canEdit: !wantDocs,
+    });
+    res.json({ config, scriptUrl, canEdit: !wantDocs });
+  } catch (err) {
+    res.status(err.status || 400).json({ message: err.message });
+  }
+});
+
+/** Сохранить письмо в дело. */
+app.post("/api/gp/preview/:id/save", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await gpDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+
+    // Права проверяем ЗАНОВО: между предпросмотром и сохранением их
+    // могли отозвать, а письмо кладётся именно сейчас.
+    const { rows } = await db.query(
+      "SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [meta.caseId]);
+    if (!rows.length) throw gpFail("Проект не найден или удалён", 404);
+    await assertCanWriteToCase(req, rows[0]);
+
+    // Приложение собирается из текущего текста письма — с правками,
+    // если их вносили в редакторе.
+    const { plain, withDocs } = await rebuildWithDocs(req, meta);
+
+    const destDir = filesLib.safeResolve(meta.gpOutputDir);
+    await fs.promises.mkdir(destDir, { recursive: true });
+    assertNamesFree(destDir, [meta.plainName, meta.withDocsName]);
+
+    const written = await writeGpFiles(req, meta.gpOutputDir, destDir, {
+      plainName: meta.plainName, withDocsName: meta.withDocsName,
+      plain, withAttachments: withDocs,
+    });
+    await gpDraft.remove(filesLib.safeResolve, meta.id);
+
+    res.json({
+      ok: true, name: meta.plainName, path: meta.gpOutputDir + "/" + meta.plainName,
+      caseFolderPath: meta.caseFolderPath,
+      files: written, noScans: !withDocs,
+    });
+  } catch (err) {
+    if (!err.status) console.error("Не удалось сохранить ГП:", err);
+    res.status(err.status || 500).json({
+      message: err.status ? err.message : "Не удалось сохранить письмо: " + err.message,
+    });
+  }
+});
+
+/** Отказались — черновик убираем сразу, а не ждём суток. */
+app.delete("/api/gp/preview/:id", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await gpDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+    await gpDraft.remove(filesLib.safeResolve, meta.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
   }
 });
 

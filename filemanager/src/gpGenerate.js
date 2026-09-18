@@ -128,6 +128,28 @@ function generateGP(data, templateBuffer) {
 const countScans = (data) =>
   (data.experts || []).reduce((sum, e) => sum + (e.scans || []).length, 0);
 
+/**
+ * Приложение к ГОТОВОМУ письму.
+ *
+ * Нужно для предпросмотра: человек правит текстовое письмо в редакторе,
+ * а письмо с приложением должно получиться из того же текста, а не из
+ * шаблона. Пересобирать его заново из данных нельзя — правки бы пропали.
+ *
+ * Возвращает null, если сканов нет вовсе: пустое «Приложение» на
+ * отдельном листе — хуже, чем его отсутствие.
+ */
+function attachScans(plainBuffer, experts) {
+  if (!countScans({ experts })) return null;
+  const zip = new AdmZip(plainBuffer);
+  const docEntry = zip.getEntry("word/document.xml");
+  if (!docEntry) {
+    throw new Error("Письмо повреждено (нет word/document.xml)");
+  }
+  const xml = appendScans(zip, docEntry.getData().toString("utf8"), experts || []);
+  zip.updateFile("word/document.xml", Buffer.from(xml, "utf8"));
+  return zip.toBuffer();
+}
+
 function buildGP(data, withAttachments, templateBuffer) {
   // Шаблон приходит буфером: он лежит в хранилище и правится людьми.
   // Без него берём эталон из образа — на случай, если рабочего файла
@@ -252,4 +274,4 @@ const titleParagraph = (text) =>
   `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/><w:rPr>${FONT_RPR}<w:b/></w:rPr></w:pPr>` +
   `<w:r><w:rPr>${FONT_RPR}<w:b/></w:rPr><w:t xml:space="preserve">${escapeXmlText(text)}</w:t></w:r></w:p>`;
 
-module.exports = { generateGP, extractParagraphTexts, REQUIRED, OPTIONAL };
+module.exports = { generateGP, attachScans, extractParagraphTexts, REQUIRED, OPTIONAL };
