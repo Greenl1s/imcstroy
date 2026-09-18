@@ -1076,11 +1076,20 @@ const EQ_STATUS = { free: "Свободен", busy: "Занят", booked: "За�
 
 /** Полоса прибора: где он, чем помечен, до какого числа поверка. */
 function instrumentStripHtml(item) {
-  const where = item.status === "busy"
-    ? `${EQ_STATUS.busy}${item.taken_by_name ? " — у " + escapeHtml(item.taken_by_name) : ""}${
-        item.taken_at ? " с " + escapeHtml(fmtEqDate(item.taken_at)) : ""}`
-    : EQ_STATUS[item.status] || item.status;
-  const tone = { free: "ok", busy: "busy", booked: "busy", retired: "muted" }[item.status] || "muted";
+  // Наличие: у прибора может быть несколько одинаковых штук, и тогда
+  // «Занят» ничего не говорит — важно, осталось ли что брать.
+  const qty = Number(item.qty) || 1;
+  const held = Number(item.held_qty) || 0;
+  const multi = qty > 1 && item.status !== "retired";
+  const where = multi
+    ? `Свободно ${qty - held} из ${qty}`
+    : (item.status === "busy"
+      ? `${EQ_STATUS.busy}${item.taken_by_name ? " — у " + escapeHtml(item.taken_by_name) : ""}${
+          item.taken_at ? " с " + escapeHtml(fmtEqDate(item.taken_at)) : ""}`
+      : EQ_STATUS[item.status] || item.status);
+  const tone = multi
+    ? (qty - held > 0 ? "ok" : "busy")
+    : ({ free: "ok", busy: "busy", booked: "busy", retired: "muted" }[item.status] || "muted");
 
   return `
     <span class="eq-badge eq-${tone}">${where}</span>
