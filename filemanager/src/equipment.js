@@ -431,7 +431,12 @@ async function describe(relPath) {
   // Папка прибора? Спрашиваем базу по точному пути — так же, как «Дела»
   // узнают проект по пути папки.
   const { rows } = await db.query(
-    `SELECT i.*, tu.username AS taken_by_name
+    // Имя, а не логин: логин остаётся делом входа. И наличие — сколько
+    // штук есть и сколько свободно: у одинаковых фонарей одна карточка.
+    `SELECT i.*,
+            COALESCE(NULLIF(btrim(tu.full_name), ''), tu.username) AS taken_by_name,
+            COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
+                       WHERE h.instrument_id = i.id), 0) AS held_qty
        FROM instruments i
        LEFT JOIN users tu ON tu.id = i.taken_by
       WHERE i.folder_path = $1`, [clean]
@@ -457,6 +462,8 @@ function decorate(row, typesByCode) {
     model: row.model,
     serial_number: row.serial_number,
     status: row.status,
+    qty: Number(row.qty) || 1,
+    held_qty: Number(row.held_qty) || 0,
     taken_by_name: row.taken_by_name,
     taken_where: row.taken_where,
     taken_at: row.taken_at,
