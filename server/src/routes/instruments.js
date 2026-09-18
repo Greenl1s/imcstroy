@@ -54,6 +54,195 @@ async function withNames(id) {
   return rows[0] || null;
 }
 
+// ---------- Наличие ----------
+/**
+ * НАЛИЧИЕ: сколько штук прибора есть и сколько у кого на руках.
+ *
+ * Два одинаковых фонаря — одна карточка и цифра «2». Держателей у такой
+ * карточки может быть несколько, и в поля taken_by / taken_at, рассчитанные
+ * на одного, они не помещаются. Поэтому у многоштучных приборов держатели
+ * живут в instrument_holdings, а taken_by остаётся пустым: назвать одного
+ * из троих «тем самым» было бы неправдой.
+ *
+ * Прибор с наличием 1 — а это все прежние приборы — идёт по СТАРОМУ пути,
+ * ни одной строкой иначе. Это не лень: менять работающий каждый день
+ * механизм выдачи ради единообразия значит рисковать им ради фонарей.
+ *
+ * Все проверки остатка делаются в базе, под FOR UPDATE. Если двое
+ * одновременно возьмут последнюю штуку, второй получит честный отказ,
+ * а не минус один в наличии.
+ */
+const MAX_QTY = 999;
+
+const isMulti = (instrument) => Number(instrument.qty) > 1;
+
+function parseQty(value, fallback = 1) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(Math.floor(n), MAX_QTY);
+}
+
+function fail(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  throw err;
+}
+
+/** Прибор со свежим остатком, заблокированный до конца транзакции. */
+async function lockInstrument(client, id) {
+  const { rows } = await client.query(
+    `SELECT i.*, COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
+                            WHERE h.instrument_id = i.id), 0) AS held_qty
+       FROM instruments i WHERE i.id = $1 FOR UPDATE OF i`,
+    [id]
+  );
+  if (!rows.length) fail(404, 'Прибор не найден');
+  const row = rows[0];
+  row.free_qty = Number(row.qty) - Number(row.held_qty);
+  return row;
+}
+
+/**
+ * Состояние многоштучного прибора — не отдельное решение, а следствие
+ * остатка: есть свободные — free, разобрали все — busy. Пересчитывается
+ * после каждой выдачи и возврата, чтобы список и фильтры не разошлись
+ * с карточкой.
+ */
+async function syncMultiStatus(client, id) {
+  const { rows } = await client.query(
+    `UPDATE instruments i
+        SET status = CASE
+              WHEN i.status = 'retired' THEN 'retired'::instrument_status
+              WHEN i.qty - COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
+                                      WHERE h.instrument_id = i.id), 0) > 0
+                THEN 'free'::instrument_status
+              ELSE 'busy'::instrument_status
+            END
+      WHERE i.id = $1 RETURNING *`,
+    [id]
+  );
+  return rows[0];
+}
+
+/** Строка «2 шт» — только там, где штук правда несколько. */
+const pieces = (n) => `${n} шт`;
+
+/**
+ * Выдача одной записи. Общая и для одиночной кнопки, и для групповой —
+ * иначе две выдачи разошлись бы в мелочах, а мелочь здесь это остаток.
+ */
+async function issueOne(client, { instrument, user, qty, where, extra, at }) {
+  if (!isMulti(instrument)) {
+    const { rows } = await client.query(
+      `UPDATE instruments
+          SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
+        WHERE id = $1 AND status = 'free'
+        RETURNING *`,
+      [instrument.id, user.id, where, extra, at]
+    );
+    if (!rows.length) fail(409, `«${instrument.name}» уже занят или забронирован`);
+    return { row: rows[0], qty: 1 };
+  }
+
+  if (instrument.status === 'retired') fail(409, `«${instrument.name}» списан`);
+  if (instrument.free_qty <= 0) fail(409, `«${instrument.name}»: свободных штук нет`);
+  if (qty > instrument.free_qty) {
+    fail(409, `«${instrument.name}»: свободно ${pieces(instrument.free_qty)}, ` +
+      `а взять хотят ${pieces(qty)}`);
+  }
+
+  // Один человек — одна запись на прибор. Взял ещё штуку — прибавляется
+  // к его же строке, иначе в карточке было бы «Петров — 1 шт» трижды.
+  await client.query(
+    `INSERT INTO instrument_holdings (instrument_id, user_id, qty, taken_where, taken_extra, taken_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (instrument_id, user_id) DO UPDATE
+        SET qty = instrument_holdings.qty + EXCLUDED.qty,
+            taken_where = COALESCE(EXCLUDED.taken_where, instrument_holdings.taken_where),
+            taken_extra = COALESCE(EXCLUDED.taken_extra, instrument_holdings.taken_extra)`,
+    [instrument.id, user.id, qty, where, extra, at]
+  );
+  return { row: await syncMultiStatus(client, instrument.id), qty };
+}
+
+/**
+ * Возврат. У многоштучного прибора возвращают СВОИ штуки; администратор
+ * может вернуть за любого — тогда он называет, за кого (holderId).
+ */
+async function returnOne(client, { instrument, user, isAdmin, qty, holderId }) {
+  if (!isMulti(instrument)) {
+    const { rows } = await client.query(
+      `UPDATE instruments
+          SET status = 'free', taken_by = NULL, taken_where = NULL,
+              taken_extra = NULL, taken_at = NULL
+        WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
+        RETURNING *`,
+      [instrument.id, user.id, isAdmin]
+    );
+    if (!rows.length) {
+      fail(409, `«${instrument.name}» не выдан или выдан другому пользователю`);
+    }
+    return { row: rows[0], qty: 1, holderName: null };
+  }
+
+  const target = isAdmin && holderId ? Number(holderId) : user.id;
+  const { rows: held } = await client.query(
+    `SELECT h.*, COALESCE(NULLIF(btrim(u.full_name), ''), u.username) AS name
+       FROM instrument_holdings h JOIN users u ON u.id = h.user_id
+      WHERE h.instrument_id = $1 AND h.user_id = $2`,
+    [instrument.id, target]
+  );
+  if (!held.length) {
+    fail(409, target === user.id
+      ? `«${instrument.name}» за вами не числится`
+      : `«${instrument.name}» за этим человеком не числится`);
+  }
+  const holding = held[0];
+  // Ничего не указали — возвращают всё своё: так и бывает почти всегда.
+  const back = qty === null ? holding.qty : qty;
+  if (back > holding.qty) {
+    fail(409, `«${instrument.name}»: на руках ${pieces(holding.qty)}, ` +
+      `вернуть хотят ${pieces(back)}`);
+  }
+
+  if (back === holding.qty) {
+    await client.query('DELETE FROM instrument_holdings WHERE id = $1', [holding.id]);
+  } else {
+    await client.query('UPDATE instrument_holdings SET qty = qty - $2 WHERE id = $1',
+      [holding.id, back]);
+  }
+  return {
+    row: await syncMultiStatus(client, instrument.id),
+    qty: back,
+    holderName: holding.name,
+  };
+}
+
+/**
+ * Бронь и передача для многоштучных приборов пока не сделаны — и лучше
+ * честно отказать, чем забронировать «весь фонарь целиком», когда два из
+ * трёх уже у людей на руках. Это следующая работа, а не забытый случай.
+ */
+function refuseMulti(instrument, what) {
+  if (isMulti(instrument)) {
+    fail(409, `«${instrument.name}»: ${what} для приборов с наличием больше одного ` +
+      'пока не сделана — скажите, если нужна');
+  }
+}
+
+/** Тот же запрет, но по номеру прибора — до начала операции. */
+async function assertSingleOp(res, id, what) {
+  const { rows } = await query('SELECT id, name, qty FROM instruments WHERE id = $1', [id]);
+  if (!rows.length) return true;              // «не найден» скажет сама операция
+  try {
+    refuseMulti(rows[0], what);
+    return true;
+  } catch (err) {
+    res.status(err.status).json({ error: err.message });
+    return false;
+  }
+}
+
 // ---------- Чтение ----------
 
 /** Список. Фотографии сюда НЕ попадают — только флаг has_photo. */
@@ -267,14 +456,21 @@ instruments.delete('/:id/document', requireAdmin, async (req, res) => {
 
 export const EDITABLE = [
   'inventory_no', 'name', 'serial_number', 'model', 'check_type', 'control_type',
-  'verification_date', 'valid_until', 'comment', 'company_code'
+  'verification_date', 'valid_until', 'comment', 'company_code', 'qty'
 ];
 
 /** Пустая строка из формы должна стать NULL, а не '' — иначе даты не сохранятся. */
 const nullify = (v) => (v === '' || v === undefined ? null : v);
 
-/** Комментарий — исключение: колонка NOT NULL, пустое значение должно остаться '', а не стать NULL. */
-const toDbValue = (key, v) => (key === 'comment' ? String(v ?? '') : nullify(v));
+/**
+ * Комментарий — исключение: колонка NOT NULL, пустое значение должно остаться '', а не стать NULL.
+ * Наличие — тоже: пустое поле в форме значит «одна штука», а не «неизвестно».
+ */
+const toDbValue = (key, v) => {
+  if (key === 'comment') return String(v ?? '');
+  if (key === 'qty') return parseQty(v);
+  return nullify(v);
+};
 
 instruments.post('/', requireAdmin, async (req, res) => {
   const values = EDITABLE.map((key) => toDbValue(key, req.body?.[key]));
@@ -283,9 +479,9 @@ instruments.post('/', requireAdmin, async (req, res) => {
       const { rows } = await client.query(
         `INSERT INTO instruments
            (inventory_no, name, serial_number, model, check_type, control_type,
-            verification_date, valid_until, comment, company_code)
+            verification_date, valid_until, comment, company_code, qty)
          VALUES ($1, $2, $3, $4, coalesce($5::check_type, 'verification'), $6,
-                 $7, $8, coalesce($9, ''), $10)
+                 $7, $8, coalesce($9, ''), $10, coalesce($11, 1))
          RETURNING *`,
         values
       );
@@ -315,6 +511,18 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
 
   try {
     const row = await transaction(async (client) => {
+      // Наличие нельзя опустить ниже того, что уже на руках: «выдано две,
+      // а есть одна» — это не данные, а ошибка, о которой потом никто не
+      // догадается. Проверяем под замком, чтобы между проверкой и записью
+      // никто не успел взять ещё одну штуку.
+      if (updates.includes('qty')) {
+        const current = await lockInstrument(client, req.params.id);
+        const wanted = parseQty(req.body.qty);
+        if (wanted < current.held_qty) {
+          fail(409, `На руках ${pieces(current.held_qty)} — меньше этого наличие ` +
+            'поставить нельзя. Сначала примите возврат.');
+        }
+      }
       const { rows } = await client.query(
         `UPDATE instruments SET ${set} WHERE id = $1 RETURNING *`, params
       );
@@ -464,29 +672,20 @@ instruments.post('/bulk/return', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
-        const { rows } = await client.query(
-          `UPDATE instruments
-              SET status = 'free', taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL
-            WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
-            RETURNING *`,
-          [id, req.user.id, req.user.role === 'admin']
-        );
-        if (!rows.length) {
-          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
-          const err = new Error(
-            exists.rows.length
-              ? `«${exists.rows[0].name}» не выдан или выдан другому пользователю`
-              : 'Прибор не найден'
-          );
-          err.status = exists.rows.length ? 409 : 404;
-          throw err;
-        }
-        const row = rows[0];
-        await logEvent(client, {
-          instrument: row, action: 'return', actor: req.user,
-          note: `Возвращён: ${userName(req.user)} (групповая операция)`
+        const found = await lockInstrument(client, id);
+        // Групповой возврат отдаёт ВСЁ своё: человек сдаёт то, что у него
+        // на руках, а не отсчитывает по одной штуке.
+        const done = await returnOne(client, {
+          instrument: found, user: req.user,
+          isAdmin: req.user.role === 'admin', qty: null, holderId: null,
         });
-        return row;
+        await logEvent(client, {
+          instrument: done.row, action: 'return', actor: req.user,
+          note: isMulti(found)
+            ? `Возвращён: ${userName(req.user)} — ${pieces(done.qty)} (групповая операция)`
+            : `Возвращён: ${userName(req.user)} (групповая операция)`
+        });
+        return done.row;
       });
       succeeded.push({ id, name: instrument.name });
     } catch (err) {
@@ -518,6 +717,8 @@ instruments.post('/bulk/transfer', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
+        const found = await lockInstrument(client, id);
+        refuseMulti(found, 'передача');
         const { rows } = await client.query(
           `UPDATE instruments
               SET pending_transfer_to = $4, pending_transfer_where = $5, pending_transfer_extra = $6
@@ -526,13 +727,10 @@ instruments.post('/bulk/transfer', async (req, res) => {
           [id, req.user.id, req.user.role === 'admin', targetId, taken_where, taken_extra]
         );
         if (!rows.length) {
-          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
           const err = new Error(
-            exists.rows.length
-              ? `«${exists.rows[0].name}» можно передать, только если он у вас на руках и не ждёт другой передачи`
-              : 'Прибор не найден'
+            `«${found.name}» можно передать, только если он у вас на руках и не ждёт другой передачи`
           );
-          err.status = exists.rows.length ? 409 : 404;
+          err.status = 409;
           throw err;
         }
         const row = rows[0];
@@ -656,28 +854,22 @@ instruments.post('/bulk/issue', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
-        const { rows } = await client.query(
-          `UPDATE instruments
-              SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
-            WHERE id = $1 AND status = 'free'
-            RETURNING *`,
-          [id, req.user.id, taken_where, taken_extra, taken_at]
-        );
-        if (!rows.length) {
-          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
-          const err = new Error(
-            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
-          );
-          err.status = exists.rows.length ? 409 : 404;
-          throw err;
-        }
-        const row = rows[0];
-        await logEvent(client, {
-          instrument: row, action: 'issue', actor: req.user,
-          targetName: userName(req.user), place: taken_where, extra: taken_extra,
-          note: `Выдан: ${userName(req.user)} (групповая выдача)`
+        const found = await lockInstrument(client, id);
+        // Групповая выдача берёт по ОДНОЙ штуке: отметили галочками десять
+        // приборов — значит взяли десять предметов. Сколько именно штук
+        // многоштучного прибора нужно, спрашивают в его карточке.
+        const done = await issueOne(client, {
+          instrument: found, user: req.user, qty: 1,
+          where: taken_where, extra: taken_extra, at: taken_at,
         });
-        return row;
+        await logEvent(client, {
+          instrument: done.row, action: 'issue', actor: req.user,
+          targetName: userName(req.user), place: taken_where, extra: taken_extra,
+          note: isMulti(found)
+            ? `Выдан: ${userName(req.user)} — ${pieces(done.qty)} (групповая выдача)`
+            : `Выдан: ${userName(req.user)} (групповая выдача)`
+        });
+        return done.row;
       });
       succeeded.push({ id, name: instrument.name });
     } catch (err) {
@@ -702,6 +894,8 @@ instruments.post('/bulk/book', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
+        const found = await lockInstrument(client, id);
+        refuseMulti(found, 'бронь');
         const { rows } = await client.query(
           `UPDATE instruments
               SET status = 'booked', booked_by = $2, booked_for = $3, booked_extra = $4, booked_where = $5
@@ -710,11 +904,8 @@ instruments.post('/bulk/book', async (req, res) => {
           [id, req.user.id, booked_for, booked_extra, booked_where]
         );
         if (!rows.length) {
-          const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
-          const err = new Error(
-            exists.rows.length ? `«${exists.rows[0].name}» уже занят или забронирован` : 'Прибор не найден'
-          );
-          err.status = exists.rows.length ? 409 : 404;
+          const err = new Error(`«${found.name}» уже занят или забронирован`);
+          err.status = 409;
           throw err;
         }
         const row = rows[0];
@@ -791,8 +982,15 @@ instruments.post('/bulk/retire', requireAdmin, async (req, res) => {
   if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
 
   const count = await transaction(async (client) => {
+    // Списанный прибор ни за кем не числится — ни через taken_by, ни
+    // через записи «на руках» у многоштучного. Иначе в наличии осталось
+    // бы «2 на руках» у прибора, которого больше нет.
     const { rows } = await client.query(
-      `UPDATE instruments
+      `WITH cleared AS (
+         DELETE FROM instrument_holdings
+          WHERE instrument_id = ANY($1::bigint[])
+       )
+       UPDATE instruments
           SET status = 'retired', retired_at = $2,
               taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
               booked_by = NULL, booked_for = NULL, booked_extra = NULL
@@ -829,40 +1027,58 @@ instruments.post('/bulk/delete', requireAdmin, async (req, res) => {
 
 // ---------- Операции с приборами ----------
 
-instruments.post('/:id/issue', (req, res) => transition(res, {
-  id: req.params.id,
-  actor: req.user,
-  action: 'issue',
-  guardMessage: 'Прибор уже занят или забронирован',
-  sql: `UPDATE instruments
-           SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
-         WHERE id = $1 AND status = 'free'
-         RETURNING *`,
-  params: [
-    req.params.id, req.user.id,
-    nullify(req.body?.taken_where), nullify(req.body?.taken_extra),
-    req.body?.taken_at || today()
-  ],
-  buildLog: (i) => ({
-    targetName: userName(req.user), place: i.taken_where, extra: i.taken_extra,
-    note: `Выдан: ${userName(req.user)}`
-  })
-}));
+instruments.post('/:id/issue', async (req, res) => {
+  const where = nullify(req.body?.taken_where);
+  const extra = nullify(req.body?.taken_extra);
+  const at = req.body?.taken_at || today();
+  try {
+    const id = await transaction(async (client) => {
+      const instrument = await lockInstrument(client, req.params.id);
+      const wanted = parseQty(req.body?.qty);
+      const done = await issueOne(client, { instrument, user: req.user, qty: wanted, where, extra, at });
+      await logEvent(client, {
+        instrument: done.row, action: 'issue', actor: req.user,
+        targetName: userName(req.user), place: where, extra,
+        note: isMulti(instrument)
+          ? `Выдан: ${userName(req.user)} — ${pieces(done.qty)} (свободно ${
+              instrument.free_qty - done.qty} из ${instrument.qty})`
+          : `Выдан: ${userName(req.user)}`
+      });
+      return done.row.id;
+    });
+    res.json(await withNames(id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 /** Вернуть может тот, кто взял, либо администратор. */
-instruments.post('/:id/return', (req, res) => transition(res, {
-  id: req.params.id,
-  actor: req.user,
-  action: 'return',
-  guardMessage: 'Прибор не выдан или выдан другому пользователю',
-  sql: `UPDATE instruments
-           SET status = 'free', taken_by = NULL, taken_where = NULL,
-               taken_extra = NULL, taken_at = NULL
-         WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
-         RETURNING *`,
-  params: [req.params.id, req.user.id, req.user.role === 'admin'],
-  buildLog: () => ({ note: `Возвращён: ${userName(req.user)}` })
-}));
+instruments.post('/:id/return', async (req, res) => {
+  const admin = req.user.role === 'admin';
+  try {
+    const id = await transaction(async (client) => {
+      const instrument = await lockInstrument(client, req.params.id);
+      const done = await returnOne(client, {
+        instrument, user: req.user, isAdmin: admin,
+        // Не указали сколько — возвращают всё своё.
+        qty: req.body?.qty === undefined ? null : parseQty(req.body.qty),
+        holderId: req.body?.holder_id,
+      });
+      await logEvent(client, {
+        instrument: done.row, action: 'return', actor: req.user,
+        targetName: done.holderName,
+        note: isMulti(instrument)
+          ? `Возвращён: ${done.holderName} — ${pieces(done.qty)}${
+              done.holderName === userName(req.user) ? '' : ` (вернул ${userName(req.user)})`}`
+          : `Возвращён: ${userName(req.user)}`
+      });
+      return done.row.id;
+    });
+    res.json(await withNames(id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 /**
  * Передать другому — только тот, у кого прибор на руках. Прибор НЕ переходит
@@ -870,6 +1086,7 @@ instruments.post('/:id/return', (req, res) => transition(res, {
  * после его согласия (см. /:id/accept-transfer) taken_by реально меняется.
  */
 instruments.post('/:id/transfer', async (req, res) => {
+  if (!await assertSingleOp(res, req.params.id, 'передача')) return;
   const targetId = Number(req.body?.to_user_id);
   if (!targetId) return res.status(400).json({ error: 'Не выбран новый пользователь' });
 
@@ -930,7 +1147,9 @@ instruments.post('/:id/reject-transfer', (req, res) => transition(res, {
   buildLog: () => ({ note: `Передача отклонена пользователем ${userName(req.user)}` })
 }));
 
-instruments.post('/:id/book', (req, res) => transition(res, {
+instruments.post('/:id/book', async (req, res) => {
+  if (!await assertSingleOp(res, req.params.id, 'бронь')) return;
+  return transition(res, {
   id: req.params.id,
   actor: req.user,
   action: 'book',
@@ -947,7 +1166,8 @@ instruments.post('/:id/book', (req, res) => transition(res, {
     targetName: userName(req.user), place: i.booked_where, extra: i.booked_extra,
     note: `Забронирован на ${i.booked_for}`
   })
-}));
+  });
+});
 
 instruments.post('/:id/cancel-booking', (req, res) => transition(res, {
   id: req.params.id,
@@ -993,7 +1213,11 @@ instruments.post('/:id/retire', requireAdmin, (req, res) => transition(res, {
   actor: req.user,
   action: 'retire',
   guardMessage: 'Прибор уже списан',
-  sql: `UPDATE instruments
+  // Записи «на руках» уходят вместе с прибором — см. групповое списание.
+  sql: `WITH cleared AS (
+          DELETE FROM instrument_holdings WHERE instrument_id = $1
+        )
+        UPDATE instruments
            SET status = 'retired', retired_at = $2,
                taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
                booked_by = NULL, booked_for = NULL, booked_extra = NULL

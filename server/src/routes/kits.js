@@ -70,7 +70,12 @@ async function kitItems(kitId) {
 
   return rows.map((item) => {
     let blocked = null;
-    if (item.status === 'busy') {
+    if (item.status === 'busy' && Number(item.qty) > 1) {
+      // Многоштучный прибор мешает выезду, только когда разобрали ВСЕ
+      // штуки. Держателей у него несколько, поэтому имени тут нет —
+      // кто именно, видно в карточке.
+      blocked = `Все ${item.qty} шт на руках`;
+    } else if (item.status === 'busy') {
       const who = item.taken_by_name ? `у ${item.taken_by_name}` : 'выдан';
       const since = item.taken_at ? ` с ${item.taken_at}` : '';
       blocked = `Занят — ${who}${since}`;
