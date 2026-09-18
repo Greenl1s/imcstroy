@@ -49,6 +49,49 @@ export function input(name, label, value = '', type = 'text', required = false) 
   return `<label>${escapeHtml(label)}<input ${attrs}></label>`;
 }
 
+/**
+ * Поле «сколько штук»: кнопки − и + рядом с числом.
+ *
+ * Обычного type="number" мало: набирать цифры ради «взять две штуки»
+ * долго, а на телефоне ещё и неудобно — клавиатура закрывает форму.
+ * Кнопки работают и без клавиатуры вовсе.
+ *
+ * Границы (min/max) остаются на самом поле: их читает и браузер при
+ * отправке формы, и обработчик кнопок. Второй список границ рядом
+ * разошёлся бы с первым в тот же день.
+ */
+export function qtyInput(name, label, value, { min = 1, max = 999, hint = '' } = {}) {
+  return `<label class="qty-label">${escapeHtml(label)}${
+    hint ? `<span class="qty-hint">${escapeHtml(hint)}</span>` : ''}
+    <span class="qty-box">
+      <button class="secondary" type="button" data-qty-step="-1" aria-label="Меньше">−</button>
+      <input name="${escapeAttr(name)}" type="number" inputmode="numeric"
+             value="${escapeAttr(value)}" min="${escapeAttr(min)}" max="${escapeAttr(max)}">
+      <button class="secondary" type="button" data-qty-step="1" aria-label="Больше">+</button>
+    </span>
+  </label>`;
+}
+
+/**
+ * Кнопки − и + работают везде, где есть такое поле, — в том числе в
+ * строках, нарисованных уже после загрузки страницы. Поэтому один
+ * обработчик на документ, а не по обработчику на каждую кнопку.
+ */
+document.addEventListener('click', (event) => {
+  const button = event.target.closest?.('[data-qty-step]');
+  if (!button) return;
+  const box = button.closest('.qty-box');
+  const input = box?.querySelector('input');
+  if (!input) return;
+  event.preventDefault();
+  const min = Number(input.min || 0);
+  const max = Number(input.max || 999);
+  const next = (Number(input.value) || 0) + Number(button.dataset.qtyStep);
+  input.value = Math.max(min, Math.min(max, next));
+  // Форма и счётчики слушают именно input — как при наборе руками.
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
 export function select(name, label, value, options) {
   const items = options.map((o) => (Array.isArray(o) ? o : [o, o]));
   const html = items.map(([val, text]) =>

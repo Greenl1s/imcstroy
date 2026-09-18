@@ -1,15 +1,17 @@
 import { state } from './state.js';
-import { checkTypeText, today, controlTypeFull, companyName } from './utils.js';
+import { checkTypeText, today, controlTypeFull, companyName, qtyOf } from './utils.js';
 import { toast } from './ui.js';
 
 const HEADERS = [
-  '№ п/п', 'Наименование', 'Серийный номер', 'Модель',
+  // «Наличие» стоит сразу за названием: в таблице, которую распечатывают
+  // и несут на склад, число штук важнее модели.
+  '№ п/п', 'Наименование', 'Наличие, шт', 'Серийный номер', 'Модель',
   'Тип документа (Поверка/калибровка)', 'Дата поверки', 'Действительно до',
   'Классификация', 'Владелец', 'Документ'
 ];
 
 const COLUMN_WIDTHS = [
-  { wch: 6 }, { wch: 35 }, { wch: 16 }, { wch: 22 },
+  { wch: 6 }, { wch: 35 }, { wch: 12 }, { wch: 16 }, { wch: 22 },
   { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 25 }, { wch: 12 }
 ];
 
@@ -17,6 +19,7 @@ function toRows(items) {
   return items.map((item, index) => [
     index + 1,
     item.name || '',
+    qtyOf(item),
     item.serial_number || '',
     item.model || '',
     checkTypeText(item.check_type),

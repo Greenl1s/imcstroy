@@ -1,7 +1,8 @@
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
-import { escapeHtml, getControlTypes, setControlTypes, getCompanies, setCompanies } from './utils.js';
-import { openModal, closeModal, toast, setSync, run } from './ui.js';
+import { escapeHtml, getControlTypes, setControlTypes, getCompanies, setCompanies,
+  qtyOf, pieces, plural } from './utils.js';
+import { openModal, closeModal, toast, setSync, run, qtyInput } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
 import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
@@ -129,7 +130,7 @@ function bindEvents() {
   };
 
   document.getElementById('massQrWordBtn').onclick = (e) => {
-    downloadSelectedQrAsWord();
+    showQrCountForm();
   };
 
   // «Собрать комплект» из отмеченных галочками приборов: самый частый
@@ -799,7 +800,18 @@ function renderQrPng(item) {
  * («8 на лист»): печатают на заранее нарезанной бумаге, и линии обязаны
  * попадать в рез. Все размеры и причины — в qr-sheet.js.
  */
-async function downloadSelectedQrAsWord() {
+/**
+ * Сначала спрашиваем, сколько наклеек нужно на каждый прибор.
+ *
+ * Наклейку клеят на КАЖДЫЙ предмет, а не на карточку: три одинаковых
+ * фонаря — три наклейки с одним и тем же кодом. Поэтому напротив прибора
+ * сразу стоит его наличие, а не единица: чаще всего это и есть ответ, и
+ * менять ничего не придётся.
+ *
+ * Ноль означает «этот не печатать» — иначе пришлось бы возвращаться в
+ * список и снимать галочку ради одной строки.
+ */
+function showQrCountForm() {
   const ids = selectedIds();
   if (!ids.length) return toast('Выберите приборы', true);
 
@@ -807,6 +819,73 @@ async function downloadSelectedQrAsWord() {
     .map((id) => (state.instruments || []).find((i) => i.id === id))
     .filter(Boolean);
   if (!items.length) return toast('Не удалось найти выбранные приборы', true);
+
+  const perPage = sheetGeometry().perPage;
+
+  openModal('Сколько наклеек печатать', `
+    <form id="qrCountForm">
+      <p class="row-subtitle qr-count-note">
+        Подставлено наличие прибора. Поменяйте, если нужно иначе; ноль — не печатать.
+      </p>
+      <table class="qr-count-table">
+        <thead>
+          <tr><th>Прибор</th><th class="num">Наличие</th><th class="num">Наклеек</th></tr>
+        </thead>
+        <tbody>
+          ${items.map((item) => `
+            <tr>
+              <td>
+                <b>${escapeHtml(item.name)}</b>
+                <span class="row-subtitle">${escapeHtml(displayNo(item))}${
+                  item.model ? ' · ' + escapeHtml(item.model) : ''}</span>
+              </td>
+              <td class="num">${escapeHtml(pieces(qtyOf(item)))}</td>
+              <td class="num">
+                ${qtyInput(`qty_${item.id}`, '', qtyOf(item), { min: 0, max: 99 })}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="qr-count-total" id="qrCountTotal"></div>
+      <div class="modal-actions">
+        <button class="primary" type="submit" id="qrCountGo">Выгрузить в Word</button>
+      </div>
+    </form>`);
+
+  const form = document.getElementById('qrCountForm');
+  const counts = () => items.map((item) => ({
+    item,
+    n: Math.max(0, Number(form.elements[`qty_${item.id}`].value) || 0),
+  }));
+
+  const retotal = () => {
+    const total = counts().reduce((sum, c) => sum + c.n, 0);
+    const pages = Math.ceil(total / perPage) || 0;
+    const rest = pages * perPage - total;
+    document.getElementById('qrCountTotal').innerHTML = total
+      ? `<b>Всего ${escapeHtml(plural(total, 'наклейка', 'наклейки', 'наклеек'))}</b> — ${
+          escapeHtml(plural(pages, 'лист', 'листа', 'листов'))}${
+          rest ? `, ${pages === 1 ? 'на нём' : 'на последнем'} останется ${
+            escapeHtml(plural(rest, 'свободное место', 'свободных места', 'свободных мест'))}` : ''}`
+      : '<b>Ничего не выбрано</b> — поставьте хотя бы одну наклейку';
+    document.getElementById('qrCountGo').disabled = !total;
+  };
+  form.addEventListener('input', retotal);
+  retotal();
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const chosen = counts().filter((c) => c.n > 0);
+    if (!chosen.length) return;
+    closeModal();
+    // Дублирование и есть весь смысл окна: один и тот же код повторяется
+    // столько раз, сколько предметов, — лист собирается из этого списка.
+    await downloadSelectedQrAsWord(chosen.flatMap(({ item, n }) => Array(n).fill(item)));
+  };
+}
+
+async function downloadSelectedQrAsWord(items) {
+  if (!items || !items.length) return toast('Выберите приборы', true);
 
   const {
     Document, Packer, Table, TableRow, TableCell, Paragraph, ImageRun, TextRun,

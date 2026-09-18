@@ -98,7 +98,8 @@ export const api = {
 
   // ---------- Операции ----------
   issue: (id, data) => request(`/instruments/${id}/issue`, { method: 'POST', body: data }),
-  return: (id) => request(`/instruments/${id}/return`, { method: 'POST', body: {} }),
+  // Наличие: сколько штук и за кого возвращают. Пусто — своё и всё.
+  return: (id, data = {}) => request(`/instruments/${id}/return`, { method: 'POST', body: data }),
   transfer: (id, data) => request(`/instruments/${id}/transfer`, { method: 'POST', body: data }),
   book: (id, data) => request(`/instruments/${id}/book`, { method: 'POST', body: data }),
   cancelBooking: (id) => request(`/instruments/${id}/cancel-booking`, { method: 'POST', body: {} }),

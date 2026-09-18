@@ -111,6 +111,32 @@ export const verificationText = (item) =>
 export const verificationBadge = (item) =>
   ({ valid: 'ok', expired: 'warn', none: 'muted' })[verificationState(item)];
 
+// ---------- Наличие ----------
+/**
+ * Наличие: сколько штук прибора есть, сколько на руках и у кого.
+ *
+ * Считает это база (instruments_view), здесь только чтение с подстановкой
+ * умолчаний: старые записи и ответы старого сервера полей не содержат, и
+ * прибор без наличия — это обычный прибор в одном экземпляре, а не ошибка.
+ */
+export const qtyOf = (item) => Math.max(1, Number(item?.qty) || 1);
+export const heldQty = (item) => Math.max(0, Number(item?.held_qty) || 0);
+export const freeQty = (item) => {
+  const free = item?.free_qty;
+  return free === undefined || free === null
+    ? qtyOf(item) - heldQty(item)
+    : Math.max(0, Number(free) || 0);
+};
+export const holdersOf = (item) => (Array.isArray(item?.holders) ? item.holders : []);
+export const isMultiItem = (item) => qtyOf(item) > 1;
+
+/** Запись «сколько у меня на руках» — или null, если ничего. */
+export const myHolding = (item, userId) =>
+  holdersOf(item).find((h) => String(h.user_id) === String(userId)) || null;
+
+/** «2 шт». Единица измерения одна на всё приложение, чтобы не расходилась. */
+export const pieces = (n) => `${Number(n) || 0} шт`;
+
 export const statusText = (s) =>
   ({ free: 'Свободен', busy: 'Занят', booked: 'Забронирован', retired: 'Списан' })[s] || s;
 

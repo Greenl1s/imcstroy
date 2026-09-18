@@ -6,9 +6,10 @@ import {
   statusBadge, statusText, checkTypeText,
   dateFieldLabel, validUntilLabel, documentButtonLabel,
   getControlTypes, controlTypeShort, controlTypeFull, controlTypeBadge,
-  getCompanies, companyName, companyBadge
+  getCompanies, companyName, companyBadge,
+  qtyOf, heldQty, freeQty, holdersOf, isMultiItem, myHolding, pieces
 } from './utils.js';
-import { closeModal, field, input, openModal, select, toast, run } from './ui.js';
+import { closeModal, field, input, openModal, select, toast, run, qtyInput } from './ui.js';
 
 // Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
 export const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
@@ -85,6 +86,15 @@ function verificationCell(item) {
 
 /** Что написано в колонке «Состояние»: у занятого — ещё и кто держит. */
 function statusCell(item) {
+  if (isMultiItem(item) && item.status !== 'retired') {
+    // «Свободно 1 из 3» вместо «Занят»: у многоштучного прибора важно не
+    // то, есть ли выданные, а осталось ли что брать.
+    const free = freeQty(item);
+    const who = holdersOf(item)
+      .map((h) => `${h.name} — ${pieces(h.qty)}`).join(', ');
+    return `<span class="badge ${free ? 'ok' : 'warn'}">Свободно ${free} из ${qtyOf(item)}</span>` +
+      (who ? `<span class="col-who">${escapeHtml(who)}</span>` : '');
+  }
   const badge = `<span class="badge ${statusBadge(item.status)}">${statusText(item.status)}</span>`;
   if (item.status === 'busy' && item.taken_by_name) {
     return `${badge}<span class="col-who">${escapeHtml(item.taken_by_name)}</span>`;
@@ -106,6 +116,15 @@ function statusCell(item) {
 function rowAction(item) {
   const admin = isAdmin();
   const me = state.currentUser?.id;
+
+  // У многоштучного прибора в строке предлагаем взять, пока есть свободные,
+  // а иначе — вернуть своё. Разбираться, сколько именно, человек будет в
+  // карточке: в строке для этого нет места, а гадать за него не надо.
+  if (isMultiItem(item) && item.status !== 'retired') {
+    if (freeQty(item) > 0) return { act: 'issue', label: 'Взять', primary: true };
+    if (myHolding(item, me) || admin) return { act: 'return', label: 'Вернуть' };
+    return null;
+  }
 
   if (item.status === 'free') return { act: 'issue', label: 'Взять', primary: true };
   if (item.status === 'busy' && (item.taken_by === me || admin)) return { act: 'return', label: 'Вернуть' };
@@ -192,6 +211,11 @@ async function runRowAction(act, id, button) {
   if (!item) return;
 
   if (act === 'issue') return showTakeForm(item);
+  // У многоштучного прибора возврат — это ещё и «сколько», поэтому вместо
+  // вопроса «да/нет» открывается та же форма, что и в карточке.
+  if (act === 'return' && isMultiItem(item)) {
+    return showReturnForm(item, myHolding(item, me) ? me : holdersOf(item)[0]?.user_id);
+  }
 
   const questions = {
     return: `Вернуть «${item.name}»?`,
@@ -274,6 +298,14 @@ export async function renderCard(id, goList) {
   const isOwner = item.taken_by === me;
   const isBookedByMe = item.booked_by === me;
 
+  // Наличие: у прибора может быть несколько одинаковых штук (два фонаря —
+  // одна карточка). Тогда «занят» и «свободен» перестают быть одним
+  // словом на всю карточку: часть на руках, часть на месте.
+  const multi = qtyOf(item) > 1;
+  const free = freeQty(item);
+  const held = heldQty(item);
+  const mine = multi ? myHolding(item, me) : null;
+
   // ---------- Кнопки ----------
   let main = '';
   let danger = '';
@@ -282,6 +314,15 @@ export async function renderCard(id, goList) {
     if (admin) {
       main += '<button class="primary" data-restore>Восстановить</button>';
       main += '<button class="secondary" data-edit>Редактировать</button>';
+    }
+  } else if (multi) {
+    // У многоштучного прибора «Взять» живо, пока есть свободные, а
+    // «Вернуть» — пока у человека что-то на руках. Одно другому не мешает:
+    // можно держать одну штуку и взять вторую.
+    if (free > 0) main += '<button class="primary" data-issue>Взять</button>';
+    if (mine || (admin && held > 0)) main += '<button class="secondary" data-return>Вернуть</button>';
+    if (free <= 0 && !mine && !admin) {
+      main += `<span class="badge warn">Все ${qtyOf(item)} шт на руках</span>`;
     }
   } else if (item.status === 'free') {
     main += '<button class="primary" data-issue>Взять</button>';
@@ -324,7 +365,25 @@ export async function renderCard(id, goList) {
     : '');
 
   let holder = '';
-  if (item.status === 'busy') {
+  if (multi) {
+    // Кто сколько держит. Строка на человека: «Петров — 2 шт».
+    const lines = holdersOf(item).map((h) => `
+      <div class="holder-line">
+        <span><b>${escapeHtml(h.name)}</b> — ${escapeHtml(pieces(h.qty))}${
+          h.taken_where ? ' · ' + escapeHtml(h.taken_where) : ''}${
+          h.taken_at ? ', с ' + escapeHtml(fmtDate(h.taken_at)) : ''}</span>
+        ${(admin || String(h.user_id) === String(me))
+          ? `<button class="secondary" type="button" data-return-holder="${escapeAttr(h.user_id)}"
+                     data-return-max="${escapeAttr(h.qty)}">Вернуть</button>`
+          : ''}
+      </div>`).join('');
+    holder = `<div class="card-box holder">
+      <h4>Наличие — ${escapeHtml(pieces(qtyOf(item)))}</h4>
+      ${kv('Свободно', pieces(free))}
+      ${held ? `<div class="holder-sub">На руках — ${escapeHtml(pieces(held))}</div>${lines}`
+             : '<div class="holder-sub">На руках никого нет</div>'}
+    </div>`;
+  } else if (item.status === 'busy') {
     holder = `<div class="card-box holder">
       <h4>Где прибор сейчас</h4>
       ${kv('Взял', item.taken_by_name)}
@@ -366,6 +425,9 @@ export async function renderCard(id, goList) {
 
   const facts = [
     ['Инвентарный номер', item.inventory_no],
+    // «1 шт» в каждой карточке — строка, которую глаз перестанет замечать
+    // через день, поэтому наличие показывается, только когда штук несколько.
+    ['Наличие', multi ? pieces(qtyOf(item)) : ''],
     ['Модель', item.model],
     ['Серийный номер', item.serial_number],
     ['Классификация', item.control_type ? controlTypeFull(item.control_type) : ''],
@@ -532,7 +594,14 @@ async function renderCardKits(item) {
 /** Чипы состояния в шапке карточки: где прибор и чей он. */
 function cardStateChips(item) {
   const chips = [];
-  if (item.status === 'busy') {
+  if (isMultiItem(item) && item.status !== 'retired') {
+    // У многоштучного прибора состояние — это два числа, а не одно слово.
+    chips.push(`<span class="card-chip ${freeQty(item) ? 'free' : 'busy'}">Свободно ${
+      freeQty(item)} из ${qtyOf(item)}</span>`);
+    if (heldQty(item)) {
+      chips.push(`<span class="card-chip busy">На руках ${heldQty(item)}</span>`);
+    }
+  } else if (item.status === 'busy') {
     chips.push(`<span class="card-chip busy">На руках у ${escapeHtml(item.taken_by_name || 'сотрудника')}${
       item.taken_at ? ' с ' + escapeHtml(fmtDate(item.taken_at)) : ''}</span>`);
   } else if (item.status === 'booked') {
@@ -663,7 +732,15 @@ function bindCardActions(item, goList) {
   on('[data-copy]', () => copyInfo(item));
   on('[data-history]', () => showHistory(item));
 
-  on('[data-return]', (b) => after(b, () => api.return(item.id), 'Прибор возвращён'));
+  if (isMultiItem(item)) {
+    // Кнопка в шапке возвращает СВОЁ; кнопка в строке держателя — его.
+    on('[data-return]', () => showReturnForm(item, state.currentUser.id));
+    root.querySelectorAll('[data-return-holder]').forEach((node) => {
+      node.onclick = () => showReturnForm(item, node.dataset.returnHolder);
+    });
+  } else {
+    on('[data-return]', (b) => after(b, () => api.return(item.id), 'Прибор возвращён'));
+  }
   on('[data-confirm-booking]', (b) => {
     if (!confirm('Подтвердить бронирование и выдать прибор?')) return;
     after(b, () => api.confirmBooking(item.id), 'Прибор выдан');
@@ -745,6 +822,10 @@ export function showInstrumentForm(item = null) {
       ${input('name', 'Название', v.name || '', 'text', true)}
       ${input('serial_number', 'Серийный номер', v.serial_number || '')}
       ${input('model', 'Модель', v.model || '')}
+      ${qtyInput('qty', 'Наличие, шт', qtyOf(v), {
+        min: Math.max(1, heldQty(v)),
+        hint: heldQty(v) ? `на руках ${heldQty(v)} — меньше поставить нельзя` : 'одинаковых штук',
+      })}
       ${select('check_type', 'Тип метрологического контроля', v.check_type, [
         ['verification', 'Поверка'],
         ['calibration', 'Калибровка'],
@@ -1058,9 +1139,15 @@ async function uploadToInstrumentFolder(instrumentId, fileList, kind) {
 }
 
 function showTakeForm(item) {
+  const multi = isMultiItem(item);
+  const free = freeQty(item);
+  if (multi && free <= 0) return toast('Свободных штук нет', true);
+
   openModal('Взять прибор', `
     <form id="takeForm" class="form-grid">
       ${field('Кто берёт', state.currentUser.name)}
+      ${multi ? qtyInput('qty', 'Сколько штук', 1,
+        { min: 1, max: free, hint: `свободно ${free} из ${qtyOf(item)}` }) : ''}
       ${input('taken_where', 'Место использования', '')}
       ${input('taken_extra', 'Доп. данные', state.currentUser.extra || '')}
       ${input('taken_at', 'Дата', today(), 'date')}
@@ -1073,6 +1160,41 @@ function showTakeForm(item) {
     const result = await run(
       () => api.issue(item.id, formData(event.target)),
       { button, success: 'Прибор выдан' }
+    );
+    if (result === null) return;
+    closeModal();
+    await refresh();
+    window.dispatchEvent(new Event('app:refresh-route'));
+  };
+}
+
+/**
+ * Возврат штук многоштучного прибора.
+ *
+ * По умолчанию возвращается ВСЁ, что у человека на руках: так и бывает
+ * почти всегда — сдают то, что брали. Но если взяли три фонаря, а вернуть
+ * готовы два, число можно уменьшить.
+ */
+function showReturnForm(item, holderId) {
+  const holding = myHolding(item, holderId);
+  if (!holding) return toast('За этим человеком ничего не числится', true);
+
+  const mine = String(holderId) === String(state.currentUser.id);
+  openModal('Вернуть прибор', `
+    <form id="returnForm" class="form-grid">
+      ${field('Кто возвращает', holding.name)}
+      ${qtyInput('qty', 'Сколько штук', holding.qty,
+        { min: 1, max: holding.qty, hint: `на руках ${holding.qty}` })}
+      ${mine ? '' : '<p class="row-subtitle">Возврат за другого сотрудника попадёт в историю прибора.</p>'}
+      <div class="modal-actions"><button class="primary" type="submit">Вернуть</button></div>
+    </form>`);
+
+  document.getElementById('returnForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector('button[type="submit"]');
+    const result = await run(
+      () => api.return(item.id, { ...formData(event.target), holder_id: holding.user_id }),
+      { button, success: 'Прибор возвращён' }
     );
     if (result === null) return;
     closeModal();
