@@ -3505,10 +3505,12 @@ els.gpForm.addEventListener("submit", async (e) => {
 
   const submitBtn = els.gpForm.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
-  submitBtn.textContent = "Создаём…";
+  submitBtn.textContent = "Собираем…";
 
   try {
-    const result = await apiFetch("/api/gp/generate", {
+    // Письмо сначала собирается в черновик и показывается целиком.
+    // В папке дела до нажатия «Сохранить» не появляется ничего.
+    const draft = await apiFetch("/api/gp/preview", {
       method: "POST",
       body: JSON.stringify({
         caseId,
@@ -3525,27 +3527,162 @@ els.gpForm.addEventListener("submit", async (e) => {
         expertPaths,
       }),
     });
+    // Форму не сбрасываем и не закрываем насовсем — прячем: из
+    // предпросмотра можно вернуться и поправить введённое, а набирать
+    // всё заново из-за одной опечатки человек не должен.
     els.gpOverlay.classList.add("hidden");
-    // Файлов теперь два: рабочий и тот, что уходит в суд. Если сканов
-    // нет ни у кого, второго не будет — и об этом надо сказать сразу, а
-    // не дать человеку искать его в папке.
+    await openGpPreview(draft);
+  } catch (err) {
+    alert("Не удалось собрать письмо: " + err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Предпросмотр";
+  }
+});
+
+/* ---------- Предпросмотр гарантийного письма ---------- */
+
+/**
+ * Письмо показывают ДО того, как оно легло в папку дела.
+ *
+ * Пока оно собиралось сразу в дело, ошибку было видно только там же: в
+ * папке оставался файл «вроде не тот», рядом появлялся второй, и через
+ * месяц никто не мог сказать, какой отправляли в суд.
+ *
+ * Правки вносятся прямо здесь, в редакторе, — их сохраняет сам редактор,
+ * как и в образцах. Письмо с приложением открывается только на просмотр
+ * и пересобирается из текстового: иначе правка в одном файле молча не
+ * попала бы во второй.
+ */
+let gpPreviewState = null;   // { draftId, plainName, withDocsName, noScans }
+let gpPreviewEditor = null;
+let gpPreviewView = "plain";
+
+async function openGpPreview(draft) {
+  gpPreviewState = draft;
+  gpPreviewView = "plain";
+  document.getElementById("gpPreviewFull").classList.remove("hidden");
+  document.body.classList.add("no-scroll");
+  document.querySelector('[data-gp-view="docs"]').disabled = Boolean(draft.noScans);
+  await showGpPreviewView("plain");
+}
+
+async function showGpPreviewView(view) {
+  if (!gpPreviewState) return;
+  gpPreviewView = view;
+  for (const tab of document.querySelectorAll("[data-gp-view]")) {
+    tab.classList.toggle("on", tab.dataset.gpView === view);
+  }
+  const withDocs = view === "docs";
+  document.getElementById("gpPreviewTitle").textContent =
+    withDocs ? gpPreviewState.withDocsName : gpPreviewState.plainName;
+  document.getElementById("gpPreviewHint").textContent = withDocs
+    ? "Только просмотр: приложение собирается из текста письма"
+    : "Правки сохраняет сам редактор";
+
+  const mount = document.getElementById("gpPreviewMount");
+  mount.innerHTML = '<div class="empty-hint" style="padding:24px;">Открываем письмо…</div>';
+  destroyGpPreviewEditor();
+
+  try {
+    if (withDocs) {
+      // Пересобираем ПЕРЕД показом: текст могли только что поправить, и
+      // показать старую редакцию — соврать ровно в том месте, ради
+      // которого предпросмотр и сделан.
+      await apiFetch(`/api/gp/preview/${encodeURIComponent(gpPreviewState.draftId)}/rebuild`,
+        { method: "POST" });
+    }
+    const { config, scriptUrl } = await apiFetch(
+      `/api/gp/preview/${encodeURIComponent(gpPreviewState.draftId)}/editor` +
+      (withDocs ? "?file=docs" : ""));
+    if (!window.DocsAPI) await loadExternalScript(scriptUrl);
+    mount.innerHTML = '<div id="gpPreviewEditorBox"></div>';
+    gpPreviewEditor = new window.DocsAPI.DocEditor("gpPreviewEditorBox", config);
+  } catch (err) {
+    mount.innerHTML = `<div class="empty-hint" style="padding:24px;">
+      Не удалось открыть письмо: ${escapeHtml(err.message)}.<br>
+      Проверьте, что сервер документов (OnlyOffice) запущен.<br><br>
+      Письмо при этом собрано и лежит в черновике — «Сохранить в дело» работает.</div>`;
+  }
+}
+
+function destroyGpPreviewEditor() {
+  // Закрываем редактор, а не просто прячем: незакрытый продолжает
+  // держать документ и спорить за право сохранить со следующим.
+  if (gpPreviewEditor && gpPreviewEditor.destroyEditor) {
+    try { gpPreviewEditor.destroyEditor(); } catch (err) { /* уже закрыт */ }
+  }
+  gpPreviewEditor = null;
+}
+
+function hideGpPreview() {
+  destroyGpPreviewEditor();
+  document.getElementById("gpPreviewFull").classList.add("hidden");
+  document.getElementById("gpPreviewMount").innerHTML = "";
+  document.body.classList.remove("no-scroll");
+}
+
+/** Вернуться к форме: черновик убираем, введённое остаётся на месте. */
+async function backFromGpPreview() {
+  const state = gpPreviewState;
+  gpPreviewState = null;
+  hideGpPreview();
+  els.gpOverlay.classList.remove("hidden");
+  if (state) {
+    try {
+      await apiFetch(`/api/gp/preview/${encodeURIComponent(state.draftId)}`, { method: "DELETE" });
+    } catch (err) { /* не убрался — уберётся сам через сутки */ }
+  }
+}
+
+for (const tab of document.querySelectorAll("[data-gp-view]")) {
+  bind(tab, "click", () => {
+    if (tab.disabled || tab.dataset.gpView === gpPreviewView) return;
+    showGpPreviewView(tab.dataset.gpView).catch((err) => alert(err.message));
+  });
+}
+bind(document.getElementById("gpPreviewBack"), "click", () => {
+  backFromGpPreview().catch((err) => alert(err.message));
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && gpPreviewState) backFromGpPreview().catch(() => {});
+});
+
+bind(document.getElementById("gpPreviewSave"), "click", async () => {
+  if (!gpPreviewState) return;
+  const button = document.getElementById("gpPreviewSave");
+  button.disabled = true;
+  button.textContent = "Сохраняем…";
+  // Редактор закрываем ДО сохранения: он отдаёт правки серверу при
+  // закрытии, и сохранить раньше этого значило бы положить в дело
+  // письмо без последней правки.
+  destroyGpPreviewEditor();
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  try {
+    const result = await apiFetch(
+      `/api/gp/preview/${encodeURIComponent(gpPreviewState.draftId)}/save`, { method: "POST" });
+    gpPreviewState = null;
+    hideGpPreview();
+    els.gpForm.reset();
+    // Файлов два: рабочий и тот, что уходит в суд. Если сканов нет ни у
+    // кого, второго не будет — и об этом надо сказать сразу, а не дать
+    // человеку искать его в папке.
     alert(result.noScans
       ? `Готово! Файл «${result.name}» создан в проекте.\n\n` +
         "Письма с приложениями нет: ни у одного из выбранных экспертов " +
         "не прикреплено ни одного скана. Их добавляют в «Базе данных / " +
         "Эксперты» кнопкой «Сведения об эксперте»."
       : `Готово! В проекте создано два файла:\n\n${result.files.join("\n")}`);
-    // Обновим колонку "Дела", если сейчас открыта именно папка этого проекта
     if (currentPath === result.caseFolderPath) {
       renderFolder(currentPath);
     } else {
       loadColumnList("cases");
     }
   } catch (err) {
-    alert("Не удалось создать документ: " + err.message);
+    alert("Не удалось сохранить письмо: " + err.message);
   } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = "Создать";
+    button.disabled = false;
+    button.textContent = "Сохранить в дело";
   }
 });
 

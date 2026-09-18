@@ -2787,6 +2787,40 @@ a.upload-btn { text-decoration: none; }
 /* Пока открыт редактор, страница под ним не должна прокручиваться. */
 body.no-scroll { overflow: hidden; }
 
+/* --- Предпросмотр письма: два вида одного письма и что с ним делать --- */
+
+.gp-preview-tabs { display: inline-flex; gap: 2px; }
+.gp-preview-tab {
+  border: 1px solid #47524d; background: transparent; color: #e6ebe7;
+  padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.gp-preview-tab:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.gp-preview-tab:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.gp-preview-tab:hover:not(:disabled) { background: #2f3a36; }
+.gp-preview-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Приложения нет вовсе — кнопка гаснет, а не открывает пустоту. */
+.gp-preview-tab:disabled { opacity: .45; cursor: default; }
+
+.gp-preview-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.gp-preview-acts .tpl-full-close { margin-left: 0; }
+/* Сохранение — единственное необратимое действие в этом окне, и оно
+   должно выглядеть заметнее возврата к форме. */
+.gp-preview-save {
+  border: 0; background: var(--accent); color: #fff;
+  border-radius: var(--radius-sm); padding: 7px 16px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.gp-preview-save:hover { filter: brightness(1.08); }
+.gp-preview-save:disabled { opacity: .6; cursor: default; }
+
+@media (max-width: 760px) {
+  .tpl-full-bar { flex-wrap: wrap; gap: 8px; }
+  .gp-preview-tabs { order: 3; flex: 1 1 100%; }
+  .gp-preview-tab { flex: 1 1 auto; }
+  /* Подсказка на телефоне уходит: место нужно кнопкам. */
+  #gpPreviewHint { display: none; }
+}
+
 /* --- Сведения об эксперте: пункт и его сканы --- */
 
 .ei-items { display: flex; flex-direction: column; gap: 12px; }
