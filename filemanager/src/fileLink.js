@@ -48,4 +48,13 @@ function verifyFileLinkToken(token, relPath) {
   return payload;
 }
 
-module.exports = { signFileLinkToken, verifyFileLinkToken };
+function verifyServiceToken(token, expected) {
+  if (!FILE_LINK_SECRET) throw new Error("Переменная окружения FILE_LINK_SECRET не задана");
+  const payload = jwt.verify(token, FILE_LINK_SECRET);
+  for (const [key, value] of Object.entries(expected)) {
+    if (String(payload[key]) !== String(value)) throw new Error("Токен не соответствует операции");
+  }
+  return payload;
+}
+
+module.exports = { signFileLinkToken, verifyFileLinkToken, verifyServiceToken };

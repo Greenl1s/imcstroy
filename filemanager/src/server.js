@@ -2236,6 +2236,49 @@ app.get("/internal/linked-file", async (req, res) => {
   }
 });
 
+// Эталонные снимки распознавания физически лежат в папке прибора в ИСУ.
+// Публичного доступа у этих методов нет: короткий токен подписывает API
+// «Учёта оборудования», а путь сервер строит сам по id прибора.
+app.post("/internal/instrument-recognition/:id",
+  express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "4mb" }),
+  async (req, res) => {
+    try {
+      fileLink.verifyServiceToken(req.query.token, {
+        action: "recognition-upload", instrumentId: Number(req.params.id),
+      });
+      const types = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+      const ext = types[req.headers["content-type"]];
+      if (!ext || !Buffer.isBuffer(req.body) || !req.body.length) {
+        return res.status(400).json({ message: "Нужно фото JPEG, PNG или WebP" });
+      }
+      const dir = await equipment.uploadDirFor(Number(req.params.id), "recognition");
+      const name = `Распознавание-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const relPath = `${dir}/${name}`;
+      await fs.promises.writeFile(filesLib.safeResolve(relPath), req.body);
+      res.status(201).json({ path: relPath, size: req.body.length });
+    } catch (err) {
+      res.status(err.status || 403).json({ message: err.message });
+    }
+  });
+
+app.delete("/internal/instrument-recognition", async (req, res) => {
+  try {
+    fileLink.verifyServiceToken(req.query.token, {
+      action: "recognition-delete", path: req.query.path,
+    });
+    const relPath = String(req.query.path || "");
+    if (!relPath.endsWith("/" + path.posix.basename(relPath)) ||
+        !relPath.includes(`/${equipment.RECOGNITION_DIRNAME}/`)) {
+      return res.status(400).json({ message: "Некорректный путь фотографии" });
+    }
+    await fs.promises.unlink(filesLib.safeResolve(relPath));
+    res.status(204).end();
+  } catch (err) {
+    if (err.code === "ENOENT") return res.status(404).json({ message: "Файл не найден" });
+    res.status(403).json({ message: err.message });
+  }
+});
+
 app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
   try {
     // requireEdit: сохранять можно только тем токеном, который выдан для

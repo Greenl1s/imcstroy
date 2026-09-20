@@ -38,9 +38,10 @@ const ARCHIVE_DIRNAME = "Архив";
 const NO_TYPE_DIRNAME = "Не указано";
 const IMAGES_DIRNAME = "Изображения";
 const DOCS_DIRNAME = "Поверка";
+const RECOGNITION_DIRNAME = "Распознавание фото";
 
 /** Служебные подпапки прибора — заводятся сразу, чтобы не гадать, куда класть. */
-const INSTRUMENT_SUBDIRS = [IMAGES_DIRNAME, DOCS_DIRNAME];
+const INSTRUMENT_SUBDIRS = [IMAGES_DIRNAME, DOCS_DIRNAME, RECOGNITION_DIRNAME];
 
 /**
  * QR-код прибора лежит файлом в его же папке.
@@ -174,6 +175,9 @@ async function sync(options = {}) {
     const current = instrument.folder_path;
 
     if (current === target && (await files.pathExists(target))) {
+      // Новые служебные подпапки должны появиться и у давно созданных
+      // приборов, а не только у тех, чья папка создаётся сегодня.
+      for (const sub of INSTRUMENT_SUBDIRS) await files.ensureDir(`${target}/${sub}`);
       // Папка на месте — но QR мог не появиться (прибор завели до этой
       // возможности) или устареть после переезда. Дешёвая проверка.
       if (await ensureQr(instrument, target, options.baseUrl)) report.qr += 1;
@@ -520,7 +524,9 @@ async function uploadDirFor(instrumentId, kind) {
   const typesByCode = await loadControlTypes();
   const folder = instrument.folder_path || expectedFolder(instrument, typesByCode);
 
-  const sub = kind === "document" ? DOCS_DIRNAME : IMAGES_DIRNAME;
+  const sub = kind === "document" ? DOCS_DIRNAME
+    : kind === "recognition" ? RECOGNITION_DIRNAME
+    : IMAGES_DIRNAME;
   await files.ensureDir(`${folder}/${sub}`);
   if (instrument.folder_path !== folder) {
     await db.query("UPDATE instruments SET folder_path = $1 WHERE id = $2", [folder, instrument.id]);
@@ -551,7 +557,8 @@ async function adoptUploadedFile(instrumentId, relFilePath, kind) {
 }
 
 module.exports = {
-  EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME, QR_FILENAME,
+  EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME,
+  RECOGNITION_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
   sync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes,
   ensureQr, rebuildQr, qrFiles, deleteGuard,
