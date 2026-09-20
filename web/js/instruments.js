@@ -305,6 +305,12 @@ export async function renderCard(id, goList) {
   const free = freeQty(item);
   const held = heldQty(item);
   const mine = multi ? myHolding(item, me) : null;
+  const verification = verificationInfo(item);
+  const issuanceBlocked = item.check_type !== 'none' &&
+    (verification.kind === 'expired' || verification.kind === 'unset');
+  const issuanceBlockText = verification.kind === 'unset'
+    ? 'Срок поверки не указан. Выдача и передача запрещены.'
+    : 'Поверка просрочена. Выдача и передача запрещены.';
 
   // ---------- Кнопки ----------
   let main = '';
@@ -319,26 +325,33 @@ export async function renderCard(id, goList) {
     // У многоштучного прибора «Взять» живо, пока есть свободные, а
     // «Вернуть» — пока у человека что-то на руках. Одно другому не мешает:
     // можно держать одну штуку и взять вторую.
-    if (free > 0) main += '<button class="primary" data-issue>Взять</button>';
-    if (mine || (admin && held > 0)) main += '<button class="secondary" data-return>Вернуть</button>';
+    if (free > 0 && !issuanceBlocked) main += '<button class="primary" data-issue>Взять прибор</button>';
+    if (free > 0 && issuanceBlocked) main += '<button class="primary" disabled>Выдача запрещена</button>';
+    if (mine || (admin && held > 0)) main += '<button class="secondary" data-return>Вернуть прибор</button>';
     if (free <= 0 && !mine && !admin) {
       main += `<span class="badge warn">Все ${qtyOf(item)} шт на руках</span>`;
     }
   } else if (item.status === 'free') {
-    main += '<button class="primary" data-issue>Взять</button>';
+    main += issuanceBlocked
+      ? '<button class="primary" disabled>Выдача запрещена</button>'
+      : '<button class="primary" data-issue>Взять прибор</button>';
     main += '<button class="secondary" data-book>Забронировать</button>';
   } else if (item.status === 'booked') {
     if (isBookedByMe || admin) {
-      main += '<button class="primary" data-confirm-booking>Подтвердить бронирование</button>';
+      main += issuanceBlocked
+        ? '<button class="primary" disabled>Выдача запрещена</button>'
+        : '<button class="primary" data-confirm-booking>Подтвердить бронирование</button>';
       main += '<button class="danger" data-cancel-booking>Отменить бронирование</button>';
     } else {
       main += `<span class="badge warn">Забронирован: ${escapeHtml(item.booked_by_name || '')}</span>`;
     }
   } else if (item.status === 'busy') {
     if (isOwner || admin) {
-      main += '<button class="primary" data-return>Вернуть</button>';
+      main += '<button class="primary" data-return>Вернуть прибор</button>';
       if (!item.pending_transfer_to) {
-        main += '<button class="secondary" data-transfer>Передать</button>';
+        main += issuanceBlocked
+          ? '<button class="secondary" disabled>Передача запрещена</button>'
+          : '<button class="secondary" data-transfer>Передать</button>';
       }
     } else {
       main += `<span class="badge warn">Занят: ${escapeHtml(item.taken_by_name || '')}</span>`;
@@ -407,7 +420,7 @@ export async function renderCard(id, goList) {
     </div>`;
   }
 
-  const v = verificationInfo(item);
+  const v = verification;
   const vTone = v.tone ? ' v-' + v.tone : '';
 
   // Незаполненные поля собираем в одну строку вместо столбца прочерков:
@@ -420,16 +433,12 @@ export async function renderCard(id, goList) {
     [!item.company_code, 'владелец'],
     [!item.verification_date && item.check_type !== 'none', dateFieldLabel(item.check_type).toLowerCase()],
     [!item.valid_until && item.check_type !== 'none', validUntilLabel(item.check_type).toLowerCase()],
-    [!item.comment, 'комментарий'],
   ].filter(([empty]) => empty).map(([, name]) => name);
 
   const facts = [
-    ['Инвентарный номер', item.inventory_no],
     // «1 шт» в каждой карточке — строка, которую глаз перестанет замечать
     // через день, поэтому наличие показывается, только когда штук несколько.
     ['Наличие', multi ? pieces(qtyOf(item)) : ''],
-    ['Модель', item.model],
-    ['Серийный номер', item.serial_number],
     ['Классификация', item.control_type ? controlTypeFull(item.control_type) : ''],
     ['Владелец', item.company_code ? companyName(item.company_code) : ''],
     ['Метрологический контроль', checkTypeText(item.check_type)],
@@ -453,7 +462,7 @@ export async function renderCard(id, goList) {
             <b>QR-код прибора</b>
             ${escapeHtml(displayNo(item))} · наклеивается на корпус
           </div>
-          <button class="secondary" type="button" data-qr>Скачать</button>
+          <button class="secondary" type="button" data-qr>QR-код</button>
         </div>
       </div>
 
@@ -461,12 +470,13 @@ export async function renderCard(id, goList) {
         <div class="card-head">
           <div class="card-head-text">
             <h1>${escapeHtml(item.name)}</h1>
+            <div class="card-model">${item.model ? escapeHtml(item.model) : 'Модель не указана'}</div>
             <div class="card-ids">
-              ${escapeHtml(displayNo(item))}${item.model ? ' · модель ' + escapeHtml(item.model) : ''}${item.serial_number ? ' · серийный номер ' + escapeHtml(item.serial_number) : ''}
+              <span>Инвентарный № <b>${escapeHtml(item.inventory_no || 'не указан')}</b></span>
+              <span>Серийный № <b>${escapeHtml(item.serial_number || 'не указан')}</b></span>
             </div>
-            <div class="card-state">${cardStateChips(item)}</div>
           </div>
-          <div class="card-actions">${main}</div>
+          ${admin && item.status !== 'retired' ? '<button class="card-head-edit" type="button" data-edit>Редактировать</button>' : ''}
         </div>
 
         <!-- Вся полоса открывает документ, а не кнопка в её углу:
@@ -474,6 +484,15 @@ export async function renderCard(id, goList) {
              человека и так одно целое — «поверка». Если документа нет,
              полоса остаётся обычным блоком: нажимать не на что, и делать
              вид, что есть, нечестно. -->
+        <div class="card-priority-grid">
+          <section class="card-focus card-location">
+            <h4>${multi ? 'Наличие и выдача' : item.status === 'booked' ? 'Бронирование' : item.status === 'retired' ? 'Списание' : 'Где прибор сейчас'}</h4>
+            <div class="card-focus-body">${holder || '<div class="card-available"><b>Прибор свободен</b><span>Можно оформить выдачу</span></div>'}</div>
+            <div class="card-actions">${main}</div>
+            ${issuanceBlocked ? `<div class="card-issue-block">${escapeHtml(issuanceBlockText)}</div>` : ''}
+          </section>
+          <section class="card-focus card-check">
+            <h4>${escapeHtml(checkTypeText(item.check_type))}</h4>
         ${item.has_document ? `
         <button type="button" class="card-verif card-verif-open${vTone}" data-document
                 title="Открыть ${escapeHtml(documentButtonLabel(item.check_type).toLowerCase())}">
@@ -482,7 +501,7 @@ export async function renderCard(id, goList) {
             <b>${escapeHtml(verifHeadline(item, v))}</b>
             ${item.verification_date ? 'Предыдущая — ' + escapeHtml(fmtDate(item.verification_date)) : 'Дата предыдущей не заполнена'}
           </span>
-          <span class="card-verif-go">Открыть
+          <span class="card-verif-go">Открыть свидетельство
             <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </span>
         </button>` : `
@@ -495,8 +514,8 @@ export async function renderCard(id, goList) {
           <span class="card-verif-none">${escapeHtml(documentButtonLabel(item.check_type))} не приложен${
             item.check_type === 'calibration' ? 'а' : ''}</span>
         </div>`}
-
-        ${holder}
+          </section>
+        </div>
 
         <div class="card-box">
           <h4>Характеристики</h4>
@@ -530,11 +549,6 @@ export async function renderCard(id, goList) {
             <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>
             Копировать данные
           </button>
-          ${admin && item.status !== 'retired' ? `
-          <button class="card-act card-act-main" type="button" data-edit>
-            <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>
-            Редактировать
-          </button>` : ''}
         </div>
 
         ${danger ? `
