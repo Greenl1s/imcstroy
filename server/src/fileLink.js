@@ -32,6 +32,26 @@ function signFileLinkToken(relPath, viewerId) {
   return jwt.sign({ path: relPath, viewerId: Number(viewerId) }, FILE_LINK_SECRET, { expiresIn: TTL });
 }
 
+function signServiceToken(payload) {
+  if (!FILE_LINK_SECRET) throw new Error('Переменная окружения FILE_LINK_SECRET не задана');
+  return jwt.sign(payload, FILE_LINK_SECRET, { expiresIn: TTL });
+}
+
+export async function storeRecognitionFile(instrumentId, buffer, contentType) {
+  const token = signServiceToken({ action: 'recognition-upload', instrumentId: Number(instrumentId) });
+  const response = await fetch(`${FILEMANAGER_INTERNAL_URL}/internal/instrument-recognition/${instrumentId}?token=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'Content-Type': contentType }, body: buffer
+  });
+  if (!response.ok) throw new Error(`Не удалось сохранить фото в ИСУ (HTTP ${response.status})`);
+  return response.json();
+}
+
+export async function deleteRecognitionFile(relPath) {
+  const token = signServiceToken({ action: 'recognition-delete', path: relPath });
+  const response = await fetch(`${FILEMANAGER_INTERNAL_URL}/internal/instrument-recognition?path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(token)}`, { method: 'DELETE' });
+  if (!response.ok && response.status !== 404) throw new Error(`Не удалось удалить фото из ИСУ (HTTP ${response.status})`);
+}
+
 /**
  * Забирает файл, привязанный по пути в файловом менеджере, и возвращает
  * его содержимое и Content-Type — чтобы отдать дальше пользователю так,
