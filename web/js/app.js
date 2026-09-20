@@ -84,6 +84,7 @@ function bindEvents() {
   document.getElementById('addInstrumentButton').onclick = () => showInstrumentForm();
   document.getElementById('retiredButton').onclick = showRetired;
   document.getElementById('kitsButton').onclick = goKits;
+  document.getElementById('recognitionScannerButton').onclick = () => { location.href = './scanner.html'; };
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);

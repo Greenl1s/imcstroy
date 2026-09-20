@@ -174,6 +174,18 @@ export const api = {
     return URL.createObjectURL(await response.blob());
   },
 
+  listRecognitionPhotos: (id) => request(`/recognition/instruments/${id}/photos`),
+  addRecognitionPhoto: (id, data) => request(`/recognition/instruments/${id}/photos`, { method: 'POST', body: data }),
+  deleteRecognitionPhoto: (id) => request(`/recognition/photos/${id}`, { method: 'DELETE' }),
+  searchRecognition: (descriptors) => request('/recognition/search', { method: 'POST', body: { descriptors } }),
+  async recognitionPhotoUrl(id) {
+    const response = await fetch(`${BASE}/recognition/photos/${id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) return null;
+    return URL.createObjectURL(await response.blob());
+  },
+
   // ---------- Документ (фото поверки, либо любой файл, привязанный из files.imcstroy.ru) ----------
   uploadDocument: (id, dataUrl) =>
     request(`/instruments/${id}/document`, { method: 'PUT', body: { data_url: dataUrl } }),

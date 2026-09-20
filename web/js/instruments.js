@@ -10,6 +10,7 @@ import {
   qtyOf, heldQty, freeQty, holdersOf, isMultiItem, myHolding, pieces
 } from './utils.js';
 import { closeModal, field, input, openModal, select, toast, run, qtyInput } from './ui.js';
+import { prepareRecognitionPhoto } from './image-fingerprint.js';
 
 // Адрес файлового менеджера. Поменяйте здесь, если домен когда-нибудь изменится.
 export const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
@@ -549,6 +550,10 @@ export async function renderCard(id, goList) {
             <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>
             Копировать данные
           </button>
+          ${admin ? `<button class="card-act" type="button" data-recognition>
+            <svg viewBox="0 0 24 24"><path d="M4 7h3l2-3h6l2 3h3v13H4z"/><circle cx="12" cy="13" r="4"/></svg>
+            Фото для распознавания
+          </button>` : ''}
         </div>
 
         ${danger ? `
@@ -745,6 +750,7 @@ function bindCardActions(item, goList) {
   on('[data-document]', () => showDocument(item));
   on('[data-copy]', () => copyInfo(item));
   on('[data-history]', () => showHistory(item));
+  on('[data-recognition]', () => showRecognitionPhotos(item));
 
   if (isMultiItem(item)) {
     // Кнопка в шапке возвращает СВОЁ; кнопка в строке держателя — его.
@@ -778,6 +784,51 @@ function bindCardActions(item, goList) {
     await refresh();
     goList();
   });
+}
+
+/** Эталонные ракурсы, по которым быстрый экран камеры узнаёт прибор. */
+async function showRecognitionPhotos(item) {
+  openModal(`Распознавание: ${item.name}`, '<p class="qr-caption">Загрузка фотографий…</p>');
+  let photos;
+  try { photos = await api.listRecognitionPhotos(item.id); }
+  catch (error) { return openModal('Фото для распознавания', `<p class="qr-caption">${escapeHtml(error.message)}</p>`); }
+
+  openModal(`Распознавание: ${item.name}`, `
+    <div class="recognition-help">
+      <b>Добавьте 6–10 разных фотографий.</b>
+      <span>Снимите прибор целиком, шильдик, панель управления, разъёмы и характерные части. Используйте разные стороны и обычное рабочее освещение.</span>
+    </div>
+    <label class="recognition-add primary">Добавить фото
+      <input id="recognitionFile" type="file" accept="image/*" capture="environment">
+    </label>
+    <div class="recognition-grid" id="recognitionGrid">
+      ${photos.length ? photos.map((p) => `<div class="recognition-photo" data-photo="${p.id}"><div class="recognition-thumb">Загрузка…</div><button class="danger" type="button" data-delete-photo="${p.id}">Удалить</button></div>`).join('') : '<p class="qr-caption">Эталонных фотографий пока нет.</p>'}
+    </div>
+    <p class="qr-caption">Сохранено: ${photos.length} из 24. После добавления фото сразу участвует в поиске.</p>`);
+
+  for (const photo of photos) {
+    api.recognitionPhotoUrl(photo.id).then((url) => {
+      const box = document.querySelector(`[data-photo="${photo.id}"] .recognition-thumb`);
+      if (box && url) box.innerHTML = `<img src="${url}" alt="Эталонный ракурс">`;
+    });
+  }
+  document.querySelectorAll('[data-delete-photo]').forEach((button) => {
+    button.onclick = async () => {
+      if (!confirm('Удалить этот эталонный снимок?')) return;
+      const result = await run(() => api.deleteRecognitionPhoto(button.dataset.deletePhoto), { button, success: 'Фотография удалена' });
+      if (result !== null) showRecognitionPhotos(item);
+    };
+  });
+  const input = document.getElementById('recognitionFile');
+  input.onchange = async () => {
+    const file = input.files?.[0]; if (!file) return;
+    const label = input.closest('label'); label.classList.add('is-loading');
+    try {
+      const prepared = await prepareRecognitionPhoto(file);
+      await api.addRecognitionPhoto(item.id, { data_url: prepared.dataUrl, descriptors: prepared.descriptors });
+      toast('Фотография добавлена'); showRecognitionPhotos(item);
+    } catch (error) { toast(error.message, 'error'); label.classList.remove('is-loading'); }
+  };
 }
 
 // ---------- Выбор файла из files.imcstroy.ru ----------
