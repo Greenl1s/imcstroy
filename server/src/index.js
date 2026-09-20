@@ -12,6 +12,7 @@ import { history } from './routes/history.js';
 import { controlTypes } from './routes/controlTypes.js';
 import { companies } from './routes/companies.js';
 import { kits } from './routes/kits.js';
+import { recognition } from './routes/recognition.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -50,6 +51,7 @@ app.use('/api/history', history);
 app.use('/api/control-types', controlTypes);
 app.use('/api/companies', companies);
 app.use('/api/kits', kits);
+app.use('/api/recognition', recognition);
 
 app.use((req, res) => res.status(404).json({ error: 'Метод не найден' }));
 
