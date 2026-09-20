@@ -3,6 +3,7 @@ import { query, transaction } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { logEvent } from '../history.js';
 import { todayIso } from '../dates.js';
+import { assertIssuableLocked } from '../issuance.js';
 
 /**
  * Комплекты приборов.
@@ -54,7 +55,7 @@ async function loadKit(id) {
  * У каждого прибора появляются три служебных поля:
  *   takeable  — можно ли взять прямо сейчас (статус free)
  *   blocked   — почему нельзя, человеческим языком (или null)
- *   warning   — можно, но стоит знать (просроченная поверка) (или null)
+ *   warning   — дополнительная подсказка (или null)
  */
 async function kitItems(kitId) {
   const { rows } = await query(
@@ -86,15 +87,12 @@ async function kitItems(kitId) {
       blocked = 'Списан';
     }
 
-    // Поверка не мешает взять прибор — только предупреждает.
-    // Решение остаётся за человеком, это его ответственность,
-    // а не повод запретить выезд.
     let warning = null;
     if (!blocked && item.check_type !== 'none') {
       if (!item.valid_until) {
-        warning = 'Срок поверки не заполнен';
+        blocked = 'Срок поверки не заполнен — выдача запрещена';
       } else if (item.valid_until < now) {
-        warning = `Поверка просрочена (до ${item.valid_until})`;
+        blocked = `Поверка просрочена (до ${item.valid_until}) — выдача запрещена`;
       }
     }
 
@@ -366,6 +364,7 @@ kits.post('/:id/issue', async (req, res) => {
   for (const instrumentId of requested) {
     try {
       const instrument = await transaction(async (client) => {
+        await assertIssuableLocked(client, instrumentId);
         const { rows } = await client.query(
           `UPDATE instruments
               SET status = 'busy', taken_by = $2, taken_where = $3,

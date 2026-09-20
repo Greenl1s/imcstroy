@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../auth.js';
 import { logEvent } from '../history.js';
 import { fetchLinkedFile } from '../fileLink.js';
 import { todayIso } from '../dates.js';
+import { assertIssuable, assertIssuableLocked } from '../issuance.js';
 
 // Как человека зовут. Логин остаётся делом входа — в журнале и в
 // карточках прибора людям нужно имя.
@@ -30,6 +31,9 @@ const today = () => todayIso();
 async function transition(res, { id, actor, sql, params, action, guardMessage, buildLog }) {
   try {
     const row = await transaction(async (client) => {
+      if (['transfer_request', 'transfer_accept', 'confirm_booking'].includes(action)) {
+        await assertIssuableLocked(client, id);
+      }
       const { rows } = await client.query(sql, params);
       if (!rows.length) {
         const exists = await client.query('SELECT status FROM instruments WHERE id = $1', [id]);
@@ -132,6 +136,7 @@ const pieces = (n) => `${n} шт`;
  * иначе две выдачи разошлись бы в мелочах, а мелочь здесь это остаток.
  */
 async function issueOne(client, { instrument, user, qty, where, extra, at }) {
+  assertIssuable(instrument);
   if (!isMulti(instrument)) {
     const { rows } = await client.query(
       `UPDATE instruments
@@ -583,6 +588,7 @@ instruments.post('/bulk/confirm-booking', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
+        await assertIssuableLocked(client, id);
         const { rows } = await client.query(
           `UPDATE instruments
               SET status = 'busy',
@@ -719,6 +725,7 @@ instruments.post('/bulk/transfer', async (req, res) => {
       const instrument = await transaction(async (client) => {
         const found = await lockInstrument(client, id);
         refuseMulti(found, 'передача');
+        assertIssuable(found);
         const { rows } = await client.query(
           `UPDATE instruments
               SET pending_transfer_to = $4, pending_transfer_where = $5, pending_transfer_extra = $6
@@ -760,6 +767,7 @@ instruments.post('/bulk/accept-transfer', async (req, res) => {
   for (const id of ids) {
     try {
       const instrument = await transaction(async (client) => {
+        await assertIssuableLocked(client, id);
         const { rows } = await client.query(
           `UPDATE instruments
               SET taken_by = pending_transfer_to,
