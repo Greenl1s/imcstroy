@@ -498,6 +498,83 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
 .card-act-main {
   border-color: var(--primary); color: var(--primary); font-weight: 600;
 }
+
+/* Карточка: сначала идентификация, затем два главных ответа — где прибор
+   и можно ли его использовать. Второстепенные сведения остаются ниже. */
+.card-screen {
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 20px;
+}
+.card-gallery { gap: 10px; }
+.card-photo { height: 122px; cursor: zoom-in; }
+.card-qr { padding: 10px; justify-content: center; }
+.card-qr-box, .card-qr-text { display: none; }
+.card-qr button { margin: 0; width: 100%; }
+.card-head { min-height: 122px; align-items: flex-start; }
+.card-head h1 { font-size: 27px; margin-bottom: 3px; }
+.card-model { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.card-ids { display: flex; gap: 8px 24px; flex-wrap: wrap; margin-top: 14px; }
+.card-ids span { white-space: nowrap; }
+.card-ids b { color: var(--text); font-weight: 600; }
+.card-head-edit {
+  padding: 7px 0; border: 0; background: transparent; color: var(--primary);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.card-head-edit:hover { text-decoration: underline; }
+.card-head-edit:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.card-priority-grid {
+  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr);
+  gap: 12px; margin-top: 14px;
+}
+.card-focus {
+  min-width: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 17px 18px;
+}
+.card-focus > h4 {
+  margin: 0 0 12px; color: var(--muted); font-size: 12.5px;
+  letter-spacing: .05em; text-transform: uppercase; font-weight: 600;
+}
+.card-focus-body .card-box { margin: 0; padding: 0; border: 0; background: transparent; }
+.card-focus-body .card-box > h4 { display: none; }
+.card-focus .card-actions { margin-top: 17px; }
+.card-focus .card-actions .primary { min-width: 150px; }
+.card-available { display: grid; gap: 3px; min-height: 61px; align-content: start; }
+.card-available b { font-size: 19px; font-weight: 600; }
+.card-available span { color: var(--muted); font-size: 13px; }
+.card-check { display: flex; flex-direction: column; }
+.card-check .card-verif { flex: 1; margin: 0; padding: 0; border: 0; background: transparent; }
+.card-check .card-verif-open { padding: 0; }
+.card-check .card-verif-open:hover { box-shadow: none; }
+.card-check .card-verif-date { font-size: 20px; }
+.card-check .card-verif-text { min-width: 0; }
+.card-check .card-verif-go { white-space: normal; text-align: right; }
+.card-issue-block {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+  color: var(--danger); font-size: 13px; font-weight: 600;
+}
+.card-box:not(.holder) { margin-top: 12px; }
+.card-minor { margin-top: 12px; }
+body.dark-theme .card-focus { background: var(--panel); }
+
+@media (max-width: 900px) {
+  .card-priority-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .card-screen { grid-template-columns: 112px minmax(0, 1fr); gap: 14px; }
+  .card-photo { height: 100px; }
+  .card-head { min-height: 100px; }
+  .card-head h1 { font-size: 22px; }
+  .card-head-edit { width: 100%; text-align: left; }
+}
+@media (max-width: 520px) {
+  .card-screen { grid-template-columns: 1fr; }
+  .card-gallery { grid-template-columns: 112px minmax(0, 1fr); }
+  .card-qr { align-self: stretch; }
+  .card-head { min-height: 0; }
+  .card-ids { display: grid; gap: 4px; }
+  .card-priority-grid { margin-top: 12px; }
+  .card-focus { padding: 15px; }
+}
 .card-act-main:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 .card-danger {
   margin-top: 11px; border: 1px dashed #dcbcb6; border-radius: var(--radius);
@@ -936,4 +1013,3 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
   .kit-pick { max-height: 50vh; }
   .kit-pick-row input[type="checkbox"] { width: 21px; height: 21px; }
 }
-
