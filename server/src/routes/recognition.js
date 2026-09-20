@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { fetchLinkedFile, storeRecognitionFile, deleteRecognitionFile } from '../fileLink.js';
 
 export const recognition = Router();
 recognition.use(requireAuth);
@@ -37,7 +38,7 @@ function cosine(a, b) {
 
 recognition.get('/instruments/:id/photos', async (req, res) => {
   const { rows } = await query(
-    `SELECT id, instrument_id, mime_type, size_bytes, created_at
+    `SELECT id, instrument_id, mime_type, size_bytes, created_at, file_path
        FROM instrument_recognition_photos WHERE instrument_id = $1 ORDER BY created_at DESC`, [req.params.id]);
   res.json(rows);
 });
@@ -49,24 +50,38 @@ recognition.post('/instruments/:id/photos', requireAdmin, async (req, res) => {
   if (!exists.rows.length) return res.status(404).json({ error: 'Прибор не найден' });
   const count = await query('SELECT count(*)::int AS count FROM instrument_recognition_photos WHERE instrument_id = $1', [req.params.id]);
   if (count.rows[0].count >= 24) return res.status(409).json({ error: 'Для одного прибора можно сохранить до 24 фотографий' });
-  const { rows } = await query(
-    `INSERT INTO instrument_recognition_photos
-       (instrument_id, mime_type, bytes, size_bytes, descriptors, created_by)
-     VALUES ($1,$2,$3,$4,$5::jsonb,$6)
-     RETURNING id, instrument_id, mime_type, size_bytes, created_at`,
-    [req.params.id, mimeType, bytes, bytes.length, JSON.stringify(descriptors), req.user.id]);
-  res.status(201).json(rows[0]);
+  const stored = await storeRecognitionFile(req.params.id, bytes, mimeType);
+  try {
+    const { rows } = await query(
+      `INSERT INTO instrument_recognition_photos
+         (instrument_id, mime_type, bytes, size_bytes, descriptors, created_by, file_path)
+       VALUES ($1,$2,NULL,$3,$4::jsonb,$5,$6)
+       RETURNING id, instrument_id, mime_type, size_bytes, created_at, file_path`,
+      [req.params.id, mimeType, bytes.length, JSON.stringify(descriptors), req.user.id, stored.path]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    await deleteRecognitionFile(stored.path).catch(() => {});
+    throw err;
+  }
 });
 
 recognition.get('/photos/:id', async (req, res) => {
-  const { rows } = await query('SELECT mime_type, bytes FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
+  const { rows } = await query('SELECT mime_type, bytes, file_path FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Фотография не найдена' });
-  res.set('Content-Type', rows[0].mime_type).set('Cache-Control', 'private, max-age=3600').send(rows[0].bytes);
+  let bytes = rows[0].bytes;
+  let contentType = rows[0].mime_type;
+  if (rows[0].file_path) {
+    const linked = await fetchLinkedFile(rows[0].file_path, req.user.id);
+    bytes = linked.buffer; contentType = linked.contentType;
+  }
+  res.set('Content-Type', contentType).set('Cache-Control', 'private, max-age=3600').send(bytes);
 });
 
 recognition.delete('/photos/:id', requireAdmin, async (req, res) => {
-  const result = await query('DELETE FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
-  if (!result.rowCount) return res.status(404).json({ error: 'Фотография не найдена' });
+  const found = await query('SELECT file_path FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
+  if (!found.rows.length) return res.status(404).json({ error: 'Фотография не найдена' });
+  if (found.rows[0].file_path) await deleteRecognitionFile(found.rows[0].file_path);
+  await query('DELETE FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
   res.status(204).end();
 });
 
