@@ -479,6 +479,16 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
    терялось между ними. Теперь у каждой значок и заметная рамка,
    а у главной — акцентный цвет. */
 .card-minor { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
+.recognition-help { display:grid; gap:6px; padding:14px; margin-bottom:14px; border-radius:12px; background:#edf6fb; color:#4e6675; line-height:1.4; }
+.recognition-help b { color:#172532; }
+.recognition-add { display:flex; align-items:center; justify-content:center; min-height:48px; border-radius:10px; cursor:pointer; }
+.recognition-add input { position:absolute; opacity:0; width:1px; height:1px; }
+.recognition-add.is-loading { opacity:.6; pointer-events:none; }
+.recognition-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; margin-top:14px; }
+.recognition-photo { border:1px solid #d8e1e7; border-radius:10px; padding:7px; }
+.recognition-thumb { height:112px; display:grid; place-items:center; color:#72838f; overflow:hidden; background:#edf2f5; border-radius:7px; }
+.recognition-thumb img { width:100%; height:100%; object-fit:cover; }
+.recognition-photo button { width:100%; margin-top:7px; }
 .card-act {
   display: inline-flex; align-items: center; gap: 8px;
   min-height: 40px; padding: 9px 15px;

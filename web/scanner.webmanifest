@@ -1,0 +1,15 @@
+{
+  "name": "Поиск приборов по фото",
+  "short_name": "Сканер приборов",
+  "id": "/instruments/scanner.html",
+  "start_url": "/instruments/scanner.html",
+  "scope": "/instruments/",
+  "display": "standalone",
+  "background_color": "#eef3f7",
+  "theme_color": "#12618e",
+  "icons": [
+    { "src": "scanner-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "scanner-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
+
