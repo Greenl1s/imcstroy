@@ -2,8 +2,10 @@
 <meta name="theme-color" content="#12618e"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Сканер приборов"><link rel="manifest" href="scanner.webmanifest"><link rel="apple-touch-icon" href="scanner-apple-touch-icon.png">
 <title>Найти прибор по фото</title><link rel="stylesheet" href="scanner.css"></head><body>
 <main class="scanner"><header><a href="./">← К приборам</a><b>Поиск по фото</b></header>
-<section class="hero"><h1>Сфотографируйте прибор</h1><p>Поместите прибор или его заметную часть в центр кадра. Хороший свет и простой фон повысят точность.</p>
-<label class="camera"><span>Открыть камеру</span><input id="photoInput" type="file" accept="image/*" capture="environment"></label>
-<img id="preview" hidden alt="Снятая фотография"><div id="status" class="status">Для первого теста сначала добавьте эталонные фотографии из карточек приборов.</div></section>
+<section class="hero"><h1>Наведите камеру на прибор</h1><p>Поместите прибор или его заметную часть в рамку. Проверьте номер найденного прибора перед выдачей.</p>
+<div class="camera-view"><video id="cameraVideo" autoplay muted playsinline></video><div class="camera-frame"></div></div>
+<button class="camera" id="captureButton" type="button" disabled>Распознать прибор</button>
+<label class="gallery"><span>Выбрать готовое фото</span><input id="photoInput" type="file" accept="image/*" capture="environment"></label>
+<img id="preview" hidden alt="Снятая фотография"><div id="status" class="status">Запускаю камеру…</div></section>
 <section id="results" class="results"></section></main><script type="module" src="js/scanner.js"></script><script>if('serviceWorker' in navigator)navigator.serviceWorker.register('./scanner-sw.js');</script></body></html>
 
