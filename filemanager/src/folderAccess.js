@@ -1,11 +1,11 @@
 const db = require("./db");
+const { normalizeStoragePath } = require("./storagePath");
 
 // Система персональных прав действует только внутри "Дела".
 const CASES_ROOT = "/Дела";
 
 function normalize(p) {
-  const clean = "/" + String(p || "/").replace(/^\/+/, "").replace(/\/+$/, "");
-  return clean === "" ? "/" : clean;
+  return normalizeStoragePath(p);
 }
 
 function isUnderCases(p) {

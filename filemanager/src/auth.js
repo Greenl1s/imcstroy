@@ -98,14 +98,15 @@ async function requireAuth(req, res, next) {
     const { rows: nameRows } = await db.query(
       `SELECT u.username, ${db.nameSql("u")} AS name, u.role, u.planfix_name, u.planfix_user_id
          FROM users u WHERE u.id = $1`, [userId]);
-    const live = nameRows[0] || {};
+    const live = nameRows[0];
+    if (!live) return res.status(401).json({ message: "Пользователь не найден" });
     req.user = {
       id: userId,
       username: live.username || identity.username,
       // Имя — то, что видно людям. Логин остаётся рядом: он нужен входу
       // и настройкам администратора, но на экранах ему делать нечего.
       name: live.name || live.username || identity.username,
-      role: live.role || identity.role,
+      role: live.role,
       can_tools: perms.can_tools,
       can_db: perms.can_db,
       can_cases: perms.can_cases,

@@ -1,9 +1,10 @@
 const folderAccess = require("./folderAccess");
 const db = require("./db");
+const { normalizeStoragePath } = require("./storagePath");
 
 // Определяет, к какому "разделу" (колонке) относится путь.
 function columnForPath(relPath) {
-  const clean = "/" + String(relPath || "/").replace(/^\/+/, "");
+  const clean = normalizeStoragePath(relPath);
   if (clean === "/База данных" || clean.startsWith("/База данных/")) return "db";
   if (clean === "/Дела" || clean.startsWith("/Дела/")) return "cases";
   return null;
@@ -26,9 +27,21 @@ function requireColumnAccess(options = {}) {
 
   return async function (req, res, next) {
     try {
+      // GET/DELETE handlers consume query.path; POST handlers consume body.path.
+      // Do not authorize a query parameter and then write to an unrelated body path.
+      const source = ["GET", "DELETE"].includes(req.method) ? req.query : req.body;
+      if (typeof source?.path !== "string" || !source.path) {
+        return res.status(400).json({ message: "Укажите путь" });
+      }
+      const p = normalizeStoragePath(source.path);
+      if (req.query?.path !== undefined && req.body?.path !== undefined &&
+          normalizeStoragePath(req.query.path) !== normalizeStoragePath(req.body.path)) {
+        return res.status(400).json({ message: "В запросе указаны разные пути" });
+      }
+      source.path = p;
+      req.accessPath = p;
       if (req.user.role === "admin") return next();
 
-      const p = req.query.path || (req.body && req.body.path);
       const col = columnForPath(p);
 
       if (col === "db") {
@@ -61,6 +74,7 @@ function requireColumnAccess(options = {}) {
 
       return res.status(403).json({ message: "Доступ запрещён" });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ message: err.message });
       console.error("Ошибка проверки доступа к папке:", err);
       res.status(500).json({ message: "Не удалось проверить права доступа" });
     }

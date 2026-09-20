@@ -1,6 +1,7 @@
 const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
+const { normalizeStoragePath } = require("./storagePath");
 
 const DATA_ROOT = process.env.DATA_ROOT || "/data";
 
@@ -8,7 +9,7 @@ const DATA_ROOT = process.env.DATA_ROOT || "/data";
 // в безопасный абсолютный путь внутри DATA_ROOT.
 // Не даёт выйти за пределы DATA_ROOT через "..".
 function safeResolve(relPath) {
-  const clean = path.normalize("/" + (relPath || "/")).replace(/^([/\\])+/, "/");
+  const clean = normalizeStoragePath(relPath);
   const abs = path.join(DATA_ROOT, clean);
   if (abs !== DATA_ROOT && !abs.startsWith(DATA_ROOT + path.sep)) {
     throw new Error("Недопустимый путь");
