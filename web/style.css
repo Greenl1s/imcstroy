@@ -1168,9 +1168,20 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
   .topbar-title { min-width: 0; }
   .topbar-title > div { min-width: 0; }
   .topbar-actions { flex-wrap: nowrap; margin-left: auto; }
-  .user-name { display: none; }
+  .user-name {
+    display: inline-flex; align-items: center; min-height: 36px; max-width: 170px;
+    padding: 6px 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px;
+    background: #f5f8fa; color: var(--text); font-size: 12px; font-weight: 600;
+    white-space: nowrap; text-overflow: ellipsis;
+  }
   #logoutButton { display: none; }
-  .icon-btn { min-height: 38px; padding: 7px 11px; }
+  .menu-wrapper > .icon-btn { display: none; }
+  .menu-dropdown {
+    position: fixed; z-index: 80; top: auto; left: 12px; right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom)); width: auto; max-height: 68vh;
+    overflow-y: auto; padding: 10px; border-radius: 16px;
+    box-shadow: 0 -12px 42px rgba(20, 30, 40, .2);
+  }
   .mobile-menu-only { display: flex; }
   .menu-dropdown .menu-danger { color: var(--danger); }
 
