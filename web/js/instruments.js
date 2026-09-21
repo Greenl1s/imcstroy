@@ -16,10 +16,10 @@ import { prepareRecognitionPhoto } from './image-fingerprint.js';
 export const FILEMANAGER_ORIGIN = 'https://files.imcstroy.ru';
 
 /** Клиентская фильтрация уже загруженного списка. */
-export function filteredInstruments() {
+export function filteredInstruments(source = state.instruments) {
   const q = state.search.trim().toLowerCase();
 
-  const list = state.instruments.filter((i) => {
+  const list = source.filter((i) => {
     const matchesSearch = !q || [i.name, i.serial_number, i.model, i.inventory_no]
       .some((v) => String(v || '').toLowerCase().includes(q));
 
@@ -135,10 +135,12 @@ function rowAction(item) {
   return null;
 }
 
-export function renderList(openCard) {
+export function renderList(openCard, options = {}) {
   updatePendingTransfersIndicator();
-  const list = filteredInstruments();
-  const showCheckboxes = state.massMode;
+  const source = options.items || state.instruments;
+  const retired = Boolean(options.retired);
+  const list = filteredInstruments(source);
+  const showCheckboxes = state.massMode && !retired;
 
   const html = list.length
     ? list.map((item) => {
@@ -174,10 +176,10 @@ export function renderList(openCard) {
           : ''}</div>
       </div>`;
     }).join('')
-    : emptyStateHtml();
+    : emptyStateHtml(source.length, retired);
 
-  document.getElementById('instrumentList').innerHTML = list.length && !showCheckboxes ? `
-    <div class="list-head"><span>Прибор / модель</span><span>Состояние</span><span>Классификация</span><span>Поверка</span><span>Владелец</span><span></span></div>${html}` : html;
+  document.getElementById('listTable')?.classList.toggle('mass-selecting', showCheckboxes);
+  document.getElementById('instrumentList').innerHTML = html;
   loadVisibleListPhotos();
 
   document.querySelectorAll('[data-open-id]').forEach((node) => {
@@ -227,6 +229,7 @@ function loadVisibleListPhotos() {
 async function runRowAction(act, id, button) {
   const item = state.instruments.find((i) => i.id === id);
   if (!item) return;
+  const me = state.currentUser?.id;
 
   if (act === 'issue') return showTakeForm(item);
   // У многоштучного прибора возврат — это ещё и «сколько», поэтому вместо
@@ -258,7 +261,7 @@ async function runRowAction(act, id, button) {
  * условиям», из которой непонятно, виноват поиск или фильтры. Теперь видно
  * и то и другое — и чем это исправить.
  */
-function emptyStateHtml() {
+function emptyStateHtml(total = state.instruments.length, retired = false) {
   const q = state.search.trim();
   const active = [];
   if (state.condition !== 'all') active.push(`состояние «${statusText(state.condition)}»`);
@@ -274,16 +277,16 @@ function emptyStateHtml() {
     active.push(`владелец «${state.company === 'none' ? 'не привязан' : companyName(state.company)}»`);
   }
 
-  const what = q ? `По запросу «${escapeHtml(q)}»` : 'Среди приборов';
+  const what = q ? `По запросу «${escapeHtml(q)}»` : (retired ? 'Среди списанных приборов' : 'Среди приборов');
   const where = active.length ? ` c условиями: ${escapeHtml(active.join(', '))},` : '';
 
   return `<div class="empty-state">
       <div class="empty-title">Ничего не нашлось</div>
       <div class="empty-text">${what}${where} совпадений нет.
-        Всего в базе ${state.instruments.length} приборов.</div>
+        Всего в этом разделе ${total} приборов.</div>
       <div class="empty-actions">
         ${q || active.length ? '<button class="secondary" type="button" data-empty-reset>Сбросить поиск и фильтры</button>' : ''}
-        <button class="secondary" type="button" data-empty-retired>Искать среди списанных</button>
+        ${retired ? '' : '<button class="secondary" type="button" data-empty-retired>Искать среди списанных</button>'}
       </div>
     </div>`;
 }

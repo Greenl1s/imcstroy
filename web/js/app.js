@@ -11,6 +11,9 @@ import { displayNo, verificationBadge, verificationText, today, verificationInfo
   VERIFICATION_SOON_DAYS } from './utils.js';
 import { sheetGeometry } from './qr-sheet.js';
 
+let retiredItems = [];
+let routeRevision = 0;
+
 // ---------- Тема ----------
 
 const themeToggle = document.getElementById('themeToggle');
@@ -88,12 +91,12 @@ function bindEvents() {
   document.getElementById('navInstrumentsButton').onclick = () => { setSidebarActive('navInstrumentsButton'); goList(); };
   document.getElementById('navKitsButton').onclick = () => { setSidebarActive('navKitsButton'); goKits(); };
   document.getElementById('navScannerButton').onclick = () => { location.href = './scanner.html'; };
-  document.getElementById('navChecksButton').onclick = () => {
-    setSidebarActive('navChecksButton');
-    goList();
-    setFilter('verification', 'soon');
-  };
   document.getElementById('navRetiredButton').onclick = () => { setSidebarActive('navRetiredButton'); showRetired(); };
+  document.getElementById('mobileInstrumentsButton').onclick = goList;
+  document.getElementById('mobileKitsButton').onclick = goKits;
+  document.getElementById('mobileScannerButton').onclick = openScanner;
+  document.getElementById('mobileScannerHero').onclick = openScanner;
+  document.getElementById('mobileMenuButton').onclick = () => document.getElementById('menuButton').click();
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
@@ -175,7 +178,7 @@ function bindEvents() {
     for (const id of ['conditionFilter', 'verificationFilter', 'controlTypeFilter', 'companyFilter']) {
       document.getElementById(id).value = 'all';
     }
-    renderList(openCard);
+    renderVisibleList();
     renderSummary();
   });
   window.addEventListener('app:show-retired', () => showRetired());
@@ -200,9 +203,26 @@ function setSidebarActive(id) {
     button.classList.toggle('is-active', button.id === id));
 }
 
+function setMobileActive(id) {
+  document.querySelectorAll('.mobile-bottom-nav button').forEach((button) =>
+    button.classList.toggle('is-active', button.id === id));
+}
+
+function openScanner() {
+  location.href = './scanner.html';
+}
+
+function isRetiredRoute() {
+  return new URLSearchParams(location.search).has('retired');
+}
+
+function renderVisibleList() {
+  renderList(openCard, isRetiredRoute() ? { items: retiredItems, retired: true } : {});
+}
+
 function setFilter(key, value) {
   state[key] = value;
-  renderList(openCard);
+  renderVisibleList();
   renderSummary();
 }
 
@@ -214,7 +234,7 @@ function toggleSort(field) {
   if (state.sort === field) state.sortDesc = !state.sortDesc;
   else { state.sort = field; state.sortDesc = false; }
   markSortedColumn();
-  renderList(openCard);
+  renderVisibleList();
 }
 
 function markSortedColumn() {
@@ -278,7 +298,7 @@ function applySummaryFilter(key) {
 
   condition.value = state.condition;
   verification.value = state.verification;
-  renderList(openCard);
+  renderVisibleList();
   renderSummary();
 }
 
@@ -390,6 +410,7 @@ function showAuth() {
  *   ?id=<n>    — карточка прибора
  *   ?kit=<n>   — карточка комплекта (она же проверка перед выездом)
  *   ?kits      — список комплектов
+ *   ?retired   — списанные приборы
  *   пусто      — список приборов
  * Так работает кнопка «назад» в браузере и так ссылку можно переслать.
  */
@@ -401,6 +422,7 @@ function showScreen(name) {
 
 function renderRoute() {
   if (!state.currentUser) return;
+  const revision = ++routeRevision;
   const params = new URLSearchParams(location.search);
   const id = params.get('id');
   const kitId = params.get('kit');
@@ -415,23 +437,43 @@ function renderRoute() {
   if (kitId) {
     if (pageTitle) pageTitle.textContent = 'Комплект';
     setSidebarActive('navKitsButton');
+    setMobileActive('mobileKitsButton');
     showScreen('kitsScreen');
     renderKitCard(kitId, goKits);
   } else if (params.has('kits')) {
     if (pageTitle) pageTitle.textContent = 'Комплекты';
     setSidebarActive('navKitsButton');
+    setMobileActive('mobileKitsButton');
     showScreen('kitsScreen');
     renderKits(openKit);
   } else if (id) {
     if (pageTitle) pageTitle.textContent = 'Карточка прибора';
     setSidebarActive('navInstrumentsButton');
+    setMobileActive('mobileInstrumentsButton');
     showScreen('cardScreen');
     renderCard(id, goList);
-  } else {
-    if (pageTitle) pageTitle.textContent = state.verification === 'soon' ? 'Поверки' : 'Приборы';
-    setSidebarActive(state.verification === 'soon' ? 'navChecksButton' : 'navInstrumentsButton');
+  } else if (params.has('retired')) {
+    if (pageTitle) pageTitle.textContent = 'Списанные';
+    setSidebarActive('navRetiredButton');
+    setMobileActive('mobileInstrumentsButton');
     showScreen('listScreen');
-    renderList(openCard);
+    document.getElementById('listScreen').classList.add('retired-view');
+    document.getElementById('instrumentList').innerHTML = '<div class="empty-state"><div class="empty-title">Загружаем списанные…</div></div>';
+    api.listRetired().then((items) => {
+      if (revision !== routeRevision || !isRetiredRoute()) return;
+      retiredItems = items;
+      renderVisibleList();
+    }).catch((err) => {
+      if (revision !== routeRevision || !isRetiredRoute()) return;
+      document.getElementById('instrumentList').innerHTML = `<div class="empty-state"><div class="empty-title">Не удалось загрузить списанные</div><div class="empty-text">${escapeHtml(err.message)}</div></div>`;
+    });
+  } else {
+    if (pageTitle) pageTitle.textContent = 'Приборы';
+    setSidebarActive('navInstrumentsButton');
+    setMobileActive('mobileInstrumentsButton');
+    showScreen('listScreen');
+    document.getElementById('listScreen').classList.remove('retired-view');
+    renderVisibleList();
   }
 }
 
@@ -441,6 +483,7 @@ function openKit(id) {
 }
 
 function goKits() {
+  document.getElementById('listScreen').classList.remove('retired-view');
   history.pushState(null, '', '?kits');
   renderRoute();
 }
@@ -451,7 +494,9 @@ function openCard(id) {
 }
 
 function goList() {
+  document.getElementById('listScreen').classList.remove('retired-view');
   history.pushState(null, '', location.pathname);
+  showScreen('listScreen');
   renderRoute();
 }
 
@@ -461,7 +506,7 @@ function setMassMode(enabled) {
   state.massMode = enabled;
   document.getElementById('massPanel').classList.toggle('hidden', !state.massMode);
   document.getElementById('massToggleBtn').textContent = state.massMode ? 'Отменить выбор' : 'Выбрать';
-  if (state.currentUser) renderList(openCard);
+  if (state.currentUser) renderVisibleList();
   updateMassCount();
 }
 
@@ -690,54 +735,12 @@ function showBulkBookForm() {
 
 // ---------- Списанные ----------
 
-async function showRetired() {
-  openModal('Списанные приборы', '<div class="list">Загрузка...</div>');
-
-  let items;
-  try {
-    items = await api.listRetired();
-  } catch (err) {
-    return openModal('Списанные приборы', `<div class="panel card">${escapeHtml(err.message)}</div>`);
-  }
-
-  const html = items.length
-    ? items.map((item) => `
-      <div class="row panel">
-        <div>
-          <div class="row-title">${escapeHtml(displayNo(item))} ${escapeHtml(item.name)}</div>
-          <div class="row-subtitle">
-            ${escapeHtml(item.model || 'Модель не указана')} ·
-            списан ${escapeHtml(item.retired_at || '—')}
-          </div>
-        </div>
-        <div class="badges">
-          <span class="badge ${verificationBadge(item)}">${verificationText(item)}</span>
-          <button class="secondary" data-open-retired="${item.id}">Открыть</button>
-          ${isAdmin() ? `<button class="primary" data-restore="${item.id}">Восстановить</button>` : ''}
-        </div>
-      </div>`).join('')
-    : '<div class="panel card">Списанных приборов нет</div>';
-
-  openModal('Списанные приборы', `<div class="list">${html}</div>`);
-
-  document.querySelectorAll('[data-open-retired]').forEach((node) => {
-    node.onclick = () => {
-      closeModal();
-      openCard(node.dataset.openRetired);
-    };
-  });
-
-  document.querySelectorAll('[data-restore]').forEach((node) => {
-    node.onclick = async (event) => {
-      const result = await run(() => api.restore(node.dataset.restore), {
-        button: event.currentTarget,
-        success: 'Прибор восстановлен'
-      });
-      if (result === null) return;
-      await refresh();
-      showRetired();
-    };
-  });
+function showRetired() {
+  state.condition = 'all';
+  document.getElementById('conditionFilter').value = 'all';
+  setMassMode(false);
+  history.pushState(null, '', '?retired');
+  renderRoute();
 }
 
 // ---------- Меню экспорта в Excel ----------
