@@ -77,6 +77,36 @@ recognition.get('/photos/:id', async (req, res) => {
   res.set('Content-Type', contentType).set('Cache-Control', 'private, max-age=3600').send(bytes);
 });
 
+// Повторная обработка старого эталона: браузер размывает фон и присылает
+// новые признаки, а запись остаётся привязана к тому же прибору.
+recognition.put('/photos/:id', requireAdmin, async (req, res) => {
+  const descriptors = validateDescriptors(req.body?.descriptors);
+  const { mimeType, bytes } = parseDataUrl(req.body?.data_url);
+  const found = await query(
+    'SELECT id, instrument_id, file_path FROM instrument_recognition_photos WHERE id = $1',
+    [req.params.id]);
+  if (!found.rows.length) return res.status(404).json({ error: 'Фотография не найдена' });
+
+  const old = found.rows[0];
+  const stored = await storeRecognitionFile(old.instrument_id, bytes, mimeType);
+  try {
+    const { rows } = await query(
+      `UPDATE instrument_recognition_photos
+          SET mime_type = $1, bytes = NULL, size_bytes = $2,
+              descriptors = $3::jsonb, file_path = $4
+        WHERE id = $5
+        RETURNING id, instrument_id, mime_type, size_bytes, created_at, file_path`,
+      [mimeType, bytes.length, JSON.stringify(descriptors), stored.path, req.params.id]);
+    if (old.file_path && old.file_path !== stored.path) {
+      await deleteRecognitionFile(old.file_path).catch(() => {});
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    await deleteRecognitionFile(stored.path).catch(() => {});
+    throw err;
+  }
+});
+
 recognition.delete('/photos/:id', requireAdmin, async (req, res) => {
   const found = await query('SELECT file_path FROM instrument_recognition_photos WHERE id = $1', [req.params.id]);
   if (!found.rows.length) return res.status(404).json({ error: 'Фотография не найдена' });
