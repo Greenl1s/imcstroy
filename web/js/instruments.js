@@ -151,9 +151,10 @@ export function renderList(openCard) {
                     aria-label="Выбрать ${escapeAttr(item.name)}">`
           : ''}
         <a class="row-main" href="?id=${escapeAttr(item.id)}" data-open-id="${escapeAttr(item.id)}">
-          <span class="row-title">${escapeHtml(item.name)}<i>${escapeHtml(displayNo(item))}</i></span>
+          <span class="row-photo${item.has_photo ? '' : ' is-empty'}" ${item.has_photo ? `data-list-photo="${escapeAttr(item.id)}"` : ''}>${item.has_photo ? '' : '—'}</span>
+          <span class="row-identity"><span class="row-title">${escapeHtml(item.name)}<i>${escapeHtml(displayNo(item))}</i></span>
           <span class="row-subtitle">${escapeHtml(item.model || 'модель не указана')} ·
-            с/н ${escapeHtml(item.serial_number || 'не указан')}</span>
+            с/н ${escapeHtml(item.serial_number || 'не указан')}</span></span>
         </a>
         <div class="row-cols">
           <div class="row-col">${statusCell(item)}</div>
@@ -175,7 +176,9 @@ export function renderList(openCard) {
     }).join('')
     : emptyStateHtml();
 
-  document.getElementById('instrumentList').innerHTML = html;
+  document.getElementById('instrumentList').innerHTML = list.length && !showCheckboxes ? `
+    <div class="list-head"><span>Прибор / модель</span><span>Состояние</span><span>Классификация</span><span>Поверка</span><span>Владелец</span><span></span></div>${html}` : html;
+  loadVisibleListPhotos();
 
   document.querySelectorAll('[data-open-id]').forEach((node) => {
     node.onclick = (event) => {
@@ -200,6 +203,20 @@ export function renderList(openCard) {
   });
 
   bindEmptyState();
+}
+
+function loadVisibleListPhotos() {
+  const nodes = [...document.querySelectorAll('[data-list-photo]')];
+  const load = (node) => {
+    const id = node.dataset.listPhoto;
+    delete node.dataset.listPhoto;
+    api.photoUrl(id).then((url) => { if (url && node.isConnected) node.innerHTML = `<img src="${url}" alt="">`; });
+  };
+  if (!('IntersectionObserver' in window)) return nodes.forEach(load);
+  const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+    if (entry.isIntersecting) { observer.unobserve(entry.target); load(entry.target); }
+  }), { rootMargin: '180px' });
+  nodes.forEach((node) => observer.observe(node));
 }
 
 /**

@@ -85,6 +85,15 @@ function bindEvents() {
   document.getElementById('retiredButton').onclick = showRetired;
   document.getElementById('kitsButton').onclick = goKits;
   document.getElementById('recognitionScannerButton').onclick = () => { location.href = './scanner.html'; };
+  document.getElementById('navInstrumentsButton').onclick = () => { setSidebarActive('navInstrumentsButton'); goList(); };
+  document.getElementById('navKitsButton').onclick = () => { setSidebarActive('navKitsButton'); goKits(); };
+  document.getElementById('navScannerButton').onclick = () => { location.href = './scanner.html'; };
+  document.getElementById('navChecksButton').onclick = () => {
+    setSidebarActive('navChecksButton');
+    goList();
+    setFilter('verification', 'soon');
+  };
+  document.getElementById('navRetiredButton').onclick = () => { setSidebarActive('navRetiredButton'); showRetired(); };
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
@@ -184,6 +193,11 @@ function bindEvents() {
   window.addEventListener('app:companies-changed', () => {
     loadCompanies();
   });
+}
+
+function setSidebarActive(id) {
+  document.querySelectorAll('.sidebar-link').forEach((button) =>
+    button.classList.toggle('is-active', button.id === id));
 }
 
 function setFilter(key, value) {
@@ -390,6 +404,7 @@ function renderRoute() {
   const params = new URLSearchParams(location.search);
   const id = params.get('id');
   const kitId = params.get('kit');
+  const pageTitle = document.getElementById('pageTitle');
 
   // «К списку» живёт в шапке рядом с «В ИСУ» — это выход из карточки,
   // а не действие над прибором. Показываем её ровно там, откуда есть
@@ -398,15 +413,23 @@ function renderRoute() {
   if (backToList) backToList.classList.toggle('hidden', !id && !kitId);
 
   if (kitId) {
+    if (pageTitle) pageTitle.textContent = 'Комплект';
+    setSidebarActive('navKitsButton');
     showScreen('kitsScreen');
     renderKitCard(kitId, goKits);
   } else if (params.has('kits')) {
+    if (pageTitle) pageTitle.textContent = 'Комплекты';
+    setSidebarActive('navKitsButton');
     showScreen('kitsScreen');
     renderKits(openKit);
   } else if (id) {
+    if (pageTitle) pageTitle.textContent = 'Карточка прибора';
+    setSidebarActive('navInstrumentsButton');
     showScreen('cardScreen');
     renderCard(id, goList);
   } else {
+    if (pageTitle) pageTitle.textContent = state.verification === 'soon' ? 'Поверки' : 'Приборы';
+    setSidebarActive(state.verification === 'soon' ? 'navChecksButton' : 'navInstrumentsButton');
     showScreen('listScreen');
     renderList(openCard);
   }
