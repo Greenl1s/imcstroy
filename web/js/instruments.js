@@ -816,7 +816,7 @@ async function showRecognitionPhotos(item) {
   openModal(`Распознавание: ${item.name}`, `
     <div class="recognition-help">
       <b>Добавьте 6–10 разных фотографий.</b>
-      <span>Держите прибор в центре кадра. Фон будет автоматически размыт и исключён из распознавания. Снимите прибор целиком, шильдик, панель, разъёмы и характерные части.</span>
+      <span>Держите прибор целиком в центре кадра и не прижимайте к краям. Фон будет полностью удалён и не попадёт в распознавание. Если прибор сливается со столом, выберите более контрастный фон.</span>
     </div>
     <label class="recognition-add primary">Добавить фото
       <input id="recognitionFile" type="file" accept="image/*" capture="environment">
@@ -864,7 +864,7 @@ async function showRecognitionPhotos(item) {
     try {
       const prepared = await prepareRecognitionPhoto(file);
       await api.addRecognitionPhoto(item.id, { data_url: prepared.dataUrl, descriptors: prepared.descriptors });
-      toast(prepared.usedFallbackMask ? 'Фото добавлено. Лучше снять ещё раз на более однотонном фоне' : 'Фотография добавлена, фон размыт'); showRecognitionPhotos(item);
+      toast('Фотография добавлена, фон удалён'); showRecognitionPhotos(item);
     } catch (error) { toast(error.message, 'error'); label.classList.remove('is-loading'); }
   };
 }

@@ -65,13 +65,11 @@ input.onchange = async () => {
 async function recognize(file) {
   results.innerHTML = '';
   capture.disabled = true;
-  status.textContent = 'Выделяю прибор и размываю фон…';
+  status.textContent = 'Выделяю прибор и удаляю фон…';
   try {
     const data = await prepareRecognitionPhoto(file);
     preview.src = data.dataUrl; preview.hidden = false;
-    status.textContent = data.usedFallbackMask
-      ? 'Прибор виден нечётко. Сравниваю центр кадра…'
-      : 'Фон исключён. Сравниваю прибор с фотобазой…';
+    status.textContent = 'Фон удалён. Сравниваю только прибор с фотобазой…';
     const found = await call('/recognition/search', {
       method: 'POST', body: JSON.stringify({ descriptors: data.descriptors })
     });

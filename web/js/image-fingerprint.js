@@ -12,8 +12,8 @@ function canvas(width, height) {
 
 /**
  * Подготавливает одно и то же изображение и для эталонной базы, и для поиска.
- * Фон оценивается по краям кадра, размывается на сохраняемой фотографии и
- * полностью исключается из числовых признаков.
+ * Фон оценивается по краям кадра и полностью удаляется с сохраняемой
+ * фотографии и из числовых признаков.
  */
 export async function prepareRecognitionPhoto(file) {
   if (!file?.type?.startsWith('image/')) throw new Error('Выберите фотографию');
@@ -25,12 +25,11 @@ export async function prepareRecognitionPhoto(file) {
     original.getContext('2d').drawImage(image, 0, 0, original.width, original.height);
 
     const subject = makeSubjectMask(original);
-    const processed = renderFocusedPhoto(original, subject.mask);
+    const processed = renderCutoutPhoto(original, subject.mask);
     return {
-      dataUrl: processed.toDataURL('image/jpeg', .86),
+      dataUrl: processed.toDataURL('image/webp', .88),
       descriptors: describe(original, subject.mask, subject.bounds),
-      foregroundRatio: subject.ratio,
-      usedFallbackMask: subject.fallback
+      foregroundRatio: subject.ratio
     };
   } finally { URL.revokeObjectURL(source); }
 }
@@ -50,6 +49,7 @@ function makeSubjectMask(source) {
   // Отличие от цветов на границе + контур. Небольшой центральный приоритет
   // помогает не принять случайный яркий предмет в углу за основной объект.
   for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    if (x < w * .07 || x > w * .93 || y < h * .07 || y > h * .93) continue;
     const i = y * w + x, p = i * 4;
     const r = rgba[p], g = rgba[p + 1], b = rgba[p + 2];
     let distance = Infinity;
@@ -65,23 +65,18 @@ function makeSubjectMask(source) {
     if (distance > 45 - center * 12 || (distance > 27 && edge > 72)) mask[i] = 1;
   }
 
-  mask = dilate(mask, w, h, 2);
-  mask = erode(mask, w, h, 1);
+  // Сначала удаляем тонкие протяжённые узоры (например, прожилки дерева),
+  // затем возвращаем размер сохранившемуся массивному объекту.
+  mask = erode(mask, w, h, 2);
+  mask = dilate(mask, w, h, 1);
   mask = keepCentralComponents(mask, w, h);
   let bounds = maskBounds(mask, w, h);
   let count = mask.reduce((sum, value) => sum + value, 0);
   let ratio = count / (w * h);
-  let fallback = false;
-
-  // Если автоматическое отделение неуверенное, берём содержимое рамки.
-  if (!bounds || ratio < .045 || ratio > .82) {
-    fallback = true;
-    mask = new Uint8Array(w * h);
-    const x0 = Math.round(w * .12), x1 = Math.round(w * .88);
-    const y0 = Math.round(h * .12), y1 = Math.round(h * .88);
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * w + x] = 1;
-    bounds = { x0, y0, x1, y1 };
-    ratio = (x1 - x0) * (y1 - y0) / (w * h);
+  // Никакого запасного прямоугольника: иначе пустой стол снова превратится
+  // в «объект». Если отделить предмет не удалось, снимок надо повторить.
+  if (!bounds || ratio < .025 || ratio > .72) {
+    throw new Error('Не удалось отделить прибор от фона. Поместите его целиком в центр рамки и выберите контрастный фон.');
   }
 
   const rawMask = canvas(w, h);
@@ -100,7 +95,6 @@ function makeSubjectMask(source) {
   return {
     mask: fullMask,
     ratio,
-    fallback,
     bounds: {
       x0: bounds.x0 / w * source.width, y0: bounds.y0 / h * source.height,
       x1: bounds.x1 / w * source.width, y1: bounds.y1 / h * source.height
@@ -157,17 +151,24 @@ function keepCentralComponents(input, w, h) {
   for (let start = 0; start < input.length; start++) {
     if (!input[start] || seen[start]) continue;
     const queue = [start], component = []; seen[start] = 1;
-    let central = false;
+    let central = false, touchesFrame = false;
+    let minX = w, minY = h, maxX = 0, maxY = 0;
     for (let q = 0; q < queue.length; q++) {
       const i = queue[q], x = i % w, y = Math.floor(i / w); component.push(i);
+      minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
       if (x > w * .1 && x < w * .9 && y > h * .1 && y < h * .9) central = true;
+      if (x <= 2 || y <= 2 || x >= w - 3 || y >= h - 3) touchesFrame = true;
       for (const next of [i - 1, i + 1, i - w, i + w]) {
         if (next < 0 || next >= input.length || seen[next] || !input[next]) continue;
         const nx = next % w; if (Math.abs(nx - x) > 1) continue;
         seen[next] = 1; queue.push(next);
       }
     }
-    if (central && component.length >= minSize) for (const i of component) output[i] = 1;
+    const componentWidth = maxX - minX + 1, componentHeight = maxY - minY + 1;
+    const aspect = Math.max(componentWidth / componentHeight, componentHeight / componentWidth);
+    if (central && !touchesFrame && aspect < 14 && component.length >= minSize) {
+      for (const i of component) output[i] = 1;
+    }
   }
   return output;
 }
@@ -182,16 +183,11 @@ function maskBounds(mask, w, h) {
   return { x0: Math.max(0, x0 - px), y0: Math.max(0, y0 - py), x1: Math.min(w, x1 + px), y1: Math.min(h, y1 + py) };
 }
 
-function renderFocusedPhoto(source, mask) {
+function renderCutoutPhoto(source, mask) {
   const output = canvas(source.width, source.height), ctx = output.getContext('2d');
-  ctx.save();
-  ctx.filter = `blur(${Math.max(12, Math.round(Math.max(source.width, source.height) / 55))}px) brightness(.72) saturate(.55)`;
   ctx.drawImage(source, 0, 0);
-  ctx.restore();
-  const subject = canvas(source.width, source.height), subjectCtx = subject.getContext('2d');
-  subjectCtx.drawImage(source, 0, 0);
-  subjectCtx.globalCompositeOperation = 'destination-in'; subjectCtx.drawImage(mask, 0, 0);
-  ctx.drawImage(subject, 0, 0);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask, 0, 0);
   return output;
 }
 
