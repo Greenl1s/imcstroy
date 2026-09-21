@@ -97,8 +97,10 @@ function bindEvents() {
   document.getElementById('mobileInstrumentsButton').onclick = goList;
   document.getElementById('mobileKitsButton').onclick = goKits;
   document.getElementById('mobileScannerButton').onclick = openScanner;
-  document.getElementById('mobileScannerHero').onclick = openScanner;
-  document.getElementById('mobileMenuButton').onclick = () => document.getElementById('menuButton').click();
+  document.getElementById('mobileMenuButton').onclick = (event) => {
+    event.stopPropagation();
+    document.getElementById('menuDropdown').classList.toggle('hidden');
+  };
   document.getElementById('mobileFiltersToggle').onclick = () => {
     const table = document.getElementById('listTable');
     table.classList.toggle('mobile-filters-open');
