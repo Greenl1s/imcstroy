@@ -493,6 +493,7 @@ body.dark-theme .card-verif.v-bad { background: #3a1a16; border-color: #5f2b23; 
 .recognition-add { display:flex; align-items:center; justify-content:center; min-height:48px; border-radius:10px; cursor:pointer; }
 .recognition-add input { position:absolute; opacity:0; width:1px; height:1px; }
 .recognition-add.is-loading { opacity:.6; pointer-events:none; }
+.recognition-reprocess { width:100%; margin:8px 0 14px; min-height:44px; }
 .recognition-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; margin-top:14px; }
 .recognition-photo { border:1px solid #d8e1e7; border-radius:10px; padding:7px; }
 .recognition-thumb { height:112px; display:grid; place-items:center; color:#72838f; overflow:hidden; background:#edf2f5; border-radius:7px; }
