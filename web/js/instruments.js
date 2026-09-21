@@ -159,13 +159,13 @@ export function renderList(openCard, options = {}) {
             с/н ${escapeHtml(item.serial_number || 'не указан')}</span></span>
         </a>
         <div class="row-cols">
-          <div class="row-col">${statusCell(item)}</div>
-          <div class="row-col">
+          <div class="row-col" data-label="Состояние">${statusCell(item)}</div>
+          <div class="row-col" data-label="Класс">
             <span class="badge ${controlTypeBadge(item.control_type)}"
                   title="${escapeAttr(controlTypeFull(item.control_type))}">${escapeHtml(controlTypeShort(item.control_type))}</span>
           </div>
-          <div class="row-col">${verificationCell(item)}</div>
-          <div class="row-col">
+          <div class="row-col" data-label="Поверка">${verificationCell(item)}</div>
+          <div class="row-col" data-label="Владелец">
             <span class="badge ${item.company_code ? companyBadge(item.company_code) : 'muted'}"
                   title="${escapeAttr(companyName(item.company_code))}">${escapeHtml(companyName(item.company_code))}</span>
           </div>

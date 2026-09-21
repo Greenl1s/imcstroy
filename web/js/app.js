@@ -71,12 +71,14 @@ function bindEvents() {
 
   document.getElementById('pendingTransfersBtn').onclick = () => showPendingTransfersModal();
 
-  document.getElementById('logoutButton').onclick = async () => {
+  const logout = async () => {
     await api.logout();
     state.currentUser = null;
     history.pushState(null, '', location.pathname);
     showAuth();
   };
+  document.getElementById('logoutButton').onclick = logout;
+  document.getElementById('mobileLogoutButton').onclick = logout;
 
   bindMenu();
 
@@ -97,6 +99,11 @@ function bindEvents() {
   document.getElementById('mobileScannerButton').onclick = openScanner;
   document.getElementById('mobileScannerHero').onclick = openScanner;
   document.getElementById('mobileMenuButton').onclick = () => document.getElementById('menuButton').click();
+  document.getElementById('mobileFiltersToggle').onclick = () => {
+    const table = document.getElementById('listTable');
+    table.classList.toggle('mobile-filters-open');
+    updateMobileFilterButton();
+  };
 
   document.getElementById('searchInput').oninput = (e) => setFilter('search', e.target.value);
   document.getElementById('verificationFilter').onchange = (e) => setFilter('verification', e.target.value);
@@ -180,6 +187,7 @@ function bindEvents() {
     }
     renderVisibleList();
     renderSummary();
+    updateMobileFilterButton();
   });
   window.addEventListener('app:show-retired', () => showRetired());
   // Модуль комплектов не знает про историю браузера — он только сообщает,
@@ -220,10 +228,23 @@ function renderVisibleList() {
   renderList(openCard, isRetiredRoute() ? { items: retiredItems, retired: true } : {});
 }
 
+function updateMobileFilterButton() {
+  const button = document.getElementById('mobileFiltersToggle');
+  const table = document.getElementById('listTable');
+  if (!button || !table) return;
+  const count = [state.condition, state.controlType, state.verification, state.company]
+    .filter((value) => value !== 'all').length;
+  const opened = table.classList.contains('mobile-filters-open');
+  button.textContent = `${opened ? 'Скрыть' : 'Фильтры'}${count ? ` · ${count}` : ''}`;
+  button.classList.toggle('has-active-filters', count > 0);
+  button.setAttribute('aria-expanded', String(opened));
+}
+
 function setFilter(key, value) {
   state[key] = value;
   renderVisibleList();
   renderSummary();
+  updateMobileFilterButton();
 }
 
 /**
@@ -300,6 +321,7 @@ function applySummaryFilter(key) {
   verification.value = state.verification;
   renderVisibleList();
   renderSummary();
+  updateMobileFilterButton();
 }
 
 /**
