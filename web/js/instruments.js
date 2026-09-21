@@ -816,11 +816,12 @@ async function showRecognitionPhotos(item) {
   openModal(`Распознавание: ${item.name}`, `
     <div class="recognition-help">
       <b>Добавьте 6–10 разных фотографий.</b>
-      <span>Снимите прибор целиком, шильдик, панель управления, разъёмы и характерные части. Используйте разные стороны и обычное рабочее освещение.</span>
+      <span>Держите прибор в центре кадра. Фон будет автоматически размыт и исключён из распознавания. Снимите прибор целиком, шильдик, панель, разъёмы и характерные части.</span>
     </div>
     <label class="recognition-add primary">Добавить фото
       <input id="recognitionFile" type="file" accept="image/*" capture="environment">
     </label>
+    ${photos.length ? '<button class="secondary recognition-reprocess" type="button" data-reprocess-photos>Обновить старые фото: убрать фон</button>' : ''}
     <div class="recognition-grid" id="recognitionGrid">
       ${photos.length ? photos.map((p) => `<div class="recognition-photo" data-photo="${p.id}"><div class="recognition-thumb">Загрузка…</div><button class="danger" type="button" data-delete-photo="${p.id}">Удалить</button></div>`).join('') : '<p class="qr-caption">Эталонных фотографий пока нет.</p>'}
     </div>
@@ -839,6 +840,23 @@ async function showRecognitionPhotos(item) {
       if (result !== null) showRecognitionPhotos(item);
     };
   });
+  const reprocess = document.querySelector('[data-reprocess-photos]');
+  if (reprocess) reprocess.onclick = async () => {
+    reprocess.disabled = true;
+    try {
+      for (let index = 0; index < photos.length; index++) {
+        reprocess.textContent = `Обрабатываю ${index + 1} из ${photos.length}…`;
+        const blob = await api.recognitionPhotoBlob(photos[index].id);
+        const prepared = await prepareRecognitionPhoto(new File([blob], `recognition-${photos[index].id}.jpg`, { type: blob.type || 'image/jpeg' }));
+        await api.updateRecognitionPhoto(photos[index].id, { data_url: prepared.dataUrl, descriptors: prepared.descriptors });
+      }
+      toast('Старые фотографии обновлены, фон исключён');
+      showRecognitionPhotos(item);
+    } catch (error) {
+      toast(error.message, true); reprocess.disabled = false;
+      reprocess.textContent = 'Повторить обработку старых фото';
+    }
+  };
   const input = document.getElementById('recognitionFile');
   input.onchange = async () => {
     const file = input.files?.[0]; if (!file) return;
@@ -846,7 +864,7 @@ async function showRecognitionPhotos(item) {
     try {
       const prepared = await prepareRecognitionPhoto(file);
       await api.addRecognitionPhoto(item.id, { data_url: prepared.dataUrl, descriptors: prepared.descriptors });
-      toast('Фотография добавлена'); showRecognitionPhotos(item);
+      toast(prepared.usedFallbackMask ? 'Фото добавлено. Лучше снять ещё раз на более однотонном фоне' : 'Фотография добавлена, фон размыт'); showRecognitionPhotos(item);
     } catch (error) { toast(error.message, 'error'); label.classList.remove('is-loading'); }
   };
 }

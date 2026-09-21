@@ -65,19 +65,28 @@ input.onchange = async () => {
 async function recognize(file) {
   results.innerHTML = '';
   capture.disabled = true;
-  status.textContent = 'Подготавливаю фотографию…';
+  status.textContent = 'Выделяю прибор и размываю фон…';
   try {
     const data = await prepareRecognitionPhoto(file);
     preview.src = data.dataUrl; preview.hidden = false;
-    status.textContent = 'Сравниваю с фотобазой…';
+    status.textContent = data.usedFallbackMask
+      ? 'Прибор виден нечётко. Сравниваю центр кадра…'
+      : 'Фон исключён. Сравниваю прибор с фотобазой…';
     const found = await call('/recognition/search', {
       method: 'POST', body: JSON.stringify({ descriptors: data.descriptors })
     });
     if (!found.length) { status.textContent = 'В фотобазе пока нет эталонных снимков.'; return; }
-    status.textContent = found[0].score >= .78
-      ? 'Нашёл наиболее похожие приборы. Проверьте номер перед выдачей.'
-      : 'Уверенного совпадения нет. Ниже — ближайшие варианты.';
-    for (const item of found) {
+    const top = found[0];
+    if (top.score < .64) {
+      status.textContent = 'Прибор не распознан. Подойдите ближе, поместите прибор в рамку и повторите снимок.';
+      return;
+    }
+    const visible = found.filter((item, index) => index === 0 || (item.score >= .72 && top.score - item.score <= .045));
+    const confident = top.score >= .78 && (found.length === 1 || top.score - found[1].score >= .025);
+    status.textContent = confident
+      ? 'Прибор найден. Проверьте инвентарный или серийный номер.'
+      : 'Есть один вероятный вариант. Проверьте номер перед выдачей.';
+    for (const item of visible) {
       const card = document.createElement('article'); card.className = 'result';
       const pct = Math.max(0, Math.min(100, Math.round(item.score * 100)));
       card.innerHTML = `<div class="no-photo"></div><div><h2>${esc(item.name)}</h2><p>${esc(item.model || 'Модель не указана')}</p><p>Инв. № ${esc(item.inventory_no || '—')} · Серийный № ${esc(item.serial_number || '—')}</p><span class="score">Сходство ${pct}%</span></div><a class="open" href="./?id=${item.instrument_id}">Открыть карточку</a>`;
