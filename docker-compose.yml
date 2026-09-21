@@ -43,8 +43,34 @@ services:
       PORT: 3000
       FILE_LINK_SECRET: ${FILE_LINK_SECRET}
       FILEMANAGER_INTERNAL_URL: http://filemanager:3000
+      RECOGNITION_AI_URL: http://recognition-ai:8000
     expose:
       - "3000"
+
+  # Экспериментальное распознавание приборов по фотографии. Сервис доступен
+  # только API внутри Docker-сети; наружу отдельный порт не публикуется.
+  recognition-ai:
+    build: ./recognition-ai
+    restart: unless-stopped
+    environment:
+      SEGMENTATION_MODEL: silueta
+      EMBEDDING_MODEL: facebook/dinov2-small
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - recognition-ai-models:/models
+    expose:
+      - "8000"
+    mem_limit: 1536m
+    cpus: 1.75
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
 
   # Календарь. Третий сервис на той же базе и том же входе: своих
   # пользователей и своего пароля у него нет — он проверяет ту же
@@ -180,3 +206,4 @@ volumes:
   onlyoffice-db:
   omniroute-data:
   omniroute-redis-data:
+  recognition-ai-models:
