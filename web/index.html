@@ -56,7 +56,6 @@
           <button id="navInstrumentsButton" class="sidebar-link is-active" type="button"><span>▣</span>Приборы</button>
           <button id="navKitsButton" class="sidebar-link" type="button"><span>▤</span>Комплекты</button>
           <button id="navScannerButton" class="sidebar-link" type="button"><span>⌾</span>Сканер</button>
-          <button id="navChecksButton" class="sidebar-link" type="button"><span>✓</span>Поверки</button>
           <button id="navRetiredButton" class="sidebar-link admin-only" type="button"><span>□</span>Списанные</button>
         </nav>
         <button id="backToIsuButton" class="sidebar-back" type="button">← Вернуться в ИСУ</button>
@@ -97,6 +96,11 @@
 
       <!-- Список -->
       <section id="listScreen">
+        <button id="mobileScannerHero" class="mobile-scan-hero" type="button">
+          <span class="mobile-scan-icon">⌖</span>
+          <span><b>Найти прибор по фото</b><small>Камера откроется сразу</small></span>
+          <span class="mobile-scan-arrow">→</span>
+        </button>
         <!-- Сводка. Каждое число — это фильтр: щелчок оставляет в списке
              только те приборы, о которых оно говорит. -->
         <div class="summary" id="summaryBar"></div>
@@ -114,52 +118,20 @@
               <button id="pendingTransfersBtn" class="danger" type="button" style="display:none;">Передачи (<span id="pendingTransfersCount">0</span>)</button>
             </div>
 
-            <!-- Фильтры стоят ровно над своими колонками в строках списка:
-                 ширина фильтра и ширина колонки заданы одной переменной,
-                 а справа зарезервировано место под кнопку действия. -->
-            <div class="filters-row">
-              <div class="filter-chip">
-                <span class="filter-chip-label" data-sort="status">Состояние</span>
-                <select id="conditionFilter">
-                  <option value="all">Все</option>
-                  <option value="free">Свободен</option>
-                  <option value="busy">Занят</option>
-                  <option value="booked">Забронирован</option>
-                </select>
-              </div>
-
-              <div class="filter-chip">
-                <span class="filter-chip-label" data-sort="control_type">Классификация</span>
-                <select id="controlTypeFilter">
-                  <option value="all">Все</option>
-                  <option value="none">Не указано</option>
-                </select>
-              </div>
-
-              <div class="filter-chip">
-                <span class="filter-chip-label" data-sort="valid_until">Поверка</span>
-                <select id="verificationFilter">
-                  <option value="all">Все</option>
-                  <option value="valid">Действует</option>
-                  <option value="soon">Истекает ≤ 30 дней</option>
-                  <option value="expired">Просрочена</option>
-                  <option value="none">Не требуется</option>
-                  <option value="unset">Срок не заполнен</option>
-                </select>
-              </div>
-
-              <div class="filter-chip">
-                <span class="filter-chip-label" data-sort="company">Владелец</span>
-                <select id="companyFilter">
-                  <option value="all">Все</option>
-                  <option value="none">Не привязан</option>
-                </select>
-              </div>
-            </div>
           </div>
         </div>
 
-        <div id="instrumentList" class="list"></div>
+        <div id="listTable" class="list-table">
+          <div class="list-head">
+            <span>Прибор / модель</span>
+            <label class="table-filter"><span>Состояние</span><select id="conditionFilter" aria-label="Фильтр по состоянию"><option value="all">Все состояния</option><option value="free">Свободен</option><option value="busy">Занят</option><option value="booked">Забронирован</option></select></label>
+            <label class="table-filter"><span>Классификация</span><select id="controlTypeFilter" aria-label="Фильтр по классификации"><option value="all">Все классы</option><option value="none">Не указано</option></select></label>
+            <label class="table-filter"><span>Поверка</span><select id="verificationFilter" aria-label="Фильтр по поверке"><option value="all">Любая поверка</option><option value="valid">Действует</option><option value="soon">Истекает ≤ 30 дней</option><option value="expired">Просрочена</option><option value="none">Не требуется</option><option value="unset">Срок не заполнен</option></select></label>
+            <label class="table-filter"><span>Владелец</span><select id="companyFilter" aria-label="Фильтр по владельцу"><option value="all">Все владельцы</option><option value="none">Не привязан</option></select></label>
+            <span></span>
+          </div>
+          <div id="instrumentList" class="list"></div>
+        </div>
 
         <!-- Панель массовых действий: показывается, только когда включён
              режим «Выбрать». Все операции на виду, опасные — отдельно
@@ -188,6 +160,12 @@
       <!-- Комплекты: и список, и карточка одного комплекта
            (она же — экран проверки перед выездом). -->
       <section id="kitsScreen" class="hidden"></section>
+      <nav class="mobile-bottom-nav" aria-label="Навигация на телефоне">
+        <button id="mobileInstrumentsButton" class="is-active" type="button"><span>▣</span>Приборы</button>
+        <button id="mobileScannerButton" type="button"><span>⌖</span>Сканер</button>
+        <button id="mobileKitsButton" type="button"><span>▤</span>Комплекты</button>
+        <button id="mobileMenuButton" type="button"><span>☰</span>Ещё</button>
+      </nav>
       </div>
       </div>
     </section>

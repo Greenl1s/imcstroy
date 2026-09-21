@@ -182,6 +182,14 @@ label { display: grid; gap: 6px; font-weight: 500; font-size: 14px; }
 /* ---------- Список ---------- */
 
 .list { display: grid; gap: 6px; }
+.list-head { display: none; }
+.mobile-scan-hero, .mobile-bottom-nav { display: none; }
+
+.retired-view .summary,
+.retired-view #addInstrumentButton,
+.retired-view #massToggleBtn,
+.retired-view #pendingTransfersBtn,
+.retired-view .mobile-scan-hero { display: none !important; }
 
 /* Строка списка. Слева — название и номер, справа — четыре колонки,
    каждая ровно под своим фильтром, и место под кнопку действия.
@@ -1074,14 +1082,31 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
   .search-full { min-height: 46px; font-size: 15px; padding-left: 16px; }
   .toolbar-bottom { align-items: end; }
   .filter-chip-label { text-align: left; }
-  .list { gap: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
+  .list-table { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
+  .list { gap: 0; }
   .list-head {
     display: grid; grid-template-columns: minmax(330px, 1fr) repeat(4, var(--col-w)) var(--act-w);
-    align-items: center; min-height: 42px; padding: 0 14px;
+    align-items: stretch; min-height: 56px; padding: 0 14px;
     background: #f7f9fb; border-bottom: 1px solid var(--line); color: var(--muted);
     font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   }
-  .list-head span:not(:first-child) { text-align: center; }
+  .list-head > span { display: flex; align-items: center; }
+  .list-head > span:not(:first-child) { justify-content: center; text-align: center; }
+  .table-filter { position: relative; display: block; min-width: 0; cursor: pointer; }
+  .table-filter > span {
+    position: absolute; z-index: 1; top: 7px; left: 10px; right: 22px;
+    color: var(--muted); font-size: 9px; line-height: 1; pointer-events: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .table-filter select {
+    width: 100%; height: 100%; min-height: 55px; padding: 20px 24px 5px 10px;
+    border: 0; border-left: 1px solid var(--line); border-radius: 0;
+    background: transparent; color: var(--text); font-size: 12.5px; font-weight: 600;
+    cursor: pointer; text-overflow: ellipsis;
+  }
+  .table-filter select:hover { background: #edf4fa; }
+  .table-filter select:focus { position: relative; z-index: 2; box-shadow: inset 0 0 0 2px var(--primary); }
+  .list-table.mass-selecting .list-head { display: none; }
   .row {
     display: grid; grid-template-columns: minmax(330px, 1fr) repeat(4, var(--col-w)) var(--act-w);
     gap: 0; min-height: 72px; padding: 8px 14px; border: 0; border-bottom: 1px solid var(--line);
@@ -1127,4 +1152,72 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
 @media (max-width: 900px) {
   .app-sidebar { display: none; }
   .topbar-eyebrow { display: none; }
+  body { padding-bottom: 78px; background: #f3f6f9; }
+  .shell { width: 100%; padding: 0; }
+  .app-content { padding: 0 12px 18px; }
+  .topbar {
+    min-height: 68px; margin: 0 -12px 14px; padding: max(10px, env(safe-area-inset-top)) 14px 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex-direction: row;
+  }
+  .topbar h1 { font-size: 21px; }
+  .topbar-title { min-width: 0; }
+  .topbar-title > div { min-width: 0; }
+  .topbar-actions { flex-wrap: nowrap; margin-left: auto; }
+  .user-name { display: none; }
+  #logoutButton { min-height: 38px; padding: 7px 11px; font-size: 13px; }
+  .icon-btn { min-height: 38px; padding: 7px 11px; }
+
+  .mobile-scan-hero {
+    width: 100%; display: grid; grid-template-columns: 48px minmax(0, 1fr) 24px;
+    align-items: center; gap: 12px; min-height: 82px; margin-bottom: 12px; padding: 14px;
+    border-radius: 16px; background: linear-gradient(135deg, #1f5c8a, #2779ad); color: #fff;
+    box-shadow: 0 8px 24px rgba(31, 92, 138, .22); text-align: left;
+  }
+  .mobile-scan-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; background: rgba(255,255,255,.16); font-size: 28px; }
+  .mobile-scan-hero b, .mobile-scan-hero small { display: block; }
+  .mobile-scan-hero b { font-size: 16px; }
+  .mobile-scan-hero small { margin-top: 2px; color: rgba(255,255,255,.75); font-size: 12px; font-weight: 400; }
+  .mobile-scan-arrow { font-size: 22px; }
+
+  .mobile-bottom-nav {
+    position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; display: grid;
+    grid-template-columns: repeat(4, 1fr); padding: 7px 8px max(7px, env(safe-area-inset-bottom));
+    background: rgba(255,255,255,.96); border-top: 1px solid var(--line); box-shadow: 0 -8px 28px rgba(20,30,40,.08);
+    backdrop-filter: blur(14px);
+  }
+  .mobile-bottom-nav button {
+    min-height: 52px; padding: 4px 2px; display: flex; flex-direction: column; gap: 1px;
+    border-radius: 10px; background: transparent; color: var(--muted); font-size: 10px;
+  }
+  .mobile-bottom-nav button span { font-size: 20px; line-height: 1.1; }
+  .mobile-bottom-nav button.is-active { color: var(--primary); background: #eaf3fa; }
+
+  .summary { margin-bottom: 12px; gap: 8px; border: 0; border-radius: 0; background: transparent; }
+  .summary-cell { min-width: 108px; min-height: 62px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  .toolbar { margin-bottom: 10px; border-radius: 14px; }
+  .compact-nav-button { display: none; }
+
+  .list-table { background: transparent; }
+  .list-head {
+    display: grid; grid-template-columns: repeat(4, minmax(138px, 1fr)); gap: 8px;
+    margin: 0 -12px 10px; padding: 0 12px 3px; overflow-x: auto; scrollbar-width: none;
+  }
+  .list-head::-webkit-scrollbar { display: none; }
+  .list-head > span { display: none; }
+  .table-filter { display: block; min-width: 0; }
+  .table-filter > span { display: none; }
+  .table-filter select {
+    min-height: 42px; padding: 8px 30px 8px 11px; border-radius: 21px;
+    background: var(--panel); font-size: 13px; font-weight: 600;
+  }
+  .table-filter:nth-of-type(1) select { color: #8a4d08; }
+  .list { gap: 9px; }
+  .row { border-radius: 14px; box-shadow: 0 2px 10px rgba(20,30,40,.04); }
+  .row-photo { width: 58px; height: 58px; flex: none; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #f4f6f8; }
+  .row-photo img { width: 100%; height: 100%; object-fit: contain; }
+  .row-main { display: flex; align-items: center; gap: 11px; }
+  .row-identity { min-width: 0; }
+  .row-title { font-size: 15px; }
+  .row-subtitle { font-size: 11.5px; }
+  .empty-state { border-radius: 14px; }
 }
