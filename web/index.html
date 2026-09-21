@@ -49,10 +49,22 @@
 
     <!-- Основное приложение -->
     <section id="appView" class="hidden">
+      <div class="app-layout">
+      <aside class="app-sidebar">
+        <div class="sidebar-brand"><span class="sidebar-mark">ИМ</span><b>Учёт оборудования</b></div>
+        <nav class="sidebar-nav" aria-label="Основные разделы">
+          <button id="navInstrumentsButton" class="sidebar-link is-active" type="button"><span>▣</span>Приборы</button>
+          <button id="navKitsButton" class="sidebar-link" type="button"><span>▤</span>Комплекты</button>
+          <button id="navScannerButton" class="sidebar-link" type="button"><span>⌾</span>Сканер</button>
+          <button id="navChecksButton" class="sidebar-link" type="button"><span>✓</span>Поверки</button>
+          <button id="navRetiredButton" class="sidebar-link admin-only" type="button"><span>□</span>Списанные</button>
+        </nav>
+        <button id="backToIsuButton" class="sidebar-back" type="button">← Вернуться в ИСУ</button>
+      </aside>
+      <div class="app-content">
       <header class="topbar">
         <div class="topbar-title">
-          <h1>Учёт оборудования</h1>
-          <button id="backToIsuButton" class="primary" type="button">← В ИСУ</button>
+          <div><span class="topbar-eyebrow">УЧЁТ ОБОРУДОВАНИЯ</span><h1 id="pageTitle">Приборы</h1></div>
           <!-- Видна только когда открыта карточка прибора: это выход
                из карточки, и место ему рядом с другим выходом, а не
                в хвосте списка действий над самим прибором. -->
@@ -94,10 +106,10 @@
 
           <div class="toolbar-bottom">
             <div class="toolbar-buttons">
-              <button id="addInstrumentButton" class="primary admin-only" type="button">Добавить</button>
-              <button id="retiredButton" class="secondary admin-only" type="button">Списанные</button>
-              <button id="kitsButton" class="secondary" type="button">Комплекты</button>
-              <button id="recognitionScannerButton" class="secondary" type="button">Найти по фото</button>
+              <button id="addInstrumentButton" class="primary admin-only" type="button">+ Добавить прибор</button>
+              <button id="retiredButton" class="secondary admin-only compact-nav-button" type="button">Списанные</button>
+              <button id="kitsButton" class="secondary compact-nav-button" type="button">Комплекты</button>
+              <button id="recognitionScannerButton" class="secondary compact-nav-button" type="button">Найти по фото</button>
               <button id="massToggleBtn" class="secondary" type="button">Выбрать</button>
               <button id="pendingTransfersBtn" class="danger" type="button" style="display:none;">Передачи (<span id="pendingTransfersCount">0</span>)</button>
             </div>
@@ -176,6 +188,8 @@
       <!-- Комплекты: и список, и карточка одного комплекта
            (она же — экран проверки перед выездом). -->
       <section id="kitsScreen" class="hidden"></section>
+      </div>
+      </div>
     </section>
   </main>
 
