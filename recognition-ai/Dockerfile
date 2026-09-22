@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/models/huggingface \
     REMBG_HOME=/models/rembg \
+    U2NET_HOME=/models/rembg \
     SEGMENTATION_MODEL=silueta \
     EMBEDDING_MODEL=facebook/dinov2-small
 
