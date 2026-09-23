@@ -850,7 +850,7 @@
      лежали рядом кучей — связи между пунктом и документом не было ни
      на диске, ни в системе. -->
 <div id="expertInfoOverlay" class="modal-overlay hidden">
-  <div class="modal-panel" style="max-width:760px;">
+  <div class="modal-panel expert-info-panel">
     <div class="modal-header">
       <span id="expertInfoHead">Редактировать эксперта</span>
       <button class="back-btn" id="expertInfoCloseBtn" type="button">
@@ -858,7 +858,7 @@
         Закрыть
       </button>
     </div>
-    <div style="display:flex; flex-direction:column; gap:14px; max-height:72vh; overflow-y:auto; padding-right:4px;">
+    <div class="expert-info-body">
       <!-- Выбор эксперта прячется, когда форму открыли из папки самого
            эксперта: там уже понятно, о ком речь, и лишний список только
            даёт повод случайно уехать не туда. -->
@@ -888,9 +888,9 @@
       </div>
 
       <p class="access-note" style="margin:0;">Каждый пункт в файле сведений начинается с «-».
-      Сканы принимаем картинками (JPG, PNG) — только их можно вшить в Word.
-      Сохранение пересобирает оба файла в папке эксперта, поэтому править их в Word смысла нет:
-      следующее сохранение перепишет.</p>
+      Фотография автоматически приводится к правильной ориентации. Для каждого скана можно
+      выбрать поворот и размер на странице. При следующем сохранении документы пересобираются
+      из этих настроек.</p>
 
       <!-- Все сканы папки, включая те, что ни к одному пункту не
            прикреплены: иначе забытый файл лежал бы вечно, и никто бы о
@@ -901,9 +901,13 @@
       </details>
 
       <p class="error-text" id="expertInfoError"></p>
-      <div class="modal-actions">
+      <label class="expert-preview-option">
+        <input type="checkbox" id="expertInfoOpenPreview" checked>
+        После сохранения открыть документ с приложениями в OnlyOffice
+      </label>
+      <div class="modal-actions expert-info-actions">
         <button class="primary" type="button" id="expertInfoSaveBtn">Сохранить сведения</button>
-        <button class="link-btn" type="button" id="expertInfoDelete">Удалить эксперта</button>
+        <button class="link-btn expert-delete" type="button" id="expertInfoDelete">Удалить эксперта</button>
       </div>
     </div>
   </div>

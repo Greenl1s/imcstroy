@@ -1388,6 +1388,8 @@ async function openExpertInfo(preselect, { only = false } = {}) {
   document.getElementById("expertInfoItems").innerHTML =
     '<div class="empty-hint">Загрузка…</div>';
   document.getElementById("expertInfoImported").style.display = "none";
+  document.getElementById("expertInfoDelete").classList.toggle(
+    "hidden", !currentUser || currentUser.role !== "admin");
   overlay.classList.remove("hidden");
 
   // Открыли снова — возвращаемся к тому, с кем работали: почти всегда
@@ -1425,7 +1427,14 @@ async function loadExpertInfo(name) {
   expertInfoWanted = name;
   const data = await apiFetch(`/api/experts/${encodeURIComponent(name)}/info`);
   if (expertInfoWanted !== name) return;
-  expertInfoState = { name, items: data.items.length ? data.items : [{ text: "", files: [] }] };
+  expertInfoState = {
+    name,
+    items: (data.items.length ? data.items : [{ text: "", files: [] }]).map((item) => ({
+      ...item,
+      files: Array.isArray(item.files) ? item.files : [],
+      image_options: item.image_options || {},
+    })),
+  };
 
   document.getElementById("expertInfoName").value = name;
   loadExpertScans(name).catch(() => { /* список сканов не главное */ });
@@ -1459,9 +1468,27 @@ function renderExpertInfoItems() {
         placeholder="образование высшее: …">${escapeHtml(item.text)}</textarea>
       <div class="ei-files">
         ${item.files.map((f, j) => `
-          <span class="ei-file">${escapeHtml(f)}
-            <button type="button" data-ei-unfile="${i}:${j}" aria-label="Открепить">✕</button>
-          </span>`).join("")}
+          <article class="ei-scan-card">
+            <div class="ei-scan-preview"><img loading="lazy" src="/api/view?path=${encodeURIComponent(
+              `${EXPERTS_PATH}/${expertInfoState.name}/Приложения/${f}`)}" alt="${escapeHtml(f)}"
+              style="transform:rotate(${Number(item.image_options?.[f]?.rotation || 0)}deg)"></div>
+            <div class="ei-scan-info">
+              <b title="${escapeHtml(f)}">${escapeHtml(f)}</b>
+              <div class="ei-scan-controls">
+                <button type="button" data-ei-rotate="${i}:${j}:-90" title="Повернуть влево">↶</button>
+                <button type="button" data-ei-rotate="${i}:${j}:90" title="Повернуть вправо">↷</button>
+                <label>Размер
+                  <select data-ei-size="${i}:${j}">
+                    ${[50, 75, 100].map((size) => `<option value="${size}"${
+                      Number(item.image_options?.[f]?.width_percent || 100) === size ? " selected" : ""
+                    }>${size}%</option>`).join("")}
+                  </select>
+                </label>
+                <span class="ei-rotation">Поворот ${Number(item.image_options?.[f]?.rotation || 0)}°</span>
+                <button type="button" class="ei-unfile" data-ei-unfile="${i}:${j}" aria-label="Открепить">Открепить</button>
+              </div>
+            </div>
+          </article>`).join("")}
         <label class="ei-add-scan">
           <input type="file" accept="image/*" multiple data-ei-file="${i}" class="ei-file-input">
           <span>+ Прикрепить скан</span>
@@ -1501,9 +1528,40 @@ function renderExpertInfoItems() {
       const [i, j] = unfile.dataset.eiUnfile.split(":").map(Number);
       // Только открепляем от пункта. Сам файл остаётся в папке: удалять
       // с диска из формы, где человек просто передумал, — слишком.
-      expertInfoState.items[i].files.splice(j, 1);
+      const [removed] = expertInfoState.items[i].files.splice(j, 1);
+      if (removed) delete expertInfoState.items[i].image_options?.[removed];
+      renderExpertInfoItems();
+      return;
+    }
+
+    const rotate = e.target.closest("[data-ei-rotate]");
+    if (rotate) {
+      const [i, j, delta] = rotate.dataset.eiRotate.split(":").map(Number);
+      const item = expertInfoState.items[i];
+      const file = item.files[j];
+      item.image_options ||= {};
+      const current = Number(item.image_options[file]?.rotation || 0);
+      item.image_options[file] = {
+        ...item.image_options[file],
+        rotation: (current + delta + 360) % 360,
+        width_percent: Number(item.image_options[file]?.width_percent || 100),
+      };
       renderExpertInfoItems();
     }
+  });
+
+  box.addEventListener("change", (e) => {
+    const size = e.target.closest("[data-ei-size]");
+    if (!size) return;
+    const [i, j] = size.dataset.eiSize.split(":").map(Number);
+    const item = expertInfoState.items[i];
+    const file = item.files[j];
+    item.image_options ||= {};
+    item.image_options[file] = {
+      ...item.image_options[file],
+      rotation: Number(item.image_options[file]?.rotation || 0),
+      width_percent: Number(size.value),
+    };
   });
 
   box.addEventListener("change", async (e) => {
@@ -1514,8 +1572,11 @@ function renderExpertInfoItems() {
     input.value = "";
     for (const file of files) {
       try {
-        const saved = await uploadExpertScan(expertInfoState.name, file);
+        const normalized = await normalizeExpertScan(file);
+        const saved = await uploadExpertScan(expertInfoState.name, normalized);
         expertInfoState.items[i].files.push(saved.name);
+        expertInfoState.items[i].image_options ||= {};
+        expertInfoState.items[i].image_options[saved.name] = { rotation: 0, width_percent: 100 };
       } catch (err) {
         showToast(err.message);
       }
@@ -1607,6 +1668,9 @@ bind(document.getElementById("expertInfoRename"), "click", async () => {
 });
 
 bind(document.getElementById("expertInfoDelete"), "click", async () => {
+  if (!currentUser || currentUser.role !== "admin") {
+    return showToast("Удалять экспертов может только администратор");
+  }
   const name = expertInfoState.name;
   if (!name) return;
   if (!confirm(`Удалить эксперта «${name}»?\n\n` +
@@ -1634,6 +1698,32 @@ async function uploadExpertScan(expertName, file) {
   return data;
 }
 
+/**
+ * Браузер учитывает EXIF-поворот фотографии, а canvas записывает уже
+ * видимое положение пикселей. Заодно ограничиваем очень большие снимки:
+ * для страницы Word 3000 px достаточно, а загрузка с телефона становится
+ * заметно быстрее. Если браузер не умеет декодировать формат, сервер
+ * вернёт обычное понятное сообщение вместо потери файла.
+ */
+async function normalizeExpertScan(file) {
+  if (!file?.type?.startsWith("image/") || typeof createImageBitmap !== "function") return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, 3000 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d", { alpha: false }).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", .94));
+    if (!blob) return file;
+    const base = file.name.replace(/\.[^.]+$/, "") || "Скан";
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+  } catch {
+    return file;
+  }
+}
+
 bind(document.getElementById("expertInfoAddItem"), "click", () => {
   expertInfoState.items.push({ text: "", files: [] });
   renderExpertInfoItems();
@@ -1649,6 +1739,9 @@ bind(document.getElementById("expertInfoSaveBtn"), "click", async (e) => {
   if (!items.length) return (error.textContent = "Заполните хотя бы один пункт");
 
   button.disabled = true;
+  const openPreview = document.getElementById("expertInfoOpenPreview").checked;
+  const previewTab = openPreview ? window.open("about:blank", "_blank") : null;
+  if (previewTab) previewTab.document.body.textContent = "Собираем документ…";
   const label = button.textContent;
   button.textContent = "Сохраняем…";
   try {
@@ -1658,9 +1751,17 @@ bind(document.getElementById("expertInfoSaveBtn"), "click", async (e) => {
     showToast(res.missing && res.missing.length
       ? `Сохранено, но не нашлись сканы: ${res.missing.join(", ")}`
       : "Сведения сохранены — оба файла пересобраны");
+    if (openPreview && res.preview_path) {
+      const url = `/office.html?mode=view&path=${encodeURIComponent(res.preview_path)}`;
+      if (previewTab) previewTab.location.href = url;
+      else window.open(url, "_blank");
+    } else if (previewTab) {
+      previewTab.close();
+    }
     document.getElementById("expertInfoOverlay").classList.add("hidden");
     if (currentPath && currentPath.startsWith(EXPERTS_PATH)) renderFolder(currentPath);
   } catch (err) {
+    if (previewTab) previewTab.close();
     error.textContent = err.message;
   } finally {
     button.disabled = false;
@@ -7668,7 +7769,15 @@ function showContextMenu(event, path, name, isDir, context) {
   // В "Дела" перемещение вручную отключено — папки переезжают сами при
   // смене стадии проекта. Пункт меню показываем только вне "Дела".
   const inCases = context === "cases" || path.startsWith(CASES_PATH);
+  const inExperts = path === EXPERTS_PATH || path.startsWith(EXPERTS_PATH + "/");
   ctxMenuEl.querySelector('[data-ctx-action="move"]').classList.toggle("hidden", inCases);
+
+  // Справочник экспертов управляется формой: иначе переименование или
+  // удаление папки обойдёт связи пунктов, сканов и сгенерированных файлов.
+  for (const action of ["rename", "move", "copy", "delete"]) {
+    ctxMenuEl.querySelector(`[data-ctx-action="${action}"]`)?.classList.toggle(
+      "hidden", inExperts || (action === "move" && inCases));
+  }
 
   // Настройка персонального доступа есть только внутри "Дела" и только у
   // администратора. Раньше это была лишь кнопка "…", появлявшаяся при

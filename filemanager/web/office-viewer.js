@@ -26,13 +26,14 @@ function loadScript(src) {
 (async function init() {
   const params = new URLSearchParams(location.search);
   const path = params.get("path");
+  const viewOnly = params.get("mode") === "view";
   if (!path) {
     showMessage("Не указан файл для открытия.", true);
     return;
   }
 
   try {
-    const res = await fetch(`/api/onlyoffice/config?path=${encodeURIComponent(path)}`, {
+    const res = await fetch(`/api/onlyoffice/config?path=${encodeURIComponent(path)}${viewOnly ? "&mode=view" : ""}`, {
       credentials: "same-origin",
     });
     if (res.status === 401) {
