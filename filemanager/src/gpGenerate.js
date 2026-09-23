@@ -253,7 +253,7 @@ function appendScans(zip, xml, experts) {
   let added = 0;
   for (const expert of experts) {
     for (const scan of expert.scans || []) {
-      const paragraph = adder.add(scan.buffer, scan.name);
+      const paragraph = adder.add(scan.buffer, scan.name, scan.options);
       if (!paragraph) continue;   // не картинка — молча мимо, письмо важнее
       body += paragraph;
       added++;

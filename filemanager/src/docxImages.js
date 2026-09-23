@@ -108,7 +108,7 @@ function pageBoxEmu(documentXml) {
  * docPr id должен быть уникальным в пределах документа — Word на
  * совпадающих ругается, — поэтому номер приходит снаружи.
  */
-function imageParagraphXml({ relId, id, cx, cy, title }) {
+function imageParagraphXml({ relId, id, cx, cy, title, rotation = 0 }) {
   const safeTitle = String(title || "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/></w:pPr><w:r><w:drawing>` +
@@ -124,7 +124,7 @@ function imageParagraphXml({ relId, id, cx, cy, title }) {
       `<pic:nvPicPr><pic:cNvPr id="${id}" name="Рисунок ${id}" descr="${safeTitle}"/><pic:cNvPicPr/></pic:nvPicPr>` +
       `<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ` +
         `r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
-      `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+      `<pic:spPr><a:xfrm${rotation ? ` rot="${rotation * 60000}"` : ""}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
       `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
       `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 }
@@ -169,9 +169,13 @@ function imageAdder(zip, documentXml) {
   }
 
   return {
-    add(buffer, title) {
+    add(buffer, title, options = {}) {
       const size = imageSize(buffer);
       if (!size) return null;
+      const rotation = [0, 90, 180, 270].includes(Number(options.rotation))
+        ? Number(options.rotation) : 0;
+      const widthPercent = [50, 75, 100].includes(Number(options.width_percent))
+        ? Number(options.width_percent) : 100;
       const ext = size.kind === "png" ? "png" : "jpeg";
       const relId = `rId${nextNumber++}`;
       const fileName = `fmimg${++fileCounter}.${ext}`;
@@ -185,8 +189,20 @@ function imageAdder(zip, documentXml) {
         `Target="media/${fileName}"/></Relationships>`
       );
 
-      const { cx, cy } = fitEmu(size, maxWidthEmu, maxHeightEmu);
-      return imageParagraphXml({ relId, id: nextDocPr++, cx, cy, title });
+      // При повороте на четверть оборота видимая ширина становится высотой.
+      // Сначала вписываем видимый прямоугольник, затем возвращаем размеры
+      // исходной рамки, которую Word уже повернёт через a:xfrm.
+      const quarterTurn = rotation === 90 || rotation === 270;
+      const visibleSize = quarterTurn
+        ? { width: size.height, height: size.width }
+        : size;
+      const fitted = fitEmu(visibleSize, maxWidthEmu, maxHeightEmu);
+      const scale = widthPercent / 100;
+      const visibleCx = Math.max(1, Math.round(fitted.cx * scale));
+      const visibleCy = Math.max(1, Math.round(fitted.cy * scale));
+      const cx = quarterTurn ? visibleCy : visibleCx;
+      const cy = quarterTurn ? visibleCx : visibleCy;
+      return imageParagraphXml({ relId, id: nextDocPr++, cx, cy, title, rotation });
     },
     /** Записать накопленные связи и типы обратно в zip. */
     flush() {

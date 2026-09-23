@@ -41,6 +41,14 @@ const ATTACH_DIRNAME = "Приложения";
 const infoFileName = (expertName) => `Сведения ${expertName}.docx`;
 const infoWithDocsFileName = (expertName) => `Сведения ${expertName} с документами.docx`;
 
+function normalizeImageOptions(value) {
+  const rotation = [0, 90, 180, 270].includes(Number(value?.rotation))
+    ? Number(value.rotation) : 0;
+  const widthPercent = [50, 75, 100].includes(Number(value?.width_percent))
+    ? Number(value.width_percent) : 100;
+  return { rotation, width_percent: widthPercent };
+}
+
 function escapeXml(text) {
   return String(text ?? "")
     .replace(/&/g, "&amp;")
@@ -72,6 +80,10 @@ async function read(safeResolve, expertDir) {
       items: items.map((it) => ({
         text: String(it?.text ?? "").trim(),
         files: Array.isArray(it?.files) ? it.files.map(String).filter(Boolean) : [],
+        image_options: Object.fromEntries(
+          Object.entries(it?.image_options && typeof it.image_options === "object" ? it.image_options : {})
+            .map(([name, options]) => [String(name), normalizeImageOptions(options)])
+        ),
       })).filter((it) => it.text || it.files.length),
     };
   } catch {
@@ -83,9 +95,15 @@ async function read(safeResolve, expertDir) {
 
 async function write(safeResolve, expertDir, items) {
   const payload = {
-    version: 1,
+    version: 2,
     updated_at: new Date().toISOString(),
-    items: items.map((it) => ({ text: it.text, files: it.files })),
+    items: items.map((it) => ({
+      text: it.text,
+      files: it.files,
+      image_options: Object.fromEntries(
+        it.files.map((name) => [name, normalizeImageOptions(it.image_options?.[name])])
+      ),
+    })),
   };
   await fs.promises.writeFile(
     safeResolve(`${expertDir}/${STORE_FILENAME}`),
@@ -214,7 +232,7 @@ function buildInfoWithDocsDocx(expertName, items, filesByName) {
     for (const fileName of item.files) {
       const buffer = filesByName.get(fileName);
       if (!buffer) continue;
-      const paragraph = adder.add(buffer, fileName);
+      const paragraph = adder.add(buffer, fileName, item.image_options?.[fileName]);
       if (paragraph) body += paragraph;
     }
   }
@@ -272,4 +290,5 @@ module.exports = {
   buildInfoWithDocsDocx,
   rebuildDocs,
   textParagraph,
+  normalizeImageOptions,
 };

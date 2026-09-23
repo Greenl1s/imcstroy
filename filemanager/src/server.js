@@ -774,6 +774,19 @@ app.post("/api/equipment/adopt-file", auth.requireAuth, async (req, res) => {
 const EXPERTS_DIR = expertsLib.EXPERTS_DIR;
 const EXPERT_INFO_FILENAME = expertsLib.INFO_FILENAME;
 
+function isManagedExpertPath(value) {
+  const clean = String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  return clean === EXPERTS_DIR || clean.startsWith(EXPERTS_DIR + "/");
+}
+
+function rejectManagedExpertMutation(res, ...pathsToCheck) {
+  if (!pathsToCheck.some(isManagedExpertPath)) return false;
+  res.status(409).json({
+    message: "Папки и файлы экспертов изменяются только через форму «Редактировать эксперта»",
+  });
+  return true;
+}
+
 function requireExpertsAccess(req, res) {
   if (req.user.role !== "admin" && !req.user.can_db) {
     res.status(403).json({ message: "Нет доступа к этому разделу" });
@@ -958,7 +971,11 @@ app.delete("/api/experts/:name/scans/:file", auth.requireAuth, async (req, res) 
 
     const stored = await expertInfo.read(filesLib.safeResolve, found.dir);
     const items = stored.items.map((item) => ({
-      ...item, files: item.files.filter((f) => f !== fileName),
+      ...item,
+      files: item.files.filter((f) => f !== fileName),
+      image_options: Object.fromEntries(
+        Object.entries(item.image_options || {}).filter(([name]) => name !== fileName)
+      ),
     }));
     if (items.length) {
       await expertInfo.write(filesLib.safeResolve, found.dir, items);
@@ -973,7 +990,7 @@ app.delete("/api/experts/:name/scans/:file", auth.requireAuth, async (req, res) 
 });
 
 /** Удалить эксперта целиком — папку со всем содержимым, в корзину. */
-app.delete("/api/experts/:name", auth.requireAuth, async (req, res) => {
+app.delete("/api/experts/:name", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     if (!requireExpertsAccess(req, res)) return;
     const found = await expertDirOr404(req.params.name, res);
@@ -1043,6 +1060,10 @@ app.put("/api/experts/:name/info", auth.requireAuth, async (req, res) => {
         files: (Array.isArray(it?.files) ? it.files : [])
           .map((f) => path.basename(String(f)))
           .filter(Boolean),
+        image_options: Object.fromEntries(
+          Object.entries(it?.image_options && typeof it.image_options === "object" ? it.image_options : {})
+            .map(([name, options]) => [path.basename(String(name)), expertInfo.normalizeImageOptions(options)])
+        ),
       }))
       .filter((it) => it.text);
     if (!items.length) {
@@ -1057,7 +1078,12 @@ app.put("/api/experts/:name/info", auth.requireAuth, async (req, res) => {
       path: `${found.dir}/${expertInfo.infoFileName(found.name)}`,
       name: expertInfo.infoFileName(found.name),
     });
-    res.json({ ok: true, items, missing });
+    res.json({
+      ok: true,
+      items,
+      missing,
+      preview_path: `${found.dir}/${expertInfo.infoWithDocsFileName(found.name)}`,
+    });
   } catch (err) {
     console.error("Не удалось сохранить сведения эксперта:", err);
     res.status(500).json({ message: "Не удалось сохранить сведения эксперта" });
@@ -1327,6 +1353,7 @@ async function readExpertsForGp(expertPaths) {
         try {
           scans.push({
             name: fileName,
+            options: item.image_options?.[fileName],
             buffer: await fs.promises.readFile(
               filesLib.safeResolve(`${p}/${expertInfo.ATTACH_DIRNAME}/${fileName}`)),
           });
@@ -1637,6 +1664,7 @@ app.get("/api/resources", auth.requireAuth, requireColumnAccess(), async (req, r
 
 app.post("/api/folder", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
+    if (rejectManagedExpertMutation(res, req.body?.path)) return;
     await filesLib.ensureDir(req.body.path);
     events.log(req.user, "create_folder", { path: req.body.path, isDir: true });
     res.json({ ok: true });
@@ -1727,6 +1755,7 @@ const FILE_TEMPLATES = {
 
 app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
+    if (rejectManagedExpertMutation(res, req.body?.path)) return;
     const { type } = req.body || {};
     let { name } = req.body || {};
     const template = FILE_TEMPLATES[type];
@@ -1764,6 +1793,7 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
 // вместе с записью (см. trash.js) — сами по себе они здесь больше не чистятся.
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
+    if (rejectManagedExpertMutation(res, req.query.path)) return;
     // Защита папок оборудования. Они — отражение «Учёта»: удалённая
     // вернётся при следующей сверке, а снимки и свидетельства успеют
     // уехать в корзину. Сотруднику отказываем совсем, администратору —
@@ -1851,6 +1881,7 @@ app.post("/api/rename", auth.requireAuth, requireColumnAccess({ write: true }), 
     if (!oldPath || !newName) {
       return res.status(400).json({ message: "Укажите путь и новое имя" });
     }
+    if (rejectManagedExpertMutation(res, oldPath)) return;
     const newPath = await filesLib.renameEntry(oldPath, newName);
     if (columnForPath(oldPath) === "cases") {
       await folderPermissions.renamePath(oldPath, newPath);
@@ -1878,6 +1909,7 @@ app.post("/api/move", auth.requireAuth, requireColumnAccess({ write: true }), as
     if (!sourcePath || !destination) {
       return res.status(400).json({ message: "Укажите путь и папку назначения" });
     }
+    if (rejectManagedExpertMutation(res, sourcePath, destination)) return;
 
     const sourceColumn = columnForPath(sourcePath);
     const destColumn = columnForPath(destination);
@@ -1922,6 +1954,7 @@ app.post("/api/copy", auth.requireAuth, requireColumnAccess({ write: true }), as
     if (!sourcePath || !destination) {
       return res.status(400).json({ message: "Укажите путь и папку назначения" });
     }
+    if (rejectManagedExpertMutation(res, sourcePath, destination)) return;
 
     const sourceColumn = columnForPath(sourcePath);
     const destColumn = columnForPath(destination);
@@ -1965,6 +1998,7 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUplo
     if (!req.file) {
       return res.status(400).json({ message: "Файл не получен" });
     }
+    if (rejectManagedExpertMutation(res, req.body?.path)) return;
     const targetDir = filesLib.safeResolve(req.body.path || "/");
     await fs.promises.mkdir(targetDir, { recursive: true });
 
@@ -2175,9 +2209,11 @@ app.get("/api/onlyoffice/config", auth.requireAuth, requireColumnAccess(), (req,
     // В "Дела" доступ мог быть только "читать" — тогда открываем строго
     // в режиме просмотра, без возможности редактировать и сохранить.
     const canEdit =
-      req.user.role === "admin" ||
-      columnForPath(relPath) !== "cases" ||
-      req.folderAccess === "write";
+      req.query.mode !== "view" && (
+        req.user.role === "admin" ||
+        columnForPath(relPath) !== "cases" ||
+        req.folderAccess === "write"
+      );
     const { config, scriptUrl } = onlyoffice.buildEditorConfig({
       relPath,
       fileName,
