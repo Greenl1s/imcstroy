@@ -109,7 +109,7 @@ async function listTrash(user) {
   const isAdmin = user.role === "admin";
   const { rows } = await db.query(
     `SELECT t.id, t.name, t.original_path, t.is_dir, t.size_bytes, t.deleted_at,
-            u.username AS deleted_by_name,
+            ${db.nameSql("u")} AS deleted_by_name,
             GREATEST(0, $2::int - FLOOR(EXTRACT(EPOCH FROM (now() - t.deleted_at)) / 86400)::int) AS days_left
        FROM fm_trash t
        LEFT JOIN users u ON u.id = t.deleted_by
