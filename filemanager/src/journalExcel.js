@@ -1,5 +1,4 @@
 const ExcelJS = require("exceljs");
-const db = require("./db");
 const files = require("./files");
 
 const JOURNAL_DIR = "/Дела/Журнал регистрации";
@@ -101,32 +100,29 @@ function buildWorkbook(sheets) {
 const isArchive = (row) => row.is_cancelled || row.stage === "done";
 
 /**
- * Пересобирает журнал регистрации с нуля из текущего состояния базы —
- * вызывается после любого изменения проекта (создание, смена стадии,
- * отмена, редактирование), поэтому файл всегда отражает актуальные
- * данные без ручного участия.
+ * Убирает прежнюю файловую копию журнала из «Дел».
+ *
+ * Журнал теперь является отдельным разделом интерфейса, а Excel при
+ * необходимости скачивается кнопкой из этого раздела. Удаляем только
+ * созданный системой файл. Если человек положил в папку что-то ещё,
+ * эти файлы остаются целыми и сама папка не удаляется.
  */
+async function removeStoredJournal() {
+  const fs = require("fs");
+  try { await fs.promises.unlink(files.absolutePathFor(JOURNAL_PATH)); }
+  catch (err) { if (err.code !== "ENOENT") throw err; }
+  try { await fs.promises.rmdir(files.absolutePathFor(JOURNAL_DIR)); }
+  catch (err) {
+    if (err.code !== "ENOENT" && err.code !== "ENOTEMPTY") throw err;
+  }
+}
+
+/** Старые вызовы обновления оставлены совместимыми, но больше не создают файл. */
 async function regenerateJournal() {
-  const { rows } = await db.query(`
-    SELECT c.*, u.username AS manager_name
-    FROM cases c
-    LEFT JOIN users u ON u.id = c.manager_id
-    WHERE c.deleted_at IS NULL
-    ORDER BY c.created_at ASC
-  `);
-
-  const workbook = buildWorkbook([
-    { name: "ТЕКУЩИЕ", rows: rows.filter((r) => !isArchive(r)) },
-    { name: "АРХИВ", rows: rows.filter(isArchive) },
-  ]);
-
-  const dirAbs = files.absolutePathFor(JOURNAL_DIR);
-  await require("fs").promises.mkdir(dirAbs, { recursive: true });
-  const fileAbs = files.absolutePathFor(JOURNAL_PATH);
-  await workbook.xlsx.writeFile(fileAbs);
+  await removeStoredJournal();
 }
 
 module.exports = {
   regenerateJournal, buildWorkbook, isArchive, HEADERS, COURT_GROUP_HEADERS,
-  JOURNAL_PATH, JOURNAL_DIR,
+  removeStoredJournal, JOURNAL_PATH, JOURNAL_DIR,
 };

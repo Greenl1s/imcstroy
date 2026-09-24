@@ -121,6 +121,12 @@ for (const rel of COLUMN_ROOTS) {
   fs.mkdirSync(filesLib.safeResolve(rel), { recursive: true });
 }
 
+// Журнал открыт отдельной кнопкой слева. Старую Excel-копию в «Делах»
+// убираем при запуске и больше не создаём.
+require("./journalExcel").removeStoredJournal().catch((err) => {
+  console.error("Не удалось убрать старую папку журнала регистрации:", err.message);
+});
+
 /* ---------------- Auth ---------------- */
 
 // Простая защита от перебора паролей: считаем неудачные попытки по
