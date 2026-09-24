@@ -479,6 +479,13 @@ const toDbValue = (key, v) => {
 
 instruments.post('/', requireAdmin, async (req, res) => {
   const values = EDITABLE.map((key) => toDbValue(key, req.body?.[key]));
+  const checkType = nullify(req.body?.check_type) || 'verification';
+  const qty = parseQty(req.body?.qty);
+  if (checkType !== 'none' && qty !== 1) {
+    return res.status(400).json({
+      error: 'Для прибора с поверкой или калибровкой каждый экземпляр создаётся отдельной карточкой'
+    });
+  }
   try {
     const row = await transaction(async (client) => {
       const { rows } = await client.query(
@@ -493,6 +500,25 @@ instruments.post('/', requireAdmin, async (req, res) => {
       await logEvent(client, {
         instrument: rows[0], action: 'create', actor: req.user, note: 'Прибор добавлен'
       });
+      const copyPhotoFrom = Number(req.body?.copy_photo_from_id);
+      if (Number.isInteger(copyPhotoFrom) && copyPhotoFrom > 0) {
+        // У экземпляров одной модели может быть общее изображение прибора,
+        // но свидетельство и даты намеренно не копируем: они индивидуальны.
+        await client.query(
+          `UPDATE instruments target
+              SET photo_link_path = source.photo_link_path
+             FROM instruments source
+            WHERE target.id = $1 AND source.id = $2`,
+          [rows[0].id, copyPhotoFrom]
+        );
+        await client.query(
+          `INSERT INTO instrument_photos (instrument_id, mime_type, bytes, size_bytes)
+           SELECT $1, mime_type, bytes, size_bytes
+             FROM instrument_photos WHERE instrument_id = $2
+           ON CONFLICT (instrument_id) DO NOTHING`,
+          [rows[0].id, copyPhotoFrom]
+        );
+      }
       return rows[0];
     });
     res.status(201).json(await withNames(row.id));
@@ -520,9 +546,15 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
       // а есть одна» — это не данные, а ошибка, о которой потом никто не
       // догадается. Проверяем под замком, чтобы между проверкой и записью
       // никто не успел взять ещё одну штуку.
-      if (updates.includes('qty')) {
+      if (updates.includes('qty') || updates.includes('check_type')) {
         const current = await lockInstrument(client, req.params.id);
-        const wanted = parseQty(req.body.qty);
+        const wanted = updates.includes('qty') ? parseQty(req.body.qty) : parseQty(current.qty);
+        const wantedCheckType = updates.includes('check_type')
+          ? (nullify(req.body.check_type) || 'verification')
+          : current.check_type;
+        if (wantedCheckType !== 'none' && wanted !== 1) {
+          fail(409, 'Для прибора с поверкой или калибровкой каждый экземпляр должен иметь отдельную карточку');
+        }
         if (wanted < current.held_qty) {
           fail(409, `На руках ${pieces(current.held_qty)} — меньше этого наличие ` +
             'поставить нельзя. Сначала примите возврат.');
