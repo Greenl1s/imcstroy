@@ -23,6 +23,10 @@ const expertsLib = require("./experts");
 const expertInfo = require("./expertInfo");
 const gpTemplate = require("./gpTemplate");
 const docxImages = require("./docxImages");
+const documentTypes = require("./documentTypes");
+const documentTemplate = require("./documentTemplate");
+const documentGenerate = require("./documentGenerate");
+const documentDraft = require("./documentDraft");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
@@ -1367,6 +1371,172 @@ async function readExpertsForGp(expertPaths) {
   return experts;
 }
 
+/* ---------------- Документы по шаблонам ---------------- */
+
+app.get("/api/documents/catalog", auth.requireAuth, (req, res) => {
+  res.json({ items: documentTypes.publicCatalog() });
+});
+
+app.get("/api/documents/templates/:type", auth.requireAuth, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    const list = await documentTemplate.listSamples(filesLib.safeResolve, type, { withState: false });
+    res.json(list);
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+
+app.get("/api/admin/document-templates/:type", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try { res.json(await documentTemplate.listSamples(filesLib.safeResolve, documentTypes.get(req.params.type).id)); }
+  catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.post("/api/admin/document-templates/:type", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    const created = await documentTemplate.createSample(filesLib.safeResolve, type, req.body || {});
+    events.log(req.user, "settings_change", { path: documentTemplate.fileOf(type, created.id), name: `Создан образец «${created.name}»` });
+    res.status(201).json({ ok: true, ...created });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.patch("/api/admin/document-templates/:type/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    await documentTemplate.updateSample(filesLib.safeResolve, type, req.params.id, {
+      name: req.body?.name, makeDefault: Boolean(req.body?.isDefault),
+    });
+    res.json({ ok: true, ...(await documentTemplate.listSamples(filesLib.safeResolve, type)) });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.delete("/api/admin/document-templates/:type/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    await documentTemplate.removeSample(filesLib.safeResolve, type, req.params.id);
+    res.json({ ok: true, ...(await documentTemplate.listSamples(filesLib.safeResolve, type)) });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.post("/api/admin/document-templates/:type/:id/reset", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    await documentTemplate.restore(filesLib.safeResolve, type, req.params.id, req.body?.to);
+    res.json({ ok: true, ...(await documentTemplate.listSamples(filesLib.safeResolve, type)) });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.get("/api/admin/document-templates/:type/:id/editor", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    const { item } = await documentTemplate.find(filesLib.safeResolve, type, req.params.id);
+    const { config, scriptUrl } = onlyoffice.buildEditorConfig({
+      relPath: documentTemplate.fileOf(type, item.id), fileName: `${item.name}.docx`,
+      userId: req.user.id, userName: req.user.name || req.user.username, canEdit: true,
+    });
+    res.json({ config, scriptUrl });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.get("/api/admin/document-templates/:type/:id/download", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type).id;
+    const { item, buffer } = await documentTemplate.readSample(filesLib.safeResolve, type, req.params.id);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(item.name + ".docx")}`);
+    res.send(buffer);
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+
+function documentOutputDir(type, kase) {
+  if (type.folder === "planning-contract") return `${kase.folder_path}/Планирование проекта/Договор`;
+  if (type.folder === "planning-correspondence") return `${kase.folder_path}/Планирование проекта/Переписка`;
+  if (type.folder === "conclusion") return `${kase.folder_path}/${kase.name}/Заключение`;
+  return `${kase.folder_path}/${kase.name}/Организационные документы/Ходатайства`;
+}
+function safeDocumentName(value) {
+  return String(value || "документ").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+}
+function requiredDocumentFields(type, data, files) {
+  for (const [name, title, kind, required] of type.fields) {
+    if (!required) continue;
+    const value = kind === "files" ? files : data[name];
+    if ((Array.isArray(value) && !value.length) || (!Array.isArray(value) && !String(value ?? "").trim())) {
+      throw gpFail(`Заполните поле «${title}»`);
+    }
+  }
+  if (type.id === "stitch") {
+    const count = Number(data.cardCount);
+    if (!Number.isInteger(count) || count < 2 || count > 12 || count % 2) {
+      throw gpFail("Количество карточек должно быть чётным: от 2 до 12");
+    }
+  }
+}
+
+app.post("/api/documents/:type/preview", auth.requireAuth,
+  upload.array("attachments", 20), cleanupTempUpload, async (req, res) => {
+  try {
+    const type = documentTypes.get(req.params.type);
+    const data = JSON.parse(req.body?.payload || "{}");
+    const caseId = Number(data.caseId);
+    if (!caseId) throw gpFail("Выберите проект");
+    const { rows } = await db.query("SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
+    if (!rows.length) throw gpFail("Проект не найден или удалён", 404);
+    const kase = rows[0];
+    await assertCanWriteToCase(req, kase);
+    requiredDocumentFields(type, data, req.files || []);
+
+    const expertPaths = Array.isArray(data.expertPaths) ? data.expertPaths : [];
+    const experts = expertPaths.length ? await readExpertsForGp(expertPaths) : [];
+    data.addedExpertsShort = experts.map((x) => x.name).join(", ");
+    if (data.removedExpertShort && data.removedExpertShort.includes("/")) data.removedExpertShort = path.basename(data.removedExpertShort);
+    const attachments = [];
+    for (const file of req.files || []) {
+      const buffer = await fs.promises.readFile(file.path);
+      if (!docxImages.imageSize(buffer)) throw gpFail(`Файл «${file.originalname}» не является изображением JPEG или PNG`);
+      attachments.push({ name: file.originalname, buffer });
+    }
+    const { item: sample, buffer: templateBuffer } = await documentTemplate.readSample(filesLib.safeResolve, type.id, data.templateId);
+    const state = documentTemplate.inspect(type.id, templateBuffer);
+    if (!state.ok) throw gpFail(`Образец «${sample.name}» повреждён: не хватает ${state.missing.map((x) => x.token).join(", ")}`);
+    const buffer = documentGenerate.generate(type.id, data, templateBuffer, { experts, attachmentFiles: attachments });
+    const outputDir = documentOutputDir(type, kase);
+    const suffix = safeDocumentName(data.caseNumber || kase.case_number || kase.name);
+    const fileName = `${type.filePrefix} ${suffix}.docx`;
+    if (fs.existsSync(path.join(filesLib.safeResolve(outputDir), fileName))) throw gpFail(`Файл «${fileName}» уже существует`);
+    const draft = await documentDraft.create(filesLib.safeResolve, { userId: req.user.id, buffer, meta: {
+      type: type.id, caseId, caseFolderPath: kase.folder_path, outputDir, fileName,
+    } });
+    res.json({ ok: true, draftId: draft.id, fileName, outputDir });
+  } catch (err) {
+    if (!err.status) console.error("Не удалось собрать документ:", err);
+    res.status(err.status || 500).json({ message: err.status ? err.message : "Не удалось собрать документ: " + err.message });
+  }
+});
+app.get("/api/documents/preview/:id/editor", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await documentDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+    const { config, scriptUrl } = onlyoffice.buildEditorConfig({
+      relPath: documentDraft.filePath(meta), fileName: meta.fileName,
+      userId: req.user.id, userName: req.user.name || req.user.username, canEdit: true,
+    });
+    res.json({ config, scriptUrl });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.post("/api/documents/preview/:id/save", auth.requireAuth, async (req, res) => {
+  try {
+    const meta = await documentDraft.read(filesLib.safeResolve, req.params.id, req.user.id);
+    const { rows } = await db.query("SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [meta.caseId]);
+    if (!rows.length) throw gpFail("Проект не найден или удалён", 404);
+    await assertCanWriteToCase(req, rows[0]);
+    const dir = filesLib.safeResolve(meta.outputDir);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const target = path.join(dir, meta.fileName);
+    if (fs.existsSync(target)) throw gpFail(`Файл «${meta.fileName}» уже существует`);
+    await fs.promises.copyFile(filesLib.safeResolve(documentDraft.filePath(meta)), target);
+    events.log(req.user, "document_generate", { path: `${meta.outputDir}/${meta.fileName}`, name: meta.fileName });
+    await documentDraft.remove(filesLib.safeResolve, meta.id);
+    res.json({ ok: true, name: meta.fileName, path: `${meta.outputDir}/${meta.fileName}`, caseFolderPath: meta.caseFolderPath });
+  } catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.delete("/api/documents/preview/:id", auth.requireAuth, async (req, res) => {
+  try { const meta = await documentDraft.read(filesLib.safeResolve, req.params.id, req.user.id); await documentDraft.remove(filesLib.safeResolve, meta.id); res.json({ ok: true }); }
+  catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+
 /** Имена файлов письма. Одно место на всё: их сверяют ещё и на занятость. */
 function gpFileNames(caseNumber) {
   const safe = String(caseNumber || "без номера").replace(/[\\/]/g, "-");
@@ -2351,6 +2521,10 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
       // текущему, возвращаться некуда.
       const sampleId = gpTemplate.idByPath(req.query.path);
       if (sampleId) await gpTemplate.backup(filesLib.safeResolve, sampleId);
+      const documentSample = documentTemplate.identifyPath(req.query.path);
+      if (documentSample) {
+        await documentTemplate.backup(filesLib.safeResolve, documentSample.type, documentSample.id);
+      }
       await fs.promises.writeFile(abs, buffer);
       console.log(`OnlyOffice callback: файл "${req.query.path}" успешно сохранён (${buffer.length} байт)`);
       // Кто именно правил документ, OnlyOffice сообщает в users — берём первого.
@@ -2358,6 +2532,9 @@ app.post("/api/onlyoffice/callback", express.json(), async (req, res) => {
       const editor = await auth.userForEvent(editorId);
       events.log(editor, "office_save", { path: req.query.path });
       if (sampleId) await gpTemplate.touch(filesLib.safeResolve, sampleId);
+      if (documentSample) {
+        await documentTemplate.touch(filesLib.safeResolve, documentSample.type, documentSample.id);
+      }
     } catch (err) {
       console.error("Не удалось сохранить документ из OnlyOffice:", err);
       return res.json({ error: 1 });
