@@ -4,7 +4,7 @@ import { escapeHtml, getControlTypes, setControlTypes, getCompanies, setCompanie
   qtyOf, pieces, plural } from './utils.js';
 import { openModal, closeModal, toast, setSync, run, qtyInput } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js?v=20260924-1';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { renderKits, renderKitCard, showKitForm } from './kits.js';
 import { displayNo, verificationBadge, verificationText, today, verificationInfo,
@@ -59,12 +59,11 @@ async function init() {
 function bindEvents() {
   document.getElementById('loginForm').onsubmit = onLogin;
 
+  const goToIsu = () => { location.href = '/'; };
   const backToIsuButton = document.getElementById('backToIsuButton');
-  if (backToIsuButton) {
-    backToIsuButton.onclick = () => {
-      location.href = '/';
-    };
-  }
+  if (backToIsuButton) backToIsuButton.onclick = goToIsu;
+  const mobileBackToIsuButton = document.getElementById('mobileBackToIsuButton');
+  if (mobileBackToIsuButton) mobileBackToIsuButton.onclick = goToIsu;
 
   const backToListButton = document.getElementById('backToListButton');
   if (backToListButton) backToListButton.onclick = () => goList();

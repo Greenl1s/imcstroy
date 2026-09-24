@@ -570,6 +570,11 @@ export async function renderCard(id, goList) {
             <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg>
             Копировать данные
           </button>
+          ${admin && item.status !== 'retired' && item.check_type !== 'none' ? `
+          <button class="card-act card-act-main" type="button" data-add-copy>
+            <svg viewBox="0 0 24 24"><rect x="4" y="4" width="12" height="12" rx="2"/><path d="M9 20h9a2 2 0 0 0 2-2V9M10 8v4M8 10h4"/></svg>
+            Добавить экземпляр
+          </button>` : ''}
           ${admin ? `<button class="card-act" type="button" data-recognition>
             <svg viewBox="0 0 24 24"><path d="M4 7h3l2-3h6l2 3h3v13H4z"/><circle cx="12" cy="13" r="4"/></svg>
             Фото для распознавания
@@ -683,8 +688,7 @@ function bindGallery(item) {
  *
  * Нужна ровно затем, чтобы прочитать мелкий текст на свидетельстве:
  * в рамке карточки или окна сроки видно, но не разобрать. Поэтому
- * щелчок по картинке ещё и приближает её вдвое, а повторный —
- * возвращает обратно.
+ * есть точный масштаб, колесо мыши, перемещение и жест двумя пальцами.
  */
 export function showLightbox(src, caption = '') {
   // Именно <dialog> и showModal(): документ открывается поверх окна,
@@ -695,12 +699,18 @@ export function showLightbox(src, caption = '') {
   node.innerHTML = `
     <div class="lightbox-bar">
       <span class="lightbox-caption">${escapeHtml(caption)}</span>
-      <span class="lightbox-hint">Щелчок по изображению — приблизить, Esc — закрыть</span>
+      <span class="lightbox-hint">Колесо мыши или кнопки — масштаб, изображение можно двигать</span>
+      <div class="lightbox-tools" aria-label="Масштаб документа">
+        <button type="button" data-zoom-out aria-label="Уменьшить">−</button>
+        <span class="lightbox-zoom-value" data-zoom-value>100%</span>
+        <button type="button" data-zoom-in aria-label="Увеличить">+</button>
+        <button type="button" data-zoom-reset aria-label="Вписать в экран">Вписать</button>
+      </div>
       <button class="lightbox-close" type="button" aria-label="Закрыть">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <div class="lightbox-stage"><img src="${src}" alt="${escapeHtml(caption)}"></div>`;
+    <div class="lightbox-stage"><div class="lightbox-canvas"><img src="${escapeAttr(src)}" alt="${escapeAttr(caption)}"></div></div>`;
 
   const close = () => {
     if (node.open) node.close();
@@ -708,29 +718,113 @@ export function showLightbox(src, caption = '') {
   };
   // Esc у <dialog> работает сам, но закрытый диалог остаётся в дереве —
   // убираем узел, чтобы они не копились.
-  node.addEventListener('close', () => node.remove());
+  node.addEventListener('close', () => {
+    window.removeEventListener('resize', fitImage);
+    node.remove();
+  });
 
   node.querySelector('.lightbox-close').onclick = close;
-  // Щелчок мимо картинки закрывает — привычнее, чем искать крестик.
-  node.onclick = (e) => { if (e.target === node || e.target.classList.contains('lightbox-stage')) close(); };
+  node.onclick = (e) => { if (e.target === node) close(); };
 
   const img = node.querySelector('img');
   const stage = node.querySelector('.lightbox-stage');
-  img.onclick = (e) => {
-    e.stopPropagation();
-    const zoomed = stage.classList.toggle('is-zoomed');
-    if (zoomed) {
-      // Приближаем к тому месту, куда ткнули, а не к середине картинки.
-      const rect = img.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-      stage.scrollLeft = x * stage.scrollWidth - stage.clientWidth / 2;
-      stage.scrollTop = y * stage.scrollHeight - stage.clientHeight / 2;
+  const canvas = node.querySelector('.lightbox-canvas');
+  const zoomValue = node.querySelector('[data-zoom-value]');
+  let zoom = 1;
+  let baseWidth = 1;
+  let baseHeight = 1;
+
+  const redraw = (nextZoom, focusX = stage.clientWidth / 2, focusY = stage.clientHeight / 2) => {
+    const oldWidth = Math.max(1, canvas.scrollWidth);
+    const oldHeight = Math.max(1, canvas.scrollHeight);
+    const xRatio = (stage.scrollLeft + focusX) / oldWidth;
+    const yRatio = (stage.scrollTop + focusY) / oldHeight;
+    zoom = Math.max(0.5, Math.min(5, nextZoom));
+    const imageWidth = Math.round(baseWidth * zoom);
+    const imageHeight = Math.round(baseHeight * zoom);
+    img.style.width = `${imageWidth}px`;
+    img.style.height = `${imageHeight}px`;
+    canvas.style.width = `${Math.max(stage.clientWidth - 32, imageWidth)}px`;
+    canvas.style.height = `${Math.max(stage.clientHeight - 32, imageHeight)}px`;
+    zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+    requestAnimationFrame(() => {
+      stage.scrollLeft = xRatio * canvas.scrollWidth - focusX;
+      stage.scrollTop = yRatio * canvas.scrollHeight - focusY;
+    });
+  };
+
+  const fitImage = () => {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const fit = Math.min(
+      Math.max(1, stage.clientWidth - 32) / img.naturalWidth,
+      Math.max(1, stage.clientHeight - 32) / img.naturalHeight,
+      1
+    );
+    baseWidth = Math.max(1, Math.round(img.naturalWidth * fit));
+    baseHeight = Math.max(1, Math.round(img.naturalHeight * fit));
+    redraw(1);
+  };
+  img.onload = fitImage;
+  if (img.complete) fitImage();
+
+  node.querySelector('[data-zoom-in]').onclick = () => redraw(zoom * 1.25);
+  node.querySelector('[data-zoom-out]').onclick = () => redraw(zoom / 1.25);
+  node.querySelector('[data-zoom-reset]').onclick = () => redraw(1);
+  img.ondblclick = (event) => {
+    event.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    redraw(zoom > 1 ? 1 : 2, event.clientX - rect.left, event.clientY - rect.top);
+  };
+  stage.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    redraw(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15),
+      event.clientX - rect.left, event.clientY - rect.top);
+  }, { passive: false });
+
+  // Перетаскивание работает и мышью, и одним пальцем. Два пальца
+  // меняют масштаб, поэтому на телефоне не нужны крошечные жесты по кнопкам.
+  const pointers = new Map();
+  let drag = null;
+  let pinch = null;
+  const distance = () => {
+    const [a, b] = [...pointers.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  };
+  stage.onpointerdown = (event) => {
+    stage.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 1) {
+      drag = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
+      stage.classList.add('is-dragging');
+    } else if (pointers.size === 2) {
+      pinch = { distance: distance(), zoom };
+      drag = null;
     }
   };
+  stage.onpointermove = (event) => {
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 2 && pinch?.distance) {
+      redraw(pinch.zoom * distance() / pinch.distance);
+    } else if (drag && pointers.size === 1) {
+      stage.scrollLeft = drag.left - (event.clientX - drag.x);
+      stage.scrollTop = drag.top - (event.clientY - drag.y);
+    }
+  };
+  const pointerUp = (event) => {
+    pointers.delete(event.pointerId);
+    pinch = null;
+    drag = null;
+    stage.classList.remove('is-dragging');
+  };
+  stage.onpointerup = pointerUp;
+  stage.onpointercancel = pointerUp;
 
   document.body.appendChild(node);
   node.showModal();
+  requestAnimationFrame(fitImage);
+  window.addEventListener('resize', fitImage);
 }
 
 /** Маленький QR прямо в карточке — его печатают на наклейку. */
@@ -766,6 +860,7 @@ function bindCardActions(item, goList) {
   on('[data-book]', () => showBookForm(item));
   on('[data-transfer]', () => showTransferForm(item));
   on('[data-edit]', () => showInstrumentForm(item));
+  on('[data-add-copy]', () => showInstrumentForm(null, { copyFrom: item }));
   on('[data-qr]', () => showQr(item));
   on('[data-document]', () => showDocument(item));
   on('[data-copy]', () => copyInfo(item));
@@ -910,17 +1005,27 @@ function openFilemanagerPicker(onPicked, startPath) {
 
 // ---------- Формы ----------
 
-export function showInstrumentForm(item = null) {
+export function showInstrumentForm(item = null, { copyFrom = null } = {}) {
   const isEdit = Boolean(item);
-  const v = item || { check_type: 'verification', comment: '' };
+  const isCopy = Boolean(copyFrom);
+  const v = item || (copyFrom ? {
+    name: copyFrom.name,
+    model: copyFrom.model,
+    check_type: copyFrom.check_type,
+    control_type: copyFrom.control_type,
+    company_code: copyFrom.company_code,
+    comment: copyFrom.comment,
+    qty: 1,
+  } : { check_type: 'verification', comment: '', qty: 1 });
 
   // Путь к файлу, выбранному в files.imcstroy.ru (если выбрали) —
   // живёт только пока открыта форма, отправляется на сервер при сохранении.
   let pickedPhotoPath = null;
   let pickedDocumentPath = null;
 
-  openModal(isEdit ? 'Редактировать прибор' : 'Добавить прибор', `
+  openModal(isEdit ? 'Редактировать прибор' : isCopy ? 'Добавить экземпляр прибора' : 'Добавить прибор', `
     <form id="instrumentForm" class="form-grid">
+      ${isCopy ? `<div class="instrument-copy-note"><b>Новая отдельная карточка</b><span>Общие данные и фото взяты из прибора ${escapeHtml(displayNo(copyFrom))}. Укажите серийный и инвентарный номера, даты и приложите его собственное свидетельство.</span></div>` : ''}
       ${input('inventory_no', 'Инвентарный номер (необязательно)', v.inventory_no || '')}
       ${input('name', 'Название', v.name || '', 'text', true)}
       ${input('serial_number', 'Серийный номер', v.serial_number || '')}
@@ -989,6 +1094,26 @@ export function showInstrumentForm(item = null) {
     </form>`);
 
   const form = document.getElementById('instrumentForm');
+
+  // Количество относится только к одинаковым вспомогательным предметам,
+  // которым не нужны собственные свидетельства. Для поверяемого прибора
+  // каждый физический экземпляр всегда хранится отдельной карточкой.
+  const checkTypeInput = form.querySelector('[name="check_type"]');
+  const qtyLabel = form.querySelector('.qty-label');
+  const qtyField = form.querySelector('[name="qty"]');
+  const syncQtyMode = () => {
+    const auxiliary = checkTypeInput.value === 'none';
+    qtyLabel.classList.toggle('qty-single-card', !auxiliary);
+    qtyLabel.querySelectorAll('[data-qty-step]').forEach((button) => { button.disabled = !auxiliary; });
+    qtyField.readOnly = !auxiliary;
+    if (!auxiliary && !isEdit) qtyField.value = '1';
+    const hint = qtyLabel.querySelector('.qty-hint');
+    if (hint) hint.textContent = auxiliary
+      ? 'одинаковых вспомогательных приборов в одной карточке'
+      : 'для каждого экземпляра создаётся отдельная карточка';
+  };
+  checkTypeInput.addEventListener('change', syncQtyMode);
+  syncQtyMode();
 
   // Папка прибора известна из карточки. Фото ищем в «Изображениях»,
   // свидетельство — в «Поверке»: там они и лежат, если их клали через
@@ -1147,6 +1272,7 @@ export function showInstrumentForm(item = null) {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     const data = formData(form);
+    if (copyFrom?.has_photo) data.copy_photo_from_id = copyFrom.id;
 
     // Приложили ли новый документ поверки — неважно, с БД или с компьютера.
     // Если да, после сохранения покажем его и спросим сроки: сроки берутся
@@ -1182,7 +1308,7 @@ export function showInstrumentForm(item = null) {
       }
 
       return saved;
-    }, { button, success: isEdit ? 'Изменения сохранены' : 'Прибор добавлен' });
+    }, { button, success: isEdit ? 'Изменения сохранены' : isCopy ? 'Экземпляр добавлен' : 'Прибор добавлен' });
 
     if (result === null) return;
     if (uploadProblem) toast(uploadProblem, true);
