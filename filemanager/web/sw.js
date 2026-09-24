@@ -21,7 +21,7 @@
 
 // Версия меняется при каждой правке этого файла — по ней браузер
 // понимает, что работник новый, и выбрасывает старые хранилища.
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL_CACHE = `оболочка-${VERSION}`;
 const DATA_CACHE = `данные-${VERSION}`;
 const OFFLINE_URL = "/app/offline.html";
