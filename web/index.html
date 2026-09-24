@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Учет оборудования</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=20260924-1">
 
 <!-- Приложение: установка на устройство, работа без сети, уведомления.
      Один и тот же набор в трёх системах — адрес у них общий, значит и
@@ -52,13 +52,13 @@
       <div class="app-layout">
       <aside class="app-sidebar">
         <div class="sidebar-brand"><span class="sidebar-mark">ИМ</span><b>Учёт оборудования</b></div>
+        <button id="backToIsuButton" class="sidebar-back" type="button">← Вернуться в ИСУ</button>
         <nav class="sidebar-nav" aria-label="Основные разделы">
           <button id="navInstrumentsButton" class="sidebar-link is-active" type="button"><span>▣</span>Приборы</button>
           <button id="navKitsButton" class="sidebar-link" type="button"><span>▤</span>Комплекты</button>
           <button id="navScannerButton" class="sidebar-link" type="button"><span>⌾</span>Сканер</button>
           <button id="navRetiredButton" class="sidebar-link admin-only" type="button"><span>□</span>Списанные</button>
         </nav>
-        <button id="backToIsuButton" class="sidebar-back" type="button">← Вернуться в ИСУ</button>
       </aside>
       <div class="app-content">
       <header class="topbar">
@@ -162,6 +162,7 @@
         <button id="mobileInstrumentsButton" class="is-active" type="button"><span>▣</span>Приборы</button>
         <button id="mobileScannerButton" type="button"><span>⌖</span>Сканер</button>
         <button id="mobileKitsButton" type="button"><span>▤</span>Комплекты</button>
+        <button id="mobileBackToIsuButton" type="button"><span>↩</span>В ИСУ</button>
         <button id="mobileMenuButton" type="button"><span>☰</span>Ещё</button>
       </nav>
       </div>
@@ -175,6 +176,6 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.iife.js"></script>
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/app.js?v=20260924-1"></script>
 </body>
 </html>
