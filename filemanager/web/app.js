@@ -442,7 +442,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-08-31.7";
+const APP_BUILD = "2026-09-24.1";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -508,6 +508,8 @@ function applyPermissionsUI() {
     // Ни дел, ни файлов — создавать нечего, кнопку прячем совсем.
     els.createSideBtn.classList.toggle("hidden", !p.can_db && !p.can_cases);
   }
+  const documentMenuButton = document.getElementById("documentMenuBtn");
+  if (documentMenuButton) documentMenuButton.closest(".side-documents").classList.toggle("hidden", !p.can_cases);
 
   const allowed = [];
   if (p.can_tools) allowed.push("tools");
@@ -2262,6 +2264,217 @@ wireCreateMenu(els.createSideBtn, els.createSideMenu, () => (
     : { path: DB_PATH, refresh: () => loadColumnList("db") }
 ));
 
+/* ---------- Создание документов по шаблонам ---------- */
+
+const documentUi = {
+  menuBtn: document.getElementById("documentMenuBtn"), menu: document.getElementById("documentMenu"),
+  overlay: document.getElementById("documentOverlay"), form: document.getElementById("documentForm"),
+  close: document.getElementById("documentCloseBtn"), title: document.getElementById("documentFormTitle"),
+  cases: document.getElementById("documentCaseSelect"), templates: document.getElementById("documentTemplateSelect"),
+  fields: document.getElementById("documentFields"), error: document.getElementById("documentFormError"),
+  newProject: document.getElementById("documentNewProject"), newProjectName: document.getElementById("documentNewProjectName"),
+  preview: document.getElementById("documentPreviewFull"), previewTitle: document.getElementById("documentPreviewTitle"),
+  previewMount: document.getElementById("documentPreviewMount"), previewBack: document.getElementById("documentPreviewBack"),
+  previewSave: document.getElementById("documentPreviewSave"),
+};
+let documentCatalog = null;
+let documentCurrentType = null;
+let documentCases = [];
+let documentExperts = [];
+let documentDraft = null;
+let documentEditor = null;
+
+if (documentUi.menuBtn && documentUi.menu) {
+  documentUi.menuBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const opening = documentUi.menu.classList.contains("hidden");
+    closeCreateMenus();
+    documentUi.menu.classList.toggle("hidden", !opening);
+    documentUi.menuBtn.setAttribute("aria-expanded", String(opening));
+  });
+  documentUi.menu.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", () => {
+    documentUi.menu.classList.add("hidden");
+    documentUi.menuBtn.setAttribute("aria-expanded", "false");
+  });
+  documentUi.menu.querySelectorAll("[data-document]").forEach((button) => {
+    button.addEventListener("click", () => {
+      documentUi.menu.classList.add("hidden");
+      if (button.dataset.document === "gp") openGpForm();
+      else openDocumentForm(button.dataset.document);
+    });
+  });
+  const sub = documentUi.menu.querySelector(".document-submenu-btn");
+  if (sub) sub.addEventListener("click", () => sub.closest(".document-submenu").classList.toggle("open"));
+}
+
+async function loadDocumentCatalog() {
+  if (!documentCatalog) documentCatalog = await apiFetch("/api/documents/catalog");
+  return documentCatalog.items;
+}
+async function loadDocumentSources() {
+  const [cases, expertsData] = await Promise.all([apiFetch("/api/cases"), apiFetch("/api/experts")]);
+  documentCases = cases.filter((c) => !c.is_cancelled);
+  documentExperts = expertsData.experts || [];
+}
+function documentFieldId(name) { return `document-field-${name}`; }
+function documentFieldHtml(field) {
+  const [name, title, kind, required, initial] = field;
+  const req = required ? " required" : "";
+  const value = Array.isArray(initial) ? "" : (initial ?? "");
+  if (kind === "textarea") return `<label>${escapeHtml(title)}<textarea id="${documentFieldId(name)}" data-document-field="${name}" rows="3"${req}>${escapeHtml(value)}</textarea></label>`;
+  if (kind === "list") {
+    const values = Array.isArray(initial) && initial.length ? initial : [""];
+    return `<fieldset class="document-list" data-document-list="${name}"><legend>${escapeHtml(title)}${required ? " *" : ""}</legend><div class="document-list-rows">${values.map((v) => documentListRow(v)).join("")}</div><button type="button" class="secondary document-list-add">+ Добавить строку</button></fieldset>`;
+  }
+  if (kind === "expert-single" || kind === "expert-multi") {
+    const options = documentExperts.map((x) => `<option value="${escapeHtml(x.path)}">${escapeHtml(x.name)}</option>`).join("");
+    if (kind === "expert-multi") return `<fieldset class="document-expert-picker" data-document-field="${name}" data-kind="expert-multi"><legend>${escapeHtml(title)}${required ? " *" : ""}</legend>${documentExperts.map((x) => `<label><input type="checkbox" value="${escapeHtml(x.path)}"><span>${escapeHtml(x.name)}</span></label>`).join("")}</fieldset>`;
+    return `<label>${escapeHtml(title)}<select id="${documentFieldId(name)}" data-document-field="${name}" data-kind="${kind}"${req}><option value="">Выберите…</option>${options}</select></label>`;
+  }
+  if (kind === "files") return `<label>${escapeHtml(title)}<input id="${documentFieldId(name)}" data-document-field="${name}" data-kind="files" type="file" accept="image/jpeg,image/png" multiple${req}><span class="field-hint">Фотографии JPEG или PNG будут добавлены в приложение № 2.</span></label>`;
+  return `<label>${escapeHtml(title)}<input id="${documentFieldId(name)}" data-document-field="${name}" type="${kind === "number" ? "number" : kind === "date" ? "date" : "text"}" value="${escapeHtml(value)}"${kind === "number" ? ' step="any"' : ""}${req}></label>`;
+}
+function documentListRow(value = "") {
+  return `<div class="document-list-row"><textarea rows="2">${escapeHtml(value)}</textarea><span class="document-list-move"><button type="button" data-list-up title="Выше">↑</button><button type="button" data-list-down title="Ниже">↓</button><button type="button" data-list-remove title="Удалить">×</button></span></div>`;
+}
+function wireDocumentLists() {
+  documentUi.fields.querySelectorAll(".document-list").forEach((box) => {
+    const rows = box.querySelector(".document-list-rows");
+    const add = box.querySelector(".document-list-add");
+    if (!add.dataset.wired) {
+      add.dataset.wired = "1";
+      add.addEventListener("click", () => {
+        rows.insertAdjacentHTML("beforeend", documentListRow()); wireDocumentLists();
+        rows.lastElementChild.querySelector("textarea").focus();
+      });
+    }
+    rows.querySelectorAll(".document-list-row").forEach((row) => {
+      const up = row.querySelector("[data-list-up]"), down = row.querySelector("[data-list-down]"), remove = row.querySelector("[data-list-remove]");
+      up.onclick = () => row.previousElementSibling && rows.insertBefore(row, row.previousElementSibling);
+      down.onclick = () => row.nextElementSibling && rows.insertBefore(row.nextElementSibling, row);
+      remove.onclick = () => { if (rows.children.length > 1) row.remove(); else row.querySelector("textarea").value = ""; };
+    });
+  });
+}
+async function openDocumentForm(typeId) {
+  try {
+    const items = await loadDocumentCatalog();
+    documentCurrentType = items.find((x) => x.id === typeId);
+    if (!documentCurrentType) throw new Error("Неизвестный вид документа");
+    await loadDocumentSources();
+    documentUi.form.reset(); documentUi.error.textContent = "";
+    documentUi.title.textContent = documentCurrentType.title;
+    documentUi.cases.innerHTML = '<option value="">Выберите проект…</option>' + documentCases
+      .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+    documentUi.newProject.classList.toggle("hidden", !documentCurrentType.allowNewProject);
+    const samples = await apiFetch(`/api/documents/templates/${encodeURIComponent(typeId)}`);
+    documentUi.templates.innerHTML = samples.items.map((x) => `<option value="${escapeHtml(x.id)}"${x.id === samples.defaultId ? " selected" : ""}>${escapeHtml(x.name)}</option>`).join("");
+    documentUi.fields.innerHTML = documentCurrentType.fields.map(documentFieldHtml).join("");
+    wireDocumentLists();
+    documentUi.overlay.classList.remove("hidden");
+  } catch (err) { alert("Не удалось открыть форму: " + err.message); }
+}
+function fillDocumentFromCase() {
+  const kase = documentCases.find((x) => String(x.id) === documentUi.cases.value);
+  if (!kase) return;
+  const values = {
+    court: kase.court_or_customer || "", caseNumber: kase.case_number || "", judge: kase.judge_name || "",
+    expertiseType: kase.expertise_type || "",
+    orderReference: `определением ${kase.judge_name || "судьи"} ${kase.court_or_customer || "суда"} по делу № ${kase.case_number || ""}`,
+  };
+  for (const [name, value] of Object.entries(values)) {
+    const input = document.getElementById(documentFieldId(name));
+    if (input && !input.value) input.value = value;
+  }
+}
+if (documentUi.cases) documentUi.cases.addEventListener("change", fillDocumentFromCase);
+if (documentUi.close) documentUi.close.addEventListener("click", () => documentUi.overlay.classList.add("hidden"));
+
+function collectDocumentData() {
+  const data = { caseId: documentUi.cases.value, templateId: documentUi.templates.value };
+  documentUi.fields.querySelectorAll("[data-document-field]").forEach((input) => {
+    const name = input.dataset.documentField;
+    if (input.dataset.kind === "files") return;
+    if (input.dataset.kind === "expert-multi") data[name] = [...input.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value);
+    else data[name] = input.value.trim();
+  });
+  documentUi.fields.querySelectorAll("[data-document-list]").forEach((box) => {
+    data[box.dataset.documentList] = [...box.querySelectorAll("textarea")].map((x) => x.value.trim()).filter(Boolean);
+  });
+  return data;
+}
+async function ensureRefusalProject(data) {
+  if (data.caseId || !documentCurrentType.allowNewProject) return;
+  const raw = documentUi.newProjectName.value.trim();
+  if (!raw) throw new Error("Выберите проект или укажите название нового проекта");
+  const name = raw.startsWith("ЭКС.") ? raw : `ЭКС.${raw}`;
+  const created = await apiFetch("/api/cases", { method: "POST", body: JSON.stringify({
+    type: "expertise", stage: "plan", name, direct_assignment: false,
+    case_number: data.caseNumber || null, court_or_customer: data.recipientOrganization || null,
+  }) });
+  data.caseId = String(created.id);
+}
+if (documentUi.form) documentUi.form.addEventListener("submit", async (event) => {
+  event.preventDefault(); documentUi.error.textContent = "";
+  const button = documentUi.form.querySelector('button[type="submit"]');
+  button.disabled = true; button.textContent = "Собираем…";
+  try {
+    const data = collectDocumentData();
+    await ensureRefusalProject(data);
+    if (!data.caseId) throw new Error("Выберите проект");
+    const body = new FormData(); body.append("payload", JSON.stringify(data));
+    documentUi.fields.querySelectorAll('input[type="file"]').forEach((input) => {
+      for (const file of input.files || []) body.append("attachments", file, file.name);
+    });
+    const response = await fetch(`/api/documents/${encodeURIComponent(documentCurrentType.id)}/preview`, { method: "POST", body, credentials: "same-origin" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || `HTTP ${response.status}`);
+    documentUi.overlay.classList.add("hidden");
+    await openDocumentPreview(result);
+  } catch (err) { documentUi.error.textContent = err.message; }
+  finally { button.disabled = false; button.textContent = "Предпросмотр"; }
+});
+
+async function openDocumentPreview(draft) {
+  documentDraft = draft;
+  documentUi.previewTitle.textContent = draft.fileName;
+  documentUi.previewMount.innerHTML = '<div class="empty-hint" style="padding:24px">Открываем редактор…</div>';
+  documentUi.preview.classList.remove("hidden"); document.body.classList.add("no-scroll");
+  try {
+    const { config, scriptUrl } = await apiFetch(`/api/documents/preview/${encodeURIComponent(draft.draftId)}/editor`);
+    if (!window.DocsAPI) await loadExternalScript(scriptUrl);
+    documentUi.previewMount.innerHTML = '<div id="documentPreviewEditor"></div>';
+    documentEditor = new window.DocsAPI.DocEditor("documentPreviewEditor", config);
+  } catch (err) { documentUi.previewMount.innerHTML = `<div class="empty-hint">${escapeHtml(err.message)}</div>`; }
+}
+function destroyDocumentEditor() {
+  if (documentEditor?.destroyEditor) try { documentEditor.destroyEditor(); } catch { /* закрыт */ }
+  documentEditor = null; documentUi.previewMount.innerHTML = "";
+}
+if (documentUi.previewBack) documentUi.previewBack.addEventListener("click", async () => {
+  destroyDocumentEditor(); documentUi.preview.classList.add("hidden"); document.body.classList.remove("no-scroll");
+  if (documentDraft) {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    apiFetch(`/api/documents/preview/${encodeURIComponent(documentDraft.draftId)}`, { method: "DELETE" }).catch(() => {});
+    documentDraft = null;
+  }
+  documentUi.overlay.classList.remove("hidden");
+});
+if (documentUi.previewSave) documentUi.previewSave.addEventListener("click", async () => {
+  if (!documentDraft) return;
+  documentUi.previewSave.disabled = true; documentUi.previewSave.textContent = "Сохраняем…";
+  try {
+    // OnlyOffice отправляет последнюю правку при закрытии редактора.
+    destroyDocumentEditor();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const saved = await apiFetch(`/api/documents/preview/${encodeURIComponent(documentDraft.draftId)}/save`, { method: "POST", body: "{}" });
+    documentUi.preview.classList.add("hidden"); document.body.classList.remove("no-scroll");
+    showToast(`Документ «${saved.name}» сохранён`); documentDraft = null;
+  } catch (err) { alert("Не удалось сохранить документ: " + err.message); }
+  finally { documentUi.previewSave.disabled = false; documentUi.previewSave.textContent = "Сохранить в дело"; }
+});
+
 // Заголовок колонки открывает её корень обычной папкой. Своих кнопок
 // «Создать» у колонок больше нет — она одна, в левой панели, и кладёт
 // туда, где человек стоит. Значит к корню раздела нужен способ встать:
@@ -2939,7 +3152,7 @@ const ORIGIN_NOTE = {
   default: "",
 };
 
-/* ---------- Вкладка «Шаблон ГП» ----------
+/* ---------- Вкладка «Шаблоны документов» ----------
 
    Письма похожи, но не одинаковы: одному делу нужно письмо с
    приложением, другому короче и без стоимости. Поэтому образцов
@@ -2955,19 +3168,34 @@ const ORIGIN_NOTE = {
 
 let gpTemplateEditor = null;
 let gpTemplateState = { items: [], defaultId: null, max: 5 };
+let settingsTemplateType = "gp";
+let settingsTemplateTitle = "Гарантийное письмо";
+
+function templateAdminBase() {
+  return settingsTemplateType === "gp"
+    ? "/api/admin/gp-templates"
+    : `/api/admin/document-templates/${encodeURIComponent(settingsTemplateType)}`;
+}
 
 async function renderTemplateTab() {
-  const data = await apiFetch("/api/admin/gp-templates");
+  const catalog = await loadDocumentCatalog();
+  const choices = [{ id: "gp", title: "Гарантийное письмо" }, ...catalog.map((x) => ({ id: x.id, title: x.title }))];
+  const selected = choices.find((x) => x.id === settingsTemplateType) || choices[0];
+  settingsTemplateType = selected.id; settingsTemplateTitle = selected.title;
+  const data = await apiFetch(templateAdminBase());
   gpTemplateState = data;
   const left = data.max - data.items.length;
 
   settingsPane().innerHTML = `
-    <p class="access-note">Образец — это сам файл письма. Правится как обычный документ Word:
+    <label class="settings-field template-type-picker"><span class="settings-label">Вид документа</span>
+      <select id="settingsTemplateType">${choices.map((x) => `<option value="${escapeHtml(x.id)}"${x.id === settingsTemplateType ? " selected" : ""}>${escapeHtml(x.title)}</option>`).join("")}</select>
+    </label>
+    <p class="access-note">Образец — это сам файл документа. Он правится как обычный документ Word:
     текст, отступы, колонтитулы. Сохранение в редакторе сразу становится новым образцом.
-    При создании ГП выбирают, по какому собрать.</p>
+    При создании документа выбирают, по какому образцу его собрать.</p>
 
     <div class="row-between">
-      <b>Образцы писем</b>
+      <b>${escapeHtml(settingsTemplateTitle)}</b>
       <span class="access-hint">Занято ${data.items.length} из ${data.max}</span>
     </div>
 
@@ -2984,19 +3212,23 @@ async function renderTemplateTab() {
     <p class="access-note">Заводить, править, скачивать и удалять образцы может только
     администратор. Выбирать образец при создании письма — любой, кто письмо создаёт.</p>
 
-    <details class="tpl-tokens">
+    ${settingsTemplateType === "gp" ? `<details class="tpl-tokens">
       <summary>Что такое метки и какие бывают</summary>
       <p class="access-note">Метка — место, куда система подставляет данные проекта. Её текст
       менять нельзя, а вот двигать, переносить в другое место письма и оформлять — можно.</p>
       <table class="access-rules">
         <thead><tr><th>Метка</th><th>Что подставляется</th></tr></thead>
-        <tbody>${[...data.required, ...data.optional].map((r) => `
+        <tbody>${[...(data.required || []), ...(data.optional || [])].map((r) => `
           <tr><td class="access-path">${escapeHtml(r.token)}</td><td>${escapeHtml(r.what)}</td></tr>`).join("")}
         </tbody>
       </table>
-    </details>`;
+    </details>` : ""}`;
 
   wireTemplateTab();
+  document.getElementById("settingsTemplateType").addEventListener("change", (event) => {
+    settingsTemplateType = event.target.value;
+    renderTemplateTab().catch(settingsError);
+  });
 }
 
 function tplSampleHtml(item) {
@@ -3046,7 +3278,7 @@ function wireTemplateTab() {
   pane.querySelectorAll("[data-tpl-download]").forEach((b) =>
     b.addEventListener("click", () => {
       // Обычной ссылкой: файл отдаёт сервер, и проверку прав он делает сам.
-      window.location.href = `/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplDownload)}/download`;
+      window.location.href = `${templateAdminBase()}/${encodeURIComponent(b.dataset.tplDownload)}/download`;
     }));
 
   pane.querySelectorAll("[data-tpl-rename]").forEach((b) =>
@@ -3054,20 +3286,20 @@ function wireTemplateTab() {
       const id = b.dataset.tplRename;
       const next = prompt("Название образца:", nameOf(id));
       if (next === null) return;
-      await templateAction(`/api/admin/gp-templates/${encodeURIComponent(id)}`,
+      await templateAction(`${templateAdminBase()}/${encodeURIComponent(id)}`,
         { method: "PATCH", body: JSON.stringify({ name: next }) }, "Переименовано");
     }));
 
   pane.querySelectorAll("[data-tpl-default]").forEach((b) =>
     b.addEventListener("click", () => templateAction(
-      `/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplDefault)}`,
+      `${templateAdminBase()}/${encodeURIComponent(b.dataset.tplDefault)}`,
       { method: "PATCH", body: JSON.stringify({ isDefault: true }) },
       "Теперь этот образец предлагается первым")));
 
   pane.querySelectorAll("[data-tpl-back]").forEach((b) =>
     b.addEventListener("click", () => {
       if (!confirm(`Вернуть образец «${nameOf(b.dataset.tplBack)}» к тому, каким он был до последней правки?`)) return;
-      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplBack)}/reset`,
+      templateAction(`${templateAdminBase()}/${encodeURIComponent(b.dataset.tplBack)}/reset`,
         { method: "POST", body: JSON.stringify({ to: "backup" }) }, "Вернули прежнюю правку");
     }));
 
@@ -3075,14 +3307,14 @@ function wireTemplateTab() {
     b.addEventListener("click", () => {
       if (!confirm(`Вернуть исходный вид образца «${nameOf(b.dataset.tplReset)}»?\n\n` +
         "Нынешний уйдёт в копию «до правки» — вернуться можно.")) return;
-      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplReset)}/reset`,
+      templateAction(`${templateAdminBase()}/${encodeURIComponent(b.dataset.tplReset)}/reset`,
         { method: "POST", body: JSON.stringify({ to: "original" }) }, "Исходный образец возвращён");
     }));
 
   pane.querySelectorAll("[data-tpl-remove]").forEach((b) =>
     b.addEventListener("click", () => {
       if (!confirm(`Удалить образец «${nameOf(b.dataset.tplRemove)}»? Это необратимо.`)) return;
-      templateAction(`/api/admin/gp-templates/${encodeURIComponent(b.dataset.tplRemove)}`,
+      templateAction(`${templateAdminBase()}/${encodeURIComponent(b.dataset.tplRemove)}`,
         { method: "DELETE" }, "Образец удалён");
     }));
 
@@ -3091,7 +3323,7 @@ function wireTemplateTab() {
     if (name === null) return;
     // Новый делаем копией основного: почти всегда его и хотят немного
     // переделать, а не писать письмо с нуля.
-    await templateAction("/api/admin/gp-templates",
+    await templateAction(templateAdminBase(),
       { method: "POST", body: JSON.stringify({ name, fromId: gpTemplateState.defaultId }) },
       "Образец заведён — откройте и поправьте");
   });
@@ -3119,7 +3351,7 @@ async function openTemplateFullscreen(id) {
   const item = gpTemplateState.items.find((i) => i.id === id) || { name: "Образец" };
   const overlay = document.getElementById("tplFullscreen");
   document.getElementById("tplFullTitle").textContent =
-    `${item.name} — образец гарантийного письма`;
+    `${item.name} — ${settingsTemplateTitle}`;
   const mount = document.getElementById("tplFullMount");
   mount.innerHTML = '<div class="empty-hint" style="padding:24px;">Открываем редактор…</div>';
   overlay.classList.remove("hidden");
@@ -3127,7 +3359,7 @@ async function openTemplateFullscreen(id) {
 
   try {
     const { config, scriptUrl } = await apiFetch(
-      `/api/admin/gp-templates/${encodeURIComponent(id)}/editor`);
+      `${templateAdminBase()}/${encodeURIComponent(id)}/editor`);
     if (!window.DocsAPI) await loadExternalScript(scriptUrl);
     mount.innerHTML = '<div id="tplFullEditor"></div>';
     gpTemplateEditor = new window.DocsAPI.DocEditor("tplFullEditor", config);
@@ -3455,8 +3687,8 @@ async function fillGpTemplates() {
     const hint = document.getElementById("gpTemplateHint");
     if (hint) {
       hint.textContent = items.length > 1
-        ? `Заведено образцов: ${items.length}. Правятся в «Настройки → Шаблон ГП».`
-        : "Пока образец один. Ещё заводятся в «Настройки → Шаблон ГП».";
+        ? `Заведено образцов: ${items.length}. Правятся в «Настройки → Шаблоны документов».`
+        : "Пока образец один. Ещё заводятся в «Настройки → Шаблоны документов».";
     }
   } catch (err) {
     // Без списка форма всё равно должна работать: сервер возьмёт

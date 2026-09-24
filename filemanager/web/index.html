@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-08-31.7">
+<meta name="build" content="2026-09-24.1">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css">
 
@@ -63,7 +63,6 @@
         <button type="button" data-create="upload"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Загрузить файлы</button>
         <div class="create-menu-sep" id="createSideSep"></div>
         <button type="button" data-create="project" class="side-create-case"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>Новый проект</button>
-        <button type="button" data-create="gp" class="side-create-case"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Гарантийное письмо</button>
       </div>
     </div>
 
@@ -79,6 +78,30 @@
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M3 14h18"/></svg>
       <span>Журнал регистрации</span>
     </button>
+    <div class="side-documents">
+      <button class="side-document-create" id="documentMenuBtn" type="button" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 12v6M9 15h6"/></svg>
+        <span>Создать документ</span><span class="side-doc-arrow">›</span>
+      </button>
+      <div class="document-menu hidden" id="documentMenu">
+        <button type="button" data-document="gp">Гарантийное письмо</button>
+        <button type="button" data-document="contract_research">Договор на независимое исследование</button>
+        <button type="button" data-document="refusal">Отказное письмо</button>
+        <button type="button" data-document="stitch">Прошито и пронумеровано</button>
+        <div class="document-submenu">
+          <button type="button" class="document-submenu-btn">Ходатайства <span>›</span></button>
+          <div class="document-menu document-petitions">
+            <button type="button" data-document="petition_replace_expert">О замене эксперта</button>
+            <button type="button" data-document="petition_inspection">О проведении экспертного осмотра</button>
+            <button type="button" data-document="petition_extension">О продлении срока экспертизы</button>
+            <button type="button" data-document="petition_expand_experts">О расширении группы экспертов</button>
+            <button type="button" data-document="petition_request_evidence">Об истребовании доказательств</button>
+            <button type="button" data-document="petition_review_questions">Об ознакомлении с вопросами</button>
+            <button type="button" data-document="petition_video_hearing">Об участии в заседании по веб-конференции</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="side-sep"></div>
 
@@ -331,7 +354,7 @@
       <nav class="settings-tabs" id="settingsTabs">
         <button class="settings-tab active" data-tab="people" type="button">Сотрудники</button>
         <button class="settings-tab" data-tab="lists" type="button">Справочники</button>
-        <button class="settings-tab" data-tab="template" type="button">Шаблон ГП</button>
+        <button class="settings-tab" data-tab="template" type="button">Шаблоны документов</button>
         <button class="settings-tab" data-tab="planfix" type="button">Связь с Planfix</button>
       </nav>
       <div class="settings-pane" id="settingsPane"></div>
@@ -951,6 +974,49 @@
   <div class="tpl-full-mount" id="gpPreviewMount"></div>
 </div>
 
+<!-- Общая форма документов. Набор полей приходит из каталога сервера:
+     новые виды документов не требуют ещё одного отдельного окна. -->
+<div id="documentOverlay" class="modal-overlay hidden">
+  <div class="modal-panel document-form-panel">
+    <div class="modal-header">
+      <span id="documentFormTitle">Создать документ</span>
+      <button class="back-btn" id="documentCloseBtn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>Закрыть
+      </button>
+    </div>
+    <form id="documentForm" class="document-form">
+      <label>Проект
+        <select id="documentCaseSelect" required><option value="">Выберите проект…</option></select>
+      </label>
+      <div id="documentNewProject" class="document-new-project hidden">
+        <label>Название нового проекта
+          <input id="documentNewProjectName" type="text" placeholder="Название проекта для отказного письма">
+        </label>
+        <p class="field-hint">Если подходящего проекта ещё нет, оставьте список выше пустым. Проект будет создан автоматически.</p>
+      </div>
+      <label>Образец
+        <select id="documentTemplateSelect"></select>
+        <span class="field-hint">Образцы можно менять в «Настройки → Шаблоны документов».</span>
+      </label>
+      <div id="documentFields" class="document-fields"></div>
+      <p id="documentFormError" class="error-text"></p>
+      <div class="modal-actions"><button class="primary" type="submit">Предпросмотр</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="documentPreviewFull" class="tpl-full hidden">
+  <div class="tpl-full-bar">
+    <span class="tpl-full-title" id="documentPreviewTitle">Предпросмотр документа</span>
+    <span class="tpl-full-hint">Документ можно поправить вручную перед сохранением</span>
+    <span class="gp-preview-acts">
+      <button type="button" class="tpl-full-close" id="documentPreviewBack">Вернуться и изменить</button>
+      <button type="button" class="gp-preview-save" id="documentPreviewSave">Сохранить в дело</button>
+    </span>
+  </div>
+  <div class="tpl-full-mount" id="documentPreviewMount"></div>
+</div>
+
 <div id="gpOverlay" class="modal-overlay hidden">
   <div class="modal-panel" style="max-width:640px;">
     <div class="modal-header">
@@ -971,7 +1037,7 @@
       <div class="add-user-row">
         <label style="flex:1 1 100%;">Образец письма
           <select id="gpTemplateSelect"></select>
-          <span class="field-hint" id="gpTemplateHint">Образцы правятся в «Настройки → Шаблон ГП».</span>
+          <span class="field-hint" id="gpTemplateHint">Образцы правятся в «Настройки → Шаблоны документов».</span>
         </label>
       </div>
       <p class="row-subtitle" style="margin:-6px 0 0;">Файл сохранится прямо в этот проект («Планирование проекта / ГП»). Суд и номер дела подставятся из карточки проекта — их можно поправить вручную.</p>
