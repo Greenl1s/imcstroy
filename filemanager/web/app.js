@@ -442,7 +442,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-24.1";
+const APP_BUILD = "2026-09-24.2";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');

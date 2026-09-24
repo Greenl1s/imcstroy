@@ -491,28 +491,35 @@ button.primary:hover { background: #2569c9; }
 
 /* Создание типовых документов находится рядом с журналом: там человек
    уже работает с проектами и исходящими документами. */
-.side-documents { position: relative; margin: -4px 8px 8px 38px; }
+.side-documents { position: relative; margin: -1px 0 7px; }
 .side-document-create {
-  width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
-  color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; text-align: left;
+  width: 100%; min-height: 38px; display: flex; align-items: center; gap: 11px; padding: 0 10px;
+  border: 0; border-radius: var(--radius-sm); background: rgba(127,192,161,.10);
+  color: var(--rail-accent); font: inherit; font-size: 14px; font-weight: 500;
+  cursor: pointer; text-align: left; transition: background .12s ease, color .12s ease;
 }
-.side-document-create:hover { border-color: var(--accent); color: var(--accent); }
-.side-document-create svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.side-doc-arrow { margin-left: auto; font-size: 20px; line-height: 12px; }
+.side-document-create:hover,
+.side-document-create[aria-expanded="true"] { background: rgba(127,192,161,.18); color: var(--rail-text-strong); }
+.side-document-create svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.side-doc-arrow { margin-left: auto; color: var(--rail-text-muted); font-size: 18px; line-height: 1; transition: transform .12s ease; }
+.side-document-create[aria-expanded="true"] .side-doc-arrow { color: var(--rail-accent); transform: translateX(2px); }
 .document-menu {
-  position: absolute; z-index: 90; left: calc(100% + 8px); top: 0; width: 310px;
-  padding: 7px; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface); box-shadow: 0 12px 32px rgba(17, 35, 52, .18);
+  position: absolute; z-index: 90; left: calc(100% + 10px); top: -5px; width: 274px;
+  padding: 6px; border: 1px solid #3d4743; border-radius: 10px;
+  background: #29312f; color: var(--rail-text);
+  box-shadow: 0 10px 24px rgba(18,24,22,.28);
 }
 .document-menu > button, .document-submenu > button {
-  display: flex; justify-content: space-between; width: 100%; padding: 9px 10px;
-  border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit;
-  text-align: left; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 36px;
+  padding: 7px 10px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--rail-text); font: inherit; font-size: 13px; line-height: 1.25; text-align: left; cursor: pointer;
 }
-.document-menu button:hover { background: var(--bg-page); color: var(--accent); }
+.document-menu button:hover,
+.document-submenu.open > .document-submenu-btn { background: rgba(255,255,255,.08); color: var(--rail-text-strong); }
 .document-submenu { position: relative; }
-.document-petitions { left: calc(100% + 8px); top: -7px; display: none; }
+.document-submenu-btn { border-top: 1px solid rgba(255,255,255,.09) !important; margin-top: 3px; padding-top: 9px !important; color: var(--rail-accent) !important; }
+.document-submenu-btn span { color: var(--rail-text-muted); font-size: 17px; }
+.document-petitions { left: calc(100% + 8px); top: -6px; width: 296px; display: none; }
 .document-submenu:hover > .document-petitions, .document-submenu.open > .document-petitions { display: block; }
 
 .document-form-panel { max-width: 760px; }
@@ -541,9 +548,9 @@ button.primary:hover { background: #2569c9; }
 .template-type-picker { max-width: 560px; margin-bottom: 16px; }
 
 @media (max-width: 760px) {
-  .side-documents { margin-left: 8px; }
-  .document-menu { position: static; width: auto; margin-top: 6px; box-shadow: none; }
-  .document-petitions { position: static; margin: 5px 0 0 10px; border-left: 2px solid var(--border); border-radius: 6px; }
+  .side-documents { margin-left: 0; }
+  .document-menu { position: static; width: auto; margin-top: 5px; box-shadow: none; background: rgba(255,255,255,.04); }
+  .document-petitions { position: static; width: auto; margin: 4px 0 0 8px; border: 0; border-left: 2px solid rgba(127,192,161,.35); border-radius: 4px; background: transparent; }
   .document-submenu:hover > .document-petitions { display: none; }
   .document-submenu.open > .document-petitions { display: block; }
   .document-fields { grid-template-columns: 1fr; }
