@@ -554,6 +554,26 @@ function requireEquipmentAccess(req, res) {
   return true;
 }
 
+function requireEquipmentAdmin(req, res) {
+  if (!requireEquipmentAccess(req, res)) return false;
+  if (req.user.role !== "admin") {
+    res.status(403).json({ message: "Редактировать и удалять приборы может только администратор" });
+    return false;
+  }
+  return true;
+}
+
+const EQUIPMENT_EDITABLE = [
+  "inventory_no", "name", "serial_number", "model", "check_type", "control_type",
+  "company_code", "verification_date", "valid_until", "comment", "qty",
+];
+const EQUIPMENT_CHECK_TYPES = new Set(["verification", "calibration", "none"]);
+const equipmentNullify = (value) => String(value ?? "").trim() || null;
+const equipmentQty = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 999) : 1;
+};
+
 /**
  * Что за папка открыта и что о ней знает «Учёт».
  *
@@ -616,29 +636,30 @@ app.get("/api/equipment/companies", auth.requireAuth, async (req, res) => {
  */
 app.post("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
   try {
-    if (!requireEquipmentAccess(req, res)) return;
+    if (!requireEquipmentAdmin(req, res)) return;
     const body = req.body || {};
     const name = String(body.name || "").trim();
     if (!name) return res.status(400).json({ message: "Укажите название прибора" });
 
-    const nullify = (v) => {
-      const t = String(v ?? "").trim();
-      return t === "" ? null : t;
-    };
-    const CHECK_TYPES = ["verification", "calibration", "none"];
-    const check_type = CHECK_TYPES.includes(body.check_type) ? body.check_type : "verification";
+    const check_type = EQUIPMENT_CHECK_TYPES.has(body.check_type) ? body.check_type : "verification";
+    const qty = equipmentQty(body.qty);
+    if (check_type !== "none" && qty !== 1) {
+      return res.status(400).json({
+        message: "Для поверки или калибровки каждый экземпляр создаётся отдельной карточкой",
+      });
+    }
 
     const { rows } = await db.query(
       `INSERT INTO instruments
          (inventory_no, name, serial_number, model, check_type, control_type,
-          company_code, verification_date, valid_until, comment)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           company_code, verification_date, valid_until, comment, qty)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
       [
-        nullify(body.inventory_no), name, nullify(body.serial_number), nullify(body.model),
-        check_type, nullify(body.control_type), nullify(body.company_code),
-        nullify(body.verification_date), nullify(body.valid_until),
-        String(body.comment || "").trim(),
+        equipmentNullify(body.inventory_no), name, equipmentNullify(body.serial_number), equipmentNullify(body.model),
+        check_type, equipmentNullify(body.control_type), equipmentNullify(body.company_code),
+        equipmentNullify(body.verification_date), equipmentNullify(body.valid_until),
+        String(body.comment || "").trim(), qty,
       ]
     );
     const instrument = rows[0];
@@ -665,6 +686,108 @@ app.post("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
     }
     console.error("Оборудование: не удалось завести прибор:", err);
     res.status(500).json({ message: "Не удалось завести прибор: " + err.message });
+  }
+});
+
+/** Редактирование той же карточки, которую показывает «Учёт оборудования». */
+app.patch("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    const updates = EQUIPMENT_EDITABLE.filter((key) => Object.hasOwn(req.body || {}, key));
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Некорректный номер прибора" });
+    if (!updates.length) return res.status(400).json({ message: "Нет изменений для сохранения" });
+
+    const { rows: currentRows } = await db.query(
+      `SELECT i.*, COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
+                             WHERE h.instrument_id = i.id), 0) AS held_qty
+         FROM instruments i WHERE i.id = $1`, [id]
+    );
+    if (!currentRows.length) return res.status(404).json({ message: "Прибор не найден" });
+    const current = currentRows[0];
+    const nextCheck = updates.includes("check_type") && EQUIPMENT_CHECK_TYPES.has(req.body.check_type)
+      ? req.body.check_type : current.check_type;
+    const nextQty = updates.includes("qty") ? equipmentQty(req.body.qty) : equipmentQty(current.qty);
+    const changesMultiplicity = nextCheck !== current.check_type || nextQty !== equipmentQty(current.qty);
+    if (nextCheck !== "none" && nextQty !== 1 && changesMultiplicity) {
+      return res.status(409).json({
+        message: "Для поверки или калибровки каждый экземпляр должен иметь отдельную карточку",
+      });
+    }
+    if (nextQty < Number(current.held_qty || 0)) {
+      return res.status(409).json({ message: `На руках ${current.held_qty} шт. Сначала примите возврат.` });
+    }
+
+    const valueFor = (key) => {
+      if (key === "name") return String(req.body[key] || "").trim();
+      if (key === "comment") return String(req.body[key] || "").trim();
+      if (key === "qty") return nextQty;
+      if (key === "check_type") return EQUIPMENT_CHECK_TYPES.has(req.body[key]) ? req.body[key] : "verification";
+      return equipmentNullify(req.body[key]);
+    };
+    if (updates.includes("name") && !valueFor("name")) {
+      return res.status(400).json({ message: "Укажите название прибора" });
+    }
+    const casts = { check_type: "::check_type" };
+    const set = updates.map((key, index) => `${key} = $${index + 2}${casts[key] || ""}`).join(", ");
+    const { rows } = await db.query(
+      `UPDATE instruments SET ${set} WHERE id = $1 RETURNING *`,
+      [id, ...updates.map(valueFor)]
+    );
+    const instrument = rows[0];
+    await db.query(
+      `INSERT INTO history (instrument_id, instrument_name, action, actor_id, actor_name, note)
+       VALUES ($1, $2, 'update', $3, $4, $5)`,
+      [instrument.id, instrument.name, req.user.id, req.user.name || req.user.username,
+       "Карточка изменена из ИСУ"]
+    ).catch((err) => console.error("Оборудование: не удалось записать историю:", err.message));
+
+    await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
+    const { rows: fresh } = await db.query("SELECT * FROM instruments WHERE id = $1", [id]);
+    events.log(req.user, "instrument_update", { path: fresh[0].folder_path, name: instrument.name });
+    res.json({ instrument: fresh[0] });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ message: "Прибор с таким инвентарным номером уже есть" });
+    console.error("Оборудование: не удалось изменить прибор:", err);
+    res.status(500).json({ message: "Не удалось сохранить прибор: " + err.message });
+  }
+});
+
+/** Удаление карточки только из формы. Файлы синхронизация переносит в архив. */
+app.delete("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) => {
+  let client;
+  try {
+    if (!requireEquipmentAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    client = await db.connect();
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT * FROM instruments WHERE id = $1 FOR UPDATE", [id]);
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
+      return res.status(404).json({ message: "Прибор не найден" });
+    }
+    const instrument = rows[0];
+    await client.query(
+      `INSERT INTO history (instrument_id, instrument_name, action, actor_id, actor_name, note)
+       VALUES ($1, $2, 'delete', $3, $4, $5)`,
+      [instrument.id, instrument.name, req.user.id, req.user.name || req.user.username,
+       "Прибор удалён из ИСУ; папка сохранена в архиве"]
+    );
+    await client.query("DELETE FROM instruments WHERE id = $1", [id]);
+    await client.query("COMMIT");
+    client.release();
+    client = null;
+    await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
+    events.log(req.user, "delete", { path: instrument.folder_path, name: instrument.name });
+    res.json({ ok: true });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    console.error("Оборудование: не удалось удалить прибор:", err);
+    res.status(500).json({ message: "Не удалось удалить прибор: " + err.message });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -794,6 +917,13 @@ function rejectManagedExpertMutation(res, ...pathsToCheck) {
   res.status(409).json({
     message: "Папки и файлы экспертов изменяются только через форму «Редактировать эксперта»",
   });
+  return true;
+}
+
+function rejectManagedEquipmentFolderMutation(res, relPath) {
+  const reason = equipment.deleteGuard(relPath);
+  if (!reason) return false;
+  res.status(409).json({ message: reason });
   return true;
 }
 
@@ -1841,6 +1971,11 @@ app.get("/api/resources", auth.requireAuth, requireColumnAccess(), async (req, r
 app.post("/api/folder", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     if (rejectManagedExpertMutation(res, req.body?.path)) return;
+    if (String(req.body?.path || "").startsWith(equipment.EQUIPMENT_DIR + "/")) {
+      return res.status(409).json({
+        message: "Папки оборудования создаются автоматически из карточек приборов",
+      });
+    }
     await filesLib.ensureDir(req.body.path);
     events.log(req.user, "create_folder", { path: req.body.path, isDir: true });
     res.json({ ok: true });
@@ -1970,20 +2105,7 @@ app.post("/api/create-file", auth.requireAuth, requireColumnAccess({ write: true
 app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true }), async (req, res) => {
   try {
     if (rejectManagedExpertMutation(res, req.query.path)) return;
-    // Защита папок оборудования. Они — отражение «Учёта»: удалённая
-    // вернётся при следующей сверке, а снимки и свидетельства успеют
-    // уехать в корзину. Сотруднику отказываем совсем, администратору —
-    // только до явного подтверждения: бывает, что разобрать завал
-    // руками всё-таки нужно.
-    const guard = equipment.deleteGuard(req.query.path);
-    if (guard) {
-      if (req.user.role !== "admin") {
-        return res.status(403).json({ message: guard });
-      }
-      if (String(req.query.force || "") !== "1") {
-        return res.status(409).json({ message: guard, needsForce: true });
-      }
-    }
+    if (rejectManagedEquipmentFolderMutation(res, req.query.path)) return;
     await trash.moveToTrash(req.query.path, req.user.id);
     events.log(req.user, "delete", { path: req.query.path });
     // Удалили папку проекта — сам проект больше не должен предлагаться
@@ -2058,6 +2180,7 @@ app.post("/api/rename", auth.requireAuth, requireColumnAccess({ write: true }), 
       return res.status(400).json({ message: "Укажите путь и новое имя" });
     }
     if (rejectManagedExpertMutation(res, oldPath)) return;
+    if (rejectManagedEquipmentFolderMutation(res, oldPath)) return;
     const newPath = await filesLib.renameEntry(oldPath, newName);
     if (columnForPath(oldPath) === "cases") {
       await folderPermissions.renamePath(oldPath, newPath);
@@ -2086,6 +2209,7 @@ app.post("/api/move", auth.requireAuth, requireColumnAccess({ write: true }), as
       return res.status(400).json({ message: "Укажите путь и папку назначения" });
     }
     if (rejectManagedExpertMutation(res, sourcePath, destination)) return;
+    if (rejectManagedEquipmentFolderMutation(res, sourcePath)) return;
 
     const sourceColumn = columnForPath(sourcePath);
     const destColumn = columnForPath(destination);
@@ -2131,6 +2255,7 @@ app.post("/api/copy", auth.requireAuth, requireColumnAccess({ write: true }), as
       return res.status(400).json({ message: "Укажите путь и папку назначения" });
     }
     if (rejectManagedExpertMutation(res, sourcePath, destination)) return;
+    if (rejectManagedEquipmentFolderMutation(res, sourcePath)) return;
 
     const sourceColumn = columnForPath(sourcePath);
     const destColumn = columnForPath(destination);

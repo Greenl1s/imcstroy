@@ -293,9 +293,11 @@ function deleteGuard(relPath) {
 
   const rest = clean.slice(EQUIPMENT_DIR.length + 1).split("/");
 
-  // Архив держит папки уже удалённых приборов — их разбирают руками,
-  // и защищать там нечего.
-  if (rest[0] === ARCHIVE_DIRNAME) return null;
+  // Сам «Архив» — системная папка, а папки удалённых приборов внутри
+  // него уже можно разбирать руками.
+  if (rest[0] === ARCHIVE_DIRNAME) {
+    return rest.length === 1 ? "«Архив» — служебная папка оборудования, её нельзя удалить." : null;
+  }
 
   if (rest.length === 1) {
     return `Папка «${rest[0]}» — это классификация из «Учёта оборудования». ` +
@@ -303,7 +305,7 @@ function deleteGuard(relPath) {
   }
   if (rest.length === 2) {
     return `Папка «${rest[1]}» принадлежит прибору. ` +
-      "Удалите или спишите прибор в «Учёте оборудования» — папка уедет в архив вместе с файлами.";
+      "Откройте её и используйте форму «Редактировать прибор» — при удалении папка с файлами уедет в архив.";
   }
   if (rest.length === 3 && INSTRUMENT_SUBDIRS.includes(rest[2])) {
     return `«${rest[2]}» — служебная папка прибора, в неё складываются файлы из формы. ` +
@@ -472,8 +474,12 @@ function decorate(row, typesByCode) {
     taken_where: row.taken_where,
     taken_at: row.taken_at,
     check_type: row.check_type,
+    verification_date: row.verification_date,
     valid_until: row.valid_until,
+    comment: row.comment,
     control_type: row.control_type,
+    company_code: row.company_code,
+    folder_path: row.folder_path,
     control_type_name: type ? type.full_name : null,
     control_type_short: type ? type.short_name : null,
     has_photo_link: Boolean(row.photo_link_path),
