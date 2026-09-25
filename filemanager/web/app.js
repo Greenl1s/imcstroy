@@ -223,7 +223,7 @@ function formatWhen(ms) {
   return `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
-function sortEntries(entries, sortMode) {
+function sortEntries(entries, sortMode, basePath = "") {
   const [field, dir] = (sortMode || "name-asc").split("-");
   const mul = dir === "desc" ? -1 : 1;
   const byName = (a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }) * mul;
@@ -233,7 +233,16 @@ function sortEntries(entries, sortMode) {
     return byName(a, b);
   };
   // Папки всегда впереди файлов, но по дате сортируются на равных.
-  const folders = entries.filter((e) => e.isDir).sort(field === "date" ? byField : byName);
+  const folders = entries.filter((e) => e.isDir).sort((a, b) => {
+    // В корне оборудования служебные папки не должны разрывать список
+    // классификаций. Они всегда последние, независимо от сортировки.
+    if (basePath === "/База данных/Оборудование") {
+      const tail = (entry) => entry.name === "Архив" ? 2 : entry.name === "Не указано" ? 1 : 0;
+      const rank = tail(a) - tail(b);
+      if (rank) return rank;
+    }
+    return field === "date" ? byField(a, b) : byName(a, b);
+  });
   const files = entries.filter((e) => !e.isDir).sort(byField);
   return [...folders, ...files];
 }
@@ -442,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-24.3";
+const APP_BUILD = "2026-09-25.1";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -737,6 +746,7 @@ const EVENT_KINDS = {
   case_stage:  { label: "Смена стадии",        tone: "stage", text: (e) => `перевёл проект ${b(e.target_name)} на стадию ${stageChip(e.details)}` },
   case_cancel: { label: "Отмена проекта",      tone: "del",   text: (e) => `отменил проект ${b(e.target_name)}` },
   case_edit:   { label: "Правка проекта",      tone: "stage", text: (e) => `изменил карточку проекта ${b(e.target_name)}` },
+  instrument_update:{ label: "Правка прибора", tone: "edit",  text: (e) => `изменил карточку прибора ${b(e.target_name)}` },
   task_created:{ label: "Новая задача",        tone: "new",   text: (e) => `поставил задачу ${b(e.target_name)}` },
   task_done:   { label: "Задача завершена",    tone: "add",   text: (e) => `завершил задачу ${b(e.target_name)}` },
   task_changed:{ label: "Правка задачи",       tone: "stage", text: (e) => `изменил задачу ${b(e.target_name)}` },
@@ -1009,7 +1019,7 @@ async function updateEquipment(path) {
 
   equipmentHere = null;
   banner.classList.add("hidden");
-  if (button) button.classList.toggle("hidden", !inEquipment);
+  if (button) button.classList.toggle("hidden", !inEquipment || currentUser?.role !== "admin");
   // Архив наклеек — только в корне: он про все приборы сразу, и
   // предлагать его, стоя в папке одного прибора, было бы странно.
   const qrButton = document.getElementById("qrArchiveBtn");
@@ -1072,6 +1082,8 @@ function renderEquipmentBanner(info) {
       location.href = `${INSTRUMENTS_APP_URL}?id=${encodeURIComponent(info.instrument.id)}`;
     };
   }
+  const edit = document.getElementById("eqEditInstrument");
+  if (edit) edit.onclick = () => openInstrumentForm(info.instrument);
 }
 
 const EQ_STATUS = { free: "Свободен", busy: "Занят", booked: "Забронирован", retired: "Списан" };
@@ -1102,6 +1114,9 @@ function instrumentStripHtml(item) {
     ${eqVerificationHtml(item)}
     ${item.serial_number ? `<span class="eq-fact">с/н ${escapeHtml(item.serial_number)}</span>` : ""}
     <span class="eq-spacer"></span>
+    ${currentUser?.role === "admin"
+      ? '<button type="button" class="eq-btn eq-accent" id="eqEditInstrument">Редактировать</button>'
+      : ""}
     <button type="button" class="eq-btn eq-accent" id="eqOpenCard">Карточка в «Учёте» →</button>`;
 }
 
@@ -1167,17 +1182,45 @@ bind(document.getElementById("qrArchiveBtn"), "click", async (e) => {
   }
 });
 
-/* ---------- Форма «Добавить прибор» ---------- */
+/* ---------- Форма прибора: создание и редактирование ---------- */
 
 bind(document.getElementById("addInstrumentBtn"), "click", () => openInstrumentForm());
 bind(document.getElementById("instrumentCloseBtn"), "click", () => {
+  instrumentFormItem = null;
   document.getElementById("instrumentOverlay").classList.add("hidden");
 });
 
-async function openInstrumentForm() {
+let instrumentFormItem = null;
+
+function syncInstrumentQtyMode() {
+  const type = document.getElementById("instrumentCheckType").value;
+  const qty = document.getElementById("instrumentQty");
+  const hint = document.getElementById("instrumentQtyHint");
+  const auxiliary = type === "none";
+  qty.readOnly = !auxiliary;
+  if (!auxiliary && !instrumentFormItem) qty.value = "1";
+  hint.textContent = auxiliary
+    ? "Одинаковые вспомогательные приборы можно учитывать одной карточкой."
+    : "Для поверки и калибровки каждый экземпляр хранится отдельной карточкой.";
+}
+
+bind(document.getElementById("instrumentCheckType"), "change", syncInstrumentQtyMode);
+
+async function openInstrumentForm(item = null) {
+  if (!currentUser || currentUser.role !== "admin") {
+    return showToast("Редактировать приборы может только администратор");
+  }
+  instrumentFormItem = item;
   const form = document.getElementById("instrumentForm");
   form.reset();
   document.getElementById("instrumentError").textContent = "";
+  document.getElementById("instrumentFormTitle").textContent = item
+    ? `Редактировать прибор №${item.id}` : "Добавить прибор";
+  document.getElementById("instrumentSubmitBtn").textContent = item ? "Сохранить изменения" : "Добавить прибор";
+  document.getElementById("instrumentDeleteBtn").classList.toggle("hidden", !item);
+  document.getElementById("instrumentModeNote").innerHTML = item
+    ? `<b>Редактируется существующая карточка</b><span>${escapeHtml(item.name)}. Изменения сразу появятся и в «Учёте оборудования».</span>`
+    : "<b>Новая карточка прибора</b><span>После сохранения она появится в «Учёте оборудования», а здесь создастся её папка.</span>";
   document.getElementById("instrumentOverlay").classList.remove("hidden");
 
   if (!equipmentTypes.length) {
@@ -1193,17 +1236,30 @@ async function openInstrumentForm() {
   document.getElementById("instrumentCompany").innerHTML = '<option value="">Не привязан</option>' +
     equipmentCompanies.map((c) => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.name)}</option>`).join("");
 
+  if (item) {
+    for (const name of ["inventory_no", "name", "serial_number", "model", "check_type",
+      "control_type", "company_code", "verification_date", "valid_until", "comment", "qty"]) {
+      const field = form.elements[name];
+      if (!field) continue;
+      const raw = item[name];
+      field.value = name.includes("date") || name === "valid_until"
+        ? String(raw || "").slice(0, 10)
+        : String(raw ?? (name === "qty" ? 1 : ""));
+    }
+  }
+
   // Стоим внутри папки классификации — подставляем её: человек уже
   // сказал, куда кладёт прибор, спрашивать второй раз незачем.
   const hint = document.getElementById("instrumentTypeHint");
   hint.textContent = "";
-  if (equipmentHere && equipmentHere.kind === "classification") {
+  if (!item && equipmentHere && equipmentHere.kind === "classification") {
     const match = equipmentTypes.find((t) => t.full_name === equipmentHere.name);
     if (match) {
       typeSelect.value = match.code;
       hint.textContent = "Подставлена по папке, в которой вы стоите. Можно поменять — прибор попадёт в другую папку.";
     }
   }
+  syncInstrumentQtyMode();
   form.querySelector('[name="name"]').focus();
 }
 
@@ -1223,24 +1279,55 @@ bind(document.getElementById("instrumentForm"), "submit", async (e) => {
   const label = button.textContent;
   button.textContent = "Сохраняем…";
   try {
-    const { instrument } = await apiFetch("/api/equipment/instruments", {
-      method: "POST", body: JSON.stringify(data),
+    const { instrument } = await apiFetch(instrumentFormItem
+      ? `/api/equipment/instruments/${encodeURIComponent(instrumentFormItem.id)}`
+      : "/api/equipment/instruments", {
+      method: instrumentFormItem ? "PATCH" : "POST", body: JSON.stringify(data),
     });
     // Файлы идут той же загрузкой, что и всё остальное в системе.
-    // Первый снимок становится фотографией карточки — но только если
-    // своей у прибора ещё нет.
+    // Первый новый снимок становится фотографией карточки, первый новый
+    // документ — текущим свидетельством. Без выбранных файлов прежние
+    // ссылки остаются как были.
     await uploadInstrumentFiles(instrument.id, photos, "photo");
     await uploadInstrumentFiles(instrument.id, docs, "document");
 
     document.getElementById("instrumentOverlay").classList.add("hidden");
-    showToast(`Прибор «${instrument.name}» добавлен`);
+    showToast(instrumentFormItem
+      ? `Изменения прибора «${instrument.name}» сохранены`
+      : `Прибор «${instrument.name}» добавлен`);
+    instrumentFormItem = null;
     equipmentSyncedFor = null;
-    if (currentPath.startsWith(EQUIPMENT_PATH)) renderFolder(currentPath);
+    if (currentPath.startsWith(EQUIPMENT_PATH)) {
+      const target = instrument.folder_path || EQUIPMENT_PATH;
+      goToFolder(target, buildTrailExtending(
+        [{ label: "База данных", path: DB_PATH }], DB_PATH, target), true);
+    }
   } catch (err) {
     error.textContent = err.message;
   } finally {
     button.disabled = false;
     button.textContent = label;
+  }
+});
+
+bind(document.getElementById("instrumentDeleteBtn"), "click", async () => {
+  if (!instrumentFormItem || currentUser?.role !== "admin") return;
+  const item = instrumentFormItem;
+  if (!confirm(`Удалить прибор «${item.name}»?\n\nКарточка будет удалена, а папка с файлами переместится в «Оборудование / Архив».`)) return;
+  const button = document.getElementById("instrumentDeleteBtn");
+  button.disabled = true;
+  try {
+    await apiFetch(`/api/equipment/instruments/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    instrumentFormItem = null;
+    document.getElementById("instrumentOverlay").classList.add("hidden");
+    showToast(`Прибор «${item.name}» удалён, файлы сохранены в архиве`);
+    equipmentSyncedFor = null;
+    goToFolder(EQUIPMENT_PATH, buildTrailExtending(
+      [{ label: "База данных", path: DB_PATH }], DB_PATH, EQUIPMENT_PATH), true);
+  } catch (err) {
+    document.getElementById("instrumentError").textContent = err.message;
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -1363,6 +1450,7 @@ bind(els.expertForm, "submit", async (e) => {
 
 let expertInfoState = { name: null, items: [] };
 let expertInfoWanted = null;
+let expertInfoChoices = [];
 // Имя эксперта, если форму открыли из его папки: тогда переключаться
 // между экспертами нельзя — форма про него одного.
 let expertInfoOnly = null;
@@ -1381,6 +1469,7 @@ async function openExpertInfo(preselect, { only = false } = {}) {
   const who = document.getElementById("expertInfoWho");
   document.getElementById("expertInfoError").textContent = "";
   expertInfoOnly = only ? preselect : null;
+  document.getElementById("expertInfoSearch").value = "";
   // Из папки эксперта список «кого правим» не нужен: и так понятно.
   document.getElementById("expertInfoWhoWrap").classList.toggle("hidden", Boolean(expertInfoOnly));
   document.getElementById("expertInfoHead").textContent = expertInfoOnly
@@ -1407,16 +1496,40 @@ async function openExpertInfo(preselect, { only = false } = {}) {
       document.getElementById("expertInfoItems").innerHTML = "";
       return;
     }
-    who.innerHTML = experts
-      .map((e) => `<option value="${escapeHtml(e.name)}">${escapeHtml(e.name)}</option>`).join("");
-    if (keep && experts.some((e) => e.name === keep)) who.value = keep;
+    expertInfoChoices = experts;
+    renderExpertInfoChoices("", keep);
     await loadExpertInfo(who.value);
   } catch (err) {
     document.getElementById("expertInfoError").textContent = err.message;
   }
 }
 
+function renderExpertInfoChoices(query = "", preferred = "") {
+  const who = document.getElementById("expertInfoWho");
+  const needle = String(query || "").trim().toLocaleLowerCase("ru");
+  const matches = expertInfoChoices.filter((expert) =>
+    !needle || expert.name.toLocaleLowerCase("ru").includes(needle));
+  who.innerHTML = matches.length
+    ? matches.map((expert) => `<option value="${escapeHtml(expert.name)}">${escapeHtml(expert.name)}</option>`).join("")
+    : '<option value="">Ничего не найдено</option>';
+  if (preferred && matches.some((expert) => expert.name === preferred)) who.value = preferred;
+  document.getElementById("expertInfoWhoHint").textContent = matches.length
+    ? `Найдено: ${matches.length}. Выбран: ${who.value}.`
+    : "По этому запросу экспертов нет.";
+  return who.value;
+}
+
+bind(document.getElementById("expertInfoSearch"), "input", debounce(async (event) => {
+  const selected = renderExpertInfoChoices(event.target.value, expertInfoState.name);
+  if (selected && selected !== expertInfoState.name) {
+    try { await loadExpertInfo(selected); }
+    catch (err) { document.getElementById("expertInfoError").textContent = err.message; }
+  }
+}, 220));
+
 bind(document.getElementById("expertInfoWho"), "change", (e) => {
+  document.getElementById("expertInfoWhoHint").textContent = e.target.value
+    ? `Выбран: ${e.target.value}.` : "Выберите эксперта.";
   loadExpertInfo(e.target.value).catch((err) => {
     document.getElementById("expertInfoError").textContent = err.message;
   });
@@ -7750,7 +7863,7 @@ function groupProjectEntries(list, path) {
 
 function renderFolderRows() {
   const source = folderSearching ? folderSearchResults : currentFolderEntries;
-  const list = sortEntries(source, els.folderSortSelect.value);
+  const list = sortEntries(source, els.folderSortSelect.value, currentPath);
   // Считаем по самому пути, а не по началу "хлебных крошек": в папку можно
   // попасть по ссылке или из карточки проекта, и тогда крошки начинаются не
   // с корня "Дела", а кнопка доступа пропадала.
@@ -7998,13 +8111,14 @@ function showContextMenu(event, path, name, isDir, context) {
   // смене стадии проекта. Пункт меню показываем только вне "Дела".
   const inCases = context === "cases" || path.startsWith(CASES_PATH);
   const inExperts = path === EXPERTS_PATH || path.startsWith(EXPERTS_PATH + "/");
+  const equipmentFolder = isDir && (path === EQUIPMENT_PATH || path.startsWith(EQUIPMENT_PATH + "/"));
   ctxMenuEl.querySelector('[data-ctx-action="move"]').classList.toggle("hidden", inCases);
 
   // Справочник экспертов управляется формой: иначе переименование или
   // удаление папки обойдёт связи пунктов, сканов и сгенерированных файлов.
   for (const action of ["rename", "move", "copy", "delete"]) {
     ctxMenuEl.querySelector(`[data-ctx-action="${action}"]`)?.classList.toggle(
-      "hidden", inExperts || (action === "move" && inCases));
+      "hidden", inExperts || equipmentFolder || (action === "move" && inCases));
   }
 
   // Настройка персонального доступа есть только внутри "Дела" и только у
@@ -8104,23 +8218,14 @@ ctxMenuEl.querySelectorAll("[data-ctx-action]").forEach((btn) => {
 /**
  * Удаление с оглядкой на защищённые папки.
  *
- * Сервер сам решает, что защищено, и отвечает 409 с объяснением —
- * тогда спрашиваем ещё раз и повторяем с подтверждением. Сотруднику
- * сервер отвечает 403, и мы просто показываем, почему нельзя.
+ * Сервер сам решает, что защищено. Системные папки экспертов и
+ * оборудования не удаляются этим маршрутом даже администратором:
+ * для них есть отдельные формы, которые сохраняют связи с базой.
  */
 async function deleteResource(path) {
   try {
     return await apiFetch(`/api/resources?path=${encodeURIComponent(path)}`, { method: "DELETE" });
   } catch (err) {
-    if (err.status === 409 && err.data && err.data.needsForce) {
-      const ok = confirm(
-        err.data.message + "\n\n" +
-        "Вы администратор, поэтому удалить всё-таки можно. Папка вернётся при следующей сверке, " +
-        "а её содержимое окажется в корзине.\n\nУдалить?"
-      );
-      if (!ok) return null;
-      return apiFetch(`/api/resources?path=${encodeURIComponent(path)}&force=1`, { method: "DELETE" });
-    }
     throw err;
   }
 }

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-09-24.3">
+<meta name="build" content="2026-09-25.1">
 <title>ИСУ: Информационная система управления</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=20260925-1">
 
 <!-- Приложение: установка на устройство, работа без сети, уведомления.
      Один и тот же набор в трёх системах — адрес у них общий, значит и
@@ -793,48 +793,69 @@
 </div>
 
 <div id="instrumentOverlay" class="modal-overlay hidden">
-  <div class="modal-panel" style="max-width:620px;">
+  <div class="modal-panel instrument-panel">
     <div class="modal-header">
-      <span>Добавить прибор</span>
+      <span id="instrumentFormTitle">Добавить прибор</span>
       <button class="back-btn" id="instrumentCloseBtn" type="button">
         <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
         Закрыть
       </button>
     </div>
-    <form id="instrumentForm" style="display:flex; flex-direction:column; gap:12px; max-height:70vh; overflow-y:auto; padding-right:4px;">
-      <label>Инвентарный номер (необязательно)<input type="text" name="inventory_no" maxlength="60"></label>
-      <label>Название<input type="text" name="name" required maxlength="200"></label>
-      <label>Серийный номер<input type="text" name="serial_number" maxlength="120"></label>
-      <label>Модель<input type="text" name="model" maxlength="120"></label>
-      <label>Тип метрологического контроля
-        <select name="check_type">
-          <option value="verification">Поверка</option>
-          <option value="calibration">Калибровка</option>
-          <option value="none">Не требуется</option>
-        </select>
-      </label>
-      <label>Классификация
-        <select name="control_type" id="instrumentControlType"><option value="">Не указано</option></select>
-        <span class="field-hint" id="instrumentTypeHint"></span>
-      </label>
-      <label>Владелец
-        <select name="company_code" id="instrumentCompany"><option value="">Не привязан</option></select>
-      </label>
-      <label>Дата поверки/калибровки<input type="date" name="verification_date"></label>
-      <label>Действительно до<input type="date" name="valid_until"></label>
-      <label>Комментарий<input type="text" name="comment" maxlength="500"></label>
+    <form id="instrumentForm" class="instrument-form">
+      <div id="instrumentModeNote" class="instrument-mode-note"></div>
+      <section class="instrument-form-section">
+        <h3>Основные данные</h3>
+        <div class="instrument-form-grid">
+          <label class="instrument-name-field">Название<input type="text" name="name" required maxlength="200"></label>
+          <label>Модель<input type="text" name="model" maxlength="120"></label>
+          <label>Инвентарный номер <span class="field-hint">необязательно</span><input type="text" name="inventory_no" maxlength="60"></label>
+          <label>Серийный номер<input type="text" name="serial_number" maxlength="120"></label>
+          <label>Классификация
+            <select name="control_type" id="instrumentControlType"><option value="">Не указано</option></select>
+            <span class="field-hint" id="instrumentTypeHint"></span>
+          </label>
+          <label>Владелец
+            <select name="company_code" id="instrumentCompany"><option value="">Не привязан</option></select>
+          </label>
+        </div>
+      </section>
 
-      <label>Фото прибора
-        <input type="file" id="instrumentPhotos" accept="image/*" multiple>
-        <span class="field-hint">Лягут в подпапку «Изображения». Первое станет фотографией карточки в «Учёте».</span>
-      </label>
-      <label>Фото документа поверки/калибровки
-        <input type="file" id="instrumentDocs" multiple>
-        <span class="field-hint">Лягут в подпапку «Поверка».</span>
-      </label>
+      <section class="instrument-form-section">
+        <h3>Наличие и метрологический контроль</h3>
+        <div class="instrument-form-grid">
+          <label>Тип контроля
+            <select name="check_type" id="instrumentCheckType">
+              <option value="verification">Поверка</option>
+              <option value="calibration">Калибровка</option>
+              <option value="none">Не требуется</option>
+            </select>
+          </label>
+          <label>Наличие, шт.
+            <input type="number" name="qty" id="instrumentQty" min="1" max="999" value="1" inputmode="numeric">
+            <span class="field-hint" id="instrumentQtyHint"></span>
+          </label>
+          <label>Дата поверки/калибровки<input type="date" name="verification_date"></label>
+          <label>Действительно до<input type="date" name="valid_until"></label>
+          <label class="instrument-wide-field">Комментарий<textarea name="comment" maxlength="500" rows="3"></textarea></label>
+        </div>
+      </section>
 
+      <section class="instrument-form-section">
+        <h3>Фотографии и свидетельство</h3>
+        <div class="instrument-form-files">
+          <label>Фото прибора
+            <input type="file" id="instrumentPhotos" accept="image/*" multiple>
+            <span class="field-hint">Первое новое фото станет фотографией карточки. Если ничего не выбирать, текущее фото сохранится.</span>
+          </label>
+          <label>Документ поверки/калибровки
+            <input type="file" id="instrumentDocs" multiple>
+            <span class="field-hint">Первый новый файл станет документом карточки. Если ничего не выбирать, текущий документ сохранится.</span>
+          </label>
+        </div>
+      </section>
       <p class="error-text" id="instrumentError"></p>
-      <div class="modal-actions">
+      <div class="modal-actions instrument-form-actions">
+        <button class="link-btn instrument-delete hidden" type="button" id="instrumentDeleteBtn">Удалить прибор</button>
         <button class="primary" type="submit" id="instrumentSubmitBtn">Сохранить</button>
       </div>
     </form>
@@ -885,10 +906,16 @@
       <!-- Выбор эксперта прячется, когда форму открыли из папки самого
            эксперта: там уже понятно, о ком речь, и лишний список только
            даёт повод случайно уехать не туда. -->
-      <label id="expertInfoWhoWrap">Эксперт
+      <section id="expertInfoWhoWrap" class="expert-picker-hero">
+        <div class="expert-picker-step">1</div>
+        <div class="expert-picker-fields">
+        <label>Выберите эксперта для редактирования
+          <input id="expertInfoSearch" type="search" autocomplete="off" placeholder="Начните вводить фамилию">
+        </label>
         <select id="expertInfoWho"></select>
-        <span class="field-hint">Список — это папки в «Базе данных / Эксперты».</span>
-      </label>
+        <span class="field-hint" id="expertInfoWhoHint">После выбора ниже откроются сведения выбранного эксперта.</span>
+        </div>
+      </section>
 
       <label>ФИО эксперта
         <span class="settings-row">
@@ -1366,6 +1393,6 @@
   </div>
 </div>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=20260925-1"></script>
 </body>
 </html>

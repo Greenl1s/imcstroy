@@ -2534,13 +2534,42 @@ a.upload-btn { text-decoration: none; }
 .eq-btn:hover { border-color: var(--accent); color: var(--accent-on-tint); }
 .eq-accent { border-color: var(--accent); color: var(--accent-on-tint); font-weight: 600; }
 
-#instrumentForm input[type="file"] { font-size: 13px; padding: 6px 0; }
-#instrumentForm .modal-actions { padding-bottom: 4px; }
+.instrument-panel { width: min(900px, calc(100vw - 32px)); max-width: 900px; max-height: calc(100vh - 32px); }
+.instrument-form {
+  display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 120px);
+  overflow-y: auto; padding-right: 6px;
+}
+.instrument-mode-note {
+  display: grid; gap: 3px; padding: 12px 14px; border: 1px solid var(--accent);
+  border-radius: 10px; background: var(--accent-bg); color: var(--text-secondary);
+}
+.instrument-mode-note b { color: var(--text-primary); }
+.instrument-form-section {
+  padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card);
+}
+.instrument-form-section h3 { margin: 0 0 12px; font-size: 15px; }
+.instrument-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.instrument-form-grid label { align-content: start; }
+.instrument-form-grid .instrument-name-field, .instrument-form-grid .instrument-wide-field { grid-column: 1 / -1; }
+.instrument-form-files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+#instrumentForm input[type="file"] { font-size: 13px; padding: 7px; background: var(--bg-subtle); }
+#instrumentForm textarea { resize: vertical; min-height: 78px; }
+#instrumentQty[readonly] { background: var(--bg-subtle); color: var(--text-muted); }
+.instrument-form-actions {
+  position: sticky; bottom: 0; z-index: 2; padding: 12px 0 2px;
+  background: var(--bg-card); border-top: 1px solid var(--border);
+}
+.instrument-delete { margin-right: auto; color: var(--danger); }
 
 @media (max-width: 720px) {
   .eq-banner { gap: 8px; }
   .eq-spacer { display: none; }
   .eq-btn { flex: 1 1 auto; }
+  .instrument-panel { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .instrument-form-grid, .instrument-form-files { grid-template-columns: 1fr; }
+  .instrument-form-grid .instrument-name-field, .instrument-form-grid .instrument-wide-field { grid-column: auto; }
+  .instrument-form-actions { flex-wrap: wrap; }
+  .instrument-form-actions .primary { flex: 1 1 100%; order: -1; }
 }
 
 /* ============================================================
@@ -2961,6 +2990,25 @@ body.no-scroll { overflow: hidden; }
   display: flex; flex-direction: column; gap: 14px;
   max-height: calc(100vh - 120px); overflow-y: auto; padding-right: 6px;
 }
+.expert-picker-hero {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px;
+  padding: 14px; border: 2px solid var(--accent); border-radius: 12px;
+  background: var(--accent-bg);
+}
+.expert-picker-step {
+  width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 17px; font-weight: 700;
+}
+.expert-picker-fields {
+  display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr);
+  gap: 8px 12px; align-items: end;
+}
+.expert-picker-fields label { font-weight: 700; }
+#expertInfoWho {
+  min-height: 46px; border: 2px solid var(--accent); background: var(--bg-card);
+  font-size: 15px; font-weight: 650;
+}
+.expert-picker-fields .field-hint { grid-column: 1 / -1; }
 .expert-info-actions {
   position: sticky; bottom: 0; z-index: 2;
   padding: 12px 0 2px; background: var(--bg-card);
@@ -3006,6 +3054,10 @@ body.no-scroll { overflow: hidden; }
 @media (max-width: 620px) {
   .expert-info-panel { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
   .expert-info-body { max-height: calc(100vh - 100px); }
+  .expert-picker-hero { grid-template-columns: 30px minmax(0, 1fr); padding: 10px; }
+  .expert-picker-step { width: 30px; height: 30px; font-size: 14px; }
+  .expert-picker-fields { grid-template-columns: 1fr; }
+  .expert-picker-fields .field-hint { grid-column: auto; }
   .ei-scan-card { grid-template-columns: 82px minmax(0, 1fr); min-width: 100%; }
   .ei-scan-preview { width: 82px; height: 82px; }
   .ei-scan-preview img { max-width: 68px; max-height: 68px; }
