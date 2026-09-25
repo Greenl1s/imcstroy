@@ -769,43 +769,6 @@ function showRetired() {
 // ---------- Меню экспорта в Excel ----------
 
 
-/* ---------- Раскладка QR-кодов по папкам приборов ---------- */
-
-/**
- * Раньше эта кнопка рисовала QR-коды в браузере и складывала их плоским
- * списком в общую папку «Оборудование/QR-код»: найти там нужный можно
- * было только по имени, а имена приборов повторяются, и файлы молча
- * затирали друг друга. Плюс перед каждой выгрузкой папка вычищалась —
- * то есть всё, что туда положили руками, пропадало.
- *
- * Теперь QR-код лежит в папке своего прибора и появляется там сам.
- * Кнопка осталась для одного случая: адрес сайта поменялся, и коды надо
- * перерисовать. Рисует их сервер ИСУ — он один знает, где чья папка,
- * и знает настоящий адрес сайта.
- */
-async function exportAllQrCodes() {
-  if (!confirm(
-    'Перерисовать QR-коды всех приборов?\n\n' +
-    'Каждый код ляжет в папку своего прибора в ИСУ. ' +
-    'Ничего постороннего не удаляется.'
-  )) return;
-
-  const base = window.FILEMANAGER_BASE || '';
-  try {
-    const res = await fetch(`${base}/api/equipment/qr-rebuild`, {
-      method: 'POST', credentials: 'include',
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || `HTTP ${res.status}`);
-    }
-    const { count } = await res.json();
-    toast(`Готово: QR-кодов разложено по папкам — ${count}`);
-  } catch (err) {
-    toast('Не удалось разложить QR-коды: ' + err.message, true);
-  }
-}
-
 /**
  * PNG того же QR-кода, что показывает карточка прибора.
  *
@@ -1105,10 +1068,6 @@ function bindMenu() {
   document.getElementById('exportExpiringButton').onclick = () => {
     dropdown.classList.add('hidden');
     exportExpiringInstruments();
-  };
-  document.getElementById('exportQrButton').onclick = () => {
-    dropdown.classList.add('hidden');
-    exportAllQrCodes();
   };
   document.getElementById('downloadQrButton').onclick = () => {
     dropdown.classList.add('hidden');
