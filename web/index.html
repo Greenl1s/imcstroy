@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Учет оборудования</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./style.css?v=20260924-1">
+  <link rel="stylesheet" href="./style.css?v=20260925-1">
 
 <!-- Приложение: установка на устройство, работа без сети, уведомления.
      Один и тот же набор в трёх системах — адрес у них общий, значит и
@@ -83,11 +83,10 @@
               <div class="menu-divider"></div>
               <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
               <button id="exportExpiringButton" type="button">Окончание поверок</button>
-              <!-- Скачать — это забрать архив себе. Выгрузить — разложить
-                   коды по папкам приборов в ИСУ. Разные действия, поэтому
-                   и названия разные, и стоят они рядом. -->
+              <!-- Общая ручная выгрузка в ИСУ больше не нужна: код каждого
+                   прибора создаётся в его папке автоматически. Архив оставлен
+                   только для разовой печати наклеек. -->
               <button id="downloadQrButton" type="button">Скачать все QR-коды</button>
-              <button id="exportQrButton" type="button">Выгрузить все QR-коды</button>
               <div class="menu-divider mobile-menu-only"></div>
               <button id="mobileLogoutButton" class="mobile-menu-only menu-danger" type="button">Выйти</button>
             </div>
@@ -176,6 +175,6 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.iife.js"></script>
-  <script type="module" src="./js/app.js?v=20260924-1"></script>
+  <script type="module" src="./js/app.js?v=20260925-1"></script>
 </body>
 </html>
