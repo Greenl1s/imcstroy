@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-25.2";
+const APP_BUILD = "2026-09-25.3";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -6683,7 +6683,7 @@ let journalRowsShown = [];   // что сейчас на экране: из эт
 
 const journalFilters = {
   q: "", stage: "any", outcome: "any", type: "any",
-  org: "any", expType: "any", year: "any", manager: "any",
+  org: "any", expType: "any", year: "any", manager: "any", expert: "any",
 };
 
 /**
@@ -6714,7 +6714,7 @@ const JOURNAL_COLUMNS = [
   { key: "year",              title: "Год",                    edit: "list:years", width: 76, filter: "year" },
   { key: "description",       title: "Описание",               edit: "text", width: 240 },
   { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150, filter: "manager" },
-  { key: "experts",           title: "Специалисты / Эксперты", edit: "experts", width: 200 },
+  { key: "experts",           title: "Специалисты / Эксперты", edit: "experts", width: 200, filter: "expert" },
   { key: "court_or_customer", title: "Заказчик",               edit: "text", width: 230 },
   { key: "case_number",       title: "№ дела или договора",    edit: "text", width: 160 },
   { key: "party1",            title: "Сторона 1",              edit: "text", width: 170, court: true },
@@ -6776,7 +6776,22 @@ function journalFilterOptions(key) {
   if (key === "manager") {
     return all.concat((journalData?.managers || []).map((m) => ({ value: String(m.id), label: m.name })));
   }
+  if (key === "expert") {
+    // В списке остаются и действующие сотрудники, и имена из старых
+    // проектов. Иначе после увольнения человека нельзя было бы найти
+    // его завершённые экспертизы.
+    const names = [
+      ...(journalData?.experts || []).map((person) => person.name),
+      ...(journalData?.rows || []).flatMap((row) => journalExpertNames(row.experts)),
+    ];
+    return plain([...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")));
+  }
   return all;
+}
+
+/** Имена в базе хранятся одной строкой через запятую. */
+function journalExpertNames(value) {
+  return String(value || "").split(",").map((name) => name.trim()).filter(Boolean);
 }
 
 /** Подпись выбранного значения — для плашек «что отобрано». */
@@ -6813,6 +6828,7 @@ function journalFiltered() {
     if (journalFilters.expType !== "any" && String(r.expertise_type || "") !== journalFilters.expType) return false;
     if (journalFilters.year !== "any" && String(r.year || "") !== journalFilters.year) return false;
     if (journalFilters.manager !== "any" && String(r.manager_id || "") !== journalFilters.manager) return false;
+    if (journalFilters.expert !== "any" && !journalExpertNames(r.experts).includes(journalFilters.expert)) return false;
 
     if (!q) return true;
     // Поиск идёт по тем же полям, по которым человек ищет глазами.
@@ -7059,7 +7075,7 @@ function renderJournalFoot() {
 
 function journalHasFilters() {
   return journalFilters.q.trim() !== "" ||
-    ["stage", "outcome", "type", "org", "expType", "year", "manager"]
+    ["stage", "outcome", "type", "org", "expType", "year", "manager", "expert"]
       .some((k) => journalFilters[k] !== "any");
 }
 
@@ -7079,6 +7095,7 @@ function renderJournalApplied() {
   add("expType", "Тип экспертизы");
   add("year", "Год");
   add("manager", "Руководитель");
+  add("expert", "Специалист / эксперт");
 
   if (!items.length) return (node.innerHTML = "");
   node.innerHTML = items.map(([key, title, value]) =>
