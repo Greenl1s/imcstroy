@@ -2535,6 +2535,26 @@ a.upload-btn { text-decoration: none; }
 .eq-accent { border-color: var(--accent); color: var(--accent-on-tint); font-weight: 600; }
 
 .instrument-panel { width: min(900px, calc(100vw - 32px)); max-width: 900px; max-height: calc(100vh - 32px); }
+.instrument-picker-panel { width: min(680px, calc(100vw - 32px)); max-width: 680px; }
+.instrument-picker-panel .modal-header > div { display: flex; flex-direction: column; gap: 3px; }
+.instrument-picker-panel .modal-header small { color: var(--text-muted); font-size: var(--fs-meta); font-weight: 500; }
+.instrument-picker-combo { padding: 16px 18px 18px; }
+.instrument-picker-results {
+  max-height: min(52vh, 460px); margin-top: 8px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--surface);
+}
+.instrument-picker-item {
+  width: 100%; display: flex; flex-direction: column; gap: 5px; padding: 12px 14px;
+  border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.instrument-picker-item:last-child { border-bottom: 0; }
+.instrument-picker-item:hover, .instrument-picker-item:focus-visible { background: var(--accent-bg); outline: none; }
+.instrument-picker-main { display: flex; align-items: baseline; gap: 7px; }
+.instrument-picker-main b { font-size: 15px; }
+.instrument-picker-id, .instrument-picker-meta { color: var(--text-muted); font-size: var(--fs-meta); }
+.instrument-picker-empty { padding: 24px 14px; color: var(--text-muted); text-align: center; }
+.instrument-picker-error { color: var(--danger); }
 .instrument-form {
   display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 120px);
   overflow-y: auto; padding-right: 6px;

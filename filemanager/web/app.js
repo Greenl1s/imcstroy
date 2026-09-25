@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-25.1";
+const APP_BUILD = "2026-09-25.2";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -1015,11 +1015,13 @@ let equipmentCompanies = [];
 async function updateEquipment(path) {
   const banner = document.getElementById("equipmentBanner");
   const button = document.getElementById("addInstrumentBtn");
+  const editButton = document.getElementById("editInstrumentsBtn");
   const inEquipment = path === EQUIPMENT_PATH || path.startsWith(EQUIPMENT_PATH + "/");
 
   equipmentHere = null;
   banner.classList.add("hidden");
   if (button) button.classList.toggle("hidden", !inEquipment || currentUser?.role !== "admin");
+  if (editButton) editButton.classList.add("hidden");
   // Архив наклеек — только в корне: он про все приборы сразу, и
   // предлагать его, стоя в папке одного прибора, было бы странно.
   const qrButton = document.getElementById("qrArchiveBtn");
@@ -1032,6 +1034,8 @@ async function updateEquipment(path) {
     return; // раздела «Учёт» может не быть в этой базе — молча живём дальше
   }
   if (!equipmentHere) return;
+  if (editButton) editButton.classList.toggle("hidden",
+    currentUser?.role !== "admin" || !["root", "classification"].includes(equipmentHere.kind));
   renderEquipmentBanner(equipmentHere);
   // Раскладка могла измениться (сверка в корне) — перечитываем список.
   if (equipmentHere.kind === "root" && currentPath === path) renderFolderAfterSync(path);
@@ -1185,12 +1189,85 @@ bind(document.getElementById("qrArchiveBtn"), "click", async (e) => {
 /* ---------- Форма прибора: создание и редактирование ---------- */
 
 bind(document.getElementById("addInstrumentBtn"), "click", () => openInstrumentForm());
+bind(document.getElementById("editInstrumentsBtn"), "click", openInstrumentPicker);
+bind(document.getElementById("instrumentPickerCloseBtn"), "click", closeInstrumentPicker);
+bind(document.getElementById("instrumentPickerOverlay"), "click", (event) => {
+  if (event.target.id === "instrumentPickerOverlay") closeInstrumentPicker();
+});
+bind(document.getElementById("instrumentPickerSearch"), "input", renderInstrumentPickerResults);
 bind(document.getElementById("instrumentCloseBtn"), "click", () => {
   instrumentFormItem = null;
   document.getElementById("instrumentOverlay").classList.add("hidden");
 });
 
 let instrumentFormItem = null;
+let instrumentPickerItems = [];
+
+function closeInstrumentPicker() {
+  document.getElementById("instrumentPickerOverlay").classList.add("hidden");
+}
+
+async function openInstrumentPicker() {
+  if (currentUser?.role !== "admin") return showToast("Редактировать приборы может только администратор");
+  const overlay = document.getElementById("instrumentPickerOverlay");
+  const search = document.getElementById("instrumentPickerSearch");
+  const results = document.getElementById("instrumentPickerResults");
+  const scope = document.getElementById("instrumentPickerScope");
+  const classification = equipmentHere?.kind === "classification"
+    ? { code: equipmentHere.code ?? "", full_name: equipmentHere.name }
+    : null;
+
+  overlay.classList.remove("hidden");
+  search.value = "";
+  search.disabled = true;
+  results.innerHTML = '<div class="instrument-picker-empty">Загружаем приборы…</div>';
+  scope.textContent = classification
+    ? `Классификация: ${classification.full_name}`
+    : "Все классификации";
+  try {
+    const query = classification ? `?control_type=${encodeURIComponent(classification.code)}` : "";
+    instrumentPickerItems = (await apiFetch(`/api/equipment/instruments${query}`)).instruments || [];
+    search.disabled = false;
+    renderInstrumentPickerResults();
+    search.focus();
+  } catch (err) {
+    results.innerHTML = `<div class="instrument-picker-empty instrument-picker-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderInstrumentPickerResults() {
+  const search = document.getElementById("instrumentPickerSearch");
+  const results = document.getElementById("instrumentPickerResults");
+  if (!search || !results) return;
+  const words = search.value.trim().toLocaleLowerCase("ru").split(/\s+/).filter(Boolean);
+  const filtered = instrumentPickerItems.filter((item) => {
+    const haystack = [item.name, item.model, item.serial_number, item.inventory_no,
+      item.control_type_name, item.control_type_short, item.id].filter(Boolean).join(" ").toLocaleLowerCase("ru");
+    return words.every((word) => haystack.includes(word));
+  });
+  if (!filtered.length) {
+    results.innerHTML = '<div class="instrument-picker-empty">Приборы не найдены</div>';
+    return;
+  }
+  results.innerHTML = filtered.map((item, index) => `
+    <button class="instrument-picker-item" type="button" role="option" data-picker-index="${index}">
+      <span class="instrument-picker-main">
+        <b>${escapeHtml(item.name)}</b><span class="instrument-picker-id">№${item.id}</span>
+      </span>
+      <span class="instrument-picker-meta">${[
+        item.model, item.serial_number ? `с/н ${item.serial_number}` : "",
+        item.inventory_no ? `инв. ${item.inventory_no}` : "", item.control_type_short || item.control_type_name || "Не указано",
+        item.status === "retired" ? "Списан" : "",
+      ].filter(Boolean).map(escapeHtml).join(" · ")}</span>
+    </button>`).join("");
+  results.querySelectorAll("[data-picker-index]").forEach((button) => {
+    button.onclick = () => {
+      const item = filtered[Number(button.dataset.pickerIndex)];
+      closeInstrumentPicker();
+      openInstrumentForm(item);
+    };
+  });
+}
 
 function syncInstrumentQtyMode() {
   const type = document.getElementById("instrumentCheckType").value;
