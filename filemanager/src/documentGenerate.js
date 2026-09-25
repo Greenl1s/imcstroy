@@ -50,7 +50,13 @@ function numberWords(raw) {
 function paragraph(xml, token) {
   const at = xml.indexOf(token);
   if (at < 0) throw Object.assign(new Error(`В образце отсутствует метка ${token}`), { status: 400 });
-  const start = xml.lastIndexOf("<w:p", at);
+  // Нельзя использовать lastIndexOf("<w:p"): он находит ближайший
+  // <w:pPr> (настройки абзаца), и в итог попадает кусок без открывающего
+  // <w:p>. Word затем считает весь документ повреждённым. Ищем именно
+  // открывающий тег абзаца: <w:p> или <w:p ...>.
+  let start = -1;
+  const openings = xml.slice(0, at + 1).matchAll(/<w:p(?=[\s>])/g);
+  for (const match of openings) start = match.index;
   const end = xml.indexOf("</w:p>", at) + 6;
   if (start < 0 || end < 6) throw new Error(`Не удалось найти абзац ${token}`);
   return { start, end, xml: xml.slice(start, end) };

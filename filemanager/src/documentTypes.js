@@ -32,7 +32,7 @@ const TYPES = {
     fields: [
       ["recipientOrganization", "Организация получателя", "text", true],
       ["recipientPerson", "Получатель: должность и ФИО", "text", true],
-      ["recipientGreeting", "Обращение", "text", true],
+      ["recipientGreeting", "Имя и отчество для обращения (без «Уважаемый»)", "text", true],
       ["caseNumber", "Номер дела / запроса", "text", true],
       ["expertiseType", "Вид экспертизы", "text", true],
       ["executorName", "Исполнитель", "text", true],

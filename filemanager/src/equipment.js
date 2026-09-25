@@ -134,6 +134,34 @@ async function loadInstruments() {
 }
 
 /**
+ * Полный список карточек для формы редактирования в ИСУ.
+ *
+ * Фильтрация по классификации выполняется в базе, а не по названию папки:
+ * название можно поменять, код классификации остаётся однозначным.
+ */
+async function listInstrumentsForEditor(controlType) {
+  const typesByCode = await loadControlTypes();
+  const params = [];
+  let where = "";
+  if (controlType !== undefined && controlType !== null) {
+    params.push(String(controlType));
+    where = "WHERE i.control_type IS NOT DISTINCT FROM NULLIF($1, '')";
+  }
+  const { rows } = await db.query(
+    `SELECT i.*,
+            COALESCE(NULLIF(btrim(tu.full_name), ''), tu.username) AS taken_by_name,
+            COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
+                       WHERE h.instrument_id = i.id), 0) AS held_qty
+       FROM instruments i
+       LEFT JOIN users tu ON tu.id = i.taken_by
+       ${where}
+      ORDER BY lower(i.name), lower(COALESCE(i.model, '')), i.id`,
+    params
+  );
+  return rows.map((row) => decorate(row, typesByCode));
+}
+
+/**
  * Приводит папки в соответствие с базой.
  *
  * Возвращает отчёт: что завели, что перенесли, что убрали в архив.
@@ -453,7 +481,10 @@ async function describe(relPath) {
 
   const rest = clean.slice(EQUIPMENT_DIR.length + 1);
   if (!rest.includes("/")) {
-    return { kind: "classification", path: clean, name: rest };
+    if (rest === RETIRED_DIRNAME) return { kind: "retired", path: clean, name: rest };
+    if (rest === ARCHIVE_DIRNAME) return { kind: "archive", path: clean, name: rest };
+    const type = [...typesByCode.values()].find((item) => sanitizeSegment(item.full_name) === rest);
+    return { kind: "classification", path: clean, name: rest, code: type?.code ?? null };
   }
   return { kind: "inside", path: clean };
 }
@@ -566,6 +597,6 @@ module.exports = {
   EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME,
   RECOGNITION_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
-  sync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes,
+  sync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes, listInstrumentsForEditor,
   ensureQr, rebuildQr, qrFiles, deleteGuard,
 };

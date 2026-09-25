@@ -624,6 +624,21 @@ app.get("/api/equipment/companies", auth.requireAuth, async (req, res) => {
   }
 });
 
+/** Карточки для единого поиска в форме редактирования приборов. */
+app.get("/api/equipment/instruments", auth.requireAuth, async (req, res) => {
+  try {
+    if (!requireEquipmentAdmin(req, res)) return;
+    const hasFilter = Object.hasOwn(req.query || {}, "control_type");
+    const instruments = await equipment.listInstrumentsForEditor(
+      hasFilter ? String(req.query.control_type || "") : undefined
+    );
+    res.json({ instruments });
+  } catch (err) {
+    console.error("Оборудование: не удалось получить список приборов:", err);
+    res.status(500).json({ message: "Не удалось загрузить список приборов" });
+  }
+});
+
 /**
  * Завести прибор из файлового менеджера.
  *
