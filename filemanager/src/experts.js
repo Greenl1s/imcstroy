@@ -44,6 +44,9 @@ function normalizeName(raw) {
   if (/[\\/:*?"<>|]/.test(name)) {
     throw badRequest('В имени нельзя использовать символы \\ / : * ? " < > |');
   }
+  if (name.includes(",")) {
+    throw badRequest("В имени эксперта нельзя использовать запятую");
+  }
   // «.» и «..» — это не имена, а обозначения текущей и родительской папки:
   // такая папка либо не создастся, либо создастся не там, где ожидают.
   //
@@ -66,6 +69,44 @@ function badRequest(message) {
 
 /** Путь к папке эксперта в терминах файлового менеджера (не абсолютный). */
 const expertPath = (name) => `${EXPERTS_DIR}/${name}`;
+
+/**
+ * Единый справочник экспертов для проектов, журнала и документов.
+ * Источник один: подпапки в «База данных/Эксперты».
+ */
+async function listExperts(safeResolve, { details = true } = {}) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(safeResolve(EXPERTS_DIR), { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+
+  const result = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const expert = {
+      name: entry.name,
+      path: expertPath(entry.name),
+    };
+    if (details) {
+      expert.has_info = await hasInfo(safeResolve, entry.name);
+      expert.attachments = await listAttachments(safeResolve, entry.name);
+    }
+    result.push(expert);
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+/** Имена в cases.experts пока хранятся строкой через запятую. */
+function parseCaseNames(raw) {
+  return String(raw || "").split(",").map((name) => name.trim()).filter(Boolean);
+}
+
+function replaceCaseName(raw, from, to) {
+  return [...new Set(parseCaseNames(raw).map((name) => (name === from ? to : name)))].join(", ");
+}
 
 /**
  * Приложения эксперта — всё, что лежит в его подпапке «Приложения».
@@ -154,13 +195,9 @@ async function createExpert(safeResolve, { name }) {
  * внутри файлов оно тоже стоит первой строкой. Поэтому файлы не
  * переименовываются, а собираются заново из пунктов.
  *
- * ПРОЕКТЫ ЭТО НЕ ЗАДЕВАЕТ, и так и должно быть. Столбец «Специалисты /
- * Эксперты» в журнале заполняется ПОЛЬЗОВАТЕЛЯМИ системы — теми, у кого
- * стоит галочка в справочниках. Папка «Эксперты» — другой справочник,
- * он про то, кого включать в гарантийное письмо. Списки разные, и
- * переписывать один по другому значило бы подменять данные по
- * случайному совпадению написания: строка в проекте перестала бы
- * проходить проверку, и карточку стало бы нельзя сохранить.
+ * Имя папки является именем эксперта во всей ИСУ. После успешного
+ * переименования вызывающий код обязан заменить его и в карточках дел:
+ * пользователи сайта и эксперты теперь являются разными сущностями.
  *
  * Уже созданные гарантийные письма тоже не трогаются: это готовые
  * документы, они лежат файлами.
@@ -208,4 +245,7 @@ module.exports = {
   listAttachments,
   hasInfo,
   createExpert,
+  listExperts,
+  parseCaseNames,
+  replaceCaseName,
 };

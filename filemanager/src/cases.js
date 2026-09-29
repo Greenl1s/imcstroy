@@ -19,6 +19,7 @@ const courtCase = require("./courtCase");
 const courtOutcomes = require("./courtOutcomes");
 const workCalendar = require("./workCalendar");
 const taskDates = require("./taskDates");
+const expertsLib = require("./experts");
 
 /**
  * Пересобирает журнал и никогда не мешает основной операции — если
@@ -476,7 +477,9 @@ async function journalRows(user) {
 cases.get("/journal", async (req, res) => {
   try {
     const rows = await journalRows(req.user);
-    const [lists, people] = await Promise.all([lookups.all(), lookups.people()]);
+    const [lists, people, folderExperts] = await Promise.all([
+      lookups.all(), lookups.people(), expertsLib.listExperts(files.safeResolve, { details: false }),
+    ]);
 
     // Списки для правки — из справочников: вписать мимо них нельзя.
     // Списки для ФИЛЬТРОВ — из справочников плюс то, что уже стоит в
@@ -489,7 +492,7 @@ cases.get("/journal", async (req, res) => {
     res.json({
       rows,
       managers: people.managers,
-      experts: people.experts,
+      experts: folderExperts.map(({ name, path }) => ({ name, path })),
       // Из чего выбирают при правке.
       lists: {
         organizations: lists.organizations,
@@ -1401,20 +1404,22 @@ async function checkLookupFields(body, existing = null) {
     return `Года «${body.year}» нет в списке. Добавьте его в «Настройки → Справочники».`;
   }
 
-  const { managers, experts } = await lookups.people();
+  const [{ managers }, folderExperts] = await Promise.all([
+    lookups.people(), expertsLib.listExperts(files.safeResolve, { details: false }),
+  ]);
   if (body.manager_id !== undefined && String(body.manager_id || "").trim()
       && !unchanged("manager_id")) {
     if (!managers.some((m) => String(m.id) === String(body.manager_id))) {
-      return "Этот сотрудник не значится руководителем проектов. Отметьте его в «Настройки → Справочники → Руководители и специалисты».";
+      return "Этот сотрудник не значится руководителем проектов. Отметьте его в «Настройки → Справочники → Руководители проектов».";
     }
   }
   if (body.experts !== undefined && String(body.experts || "").trim()
       && !unchanged("experts")) {
-    const allowed = new Set(experts.map((e) => e.name));
-    const unknown = String(body.experts).split(",").map((x) => x.trim()).filter(Boolean)
+    const allowed = new Set(folderExperts.map((e) => e.name));
+    const unknown = expertsLib.parseCaseNames(body.experts)
       .filter((name) => !allowed.has(name));
     if (unknown.length) {
-      return `Не значатся специалистами: ${unknown.join(", ")}. Отметьте их в «Настройки → Справочники → Руководители и специалисты».`;
+      return `Нет в папке «База данных → Эксперты»: ${unknown.join(", ")}. Сначала добавьте эксперта в этой папке.`;
     }
   }
   return null;

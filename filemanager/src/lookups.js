@@ -134,27 +134,22 @@ async function has(kind, rawValue) {
 }
 
 /**
- * Кто может стоять руководителем и кто — специалистом.
- *
- * Списки разные: руководителей обычно единицы, специалистов больше.
- * Отдаём с именами, чтобы экран не ходил за ними отдельно.
+ * Пользователи, которых можно назначать руководителями проектов.
+ * Эксперты сюда намеренно не входят: их единый справочник находится
+ * в папке «База данных/Эксперты».
  */
 async function people() {
   const { rows } = await db.query(
     `SELECT u.id, ${db.nameSql("u")} AS name,
-            COALESCE(p.can_be_manager, true) AS can_be_manager,
-            COALESCE(p.can_be_expert, true)  AS can_be_expert
+            COALESCE(p.can_be_manager, true) AS can_be_manager
        FROM users u
        LEFT JOIN fm_permissions p ON p.user_id = u.id
       ORDER BY ${db.nameSql("u")} ASC`
   );
-  // Отдаём ИМЯ, а не логин: логин набирают при входе, и выставлять его
-  // в списках журнала незачем. Именно это имя и записано в проектах
-  // текстом в столбце «Специалисты / Эксперты».
+  // Отдаём имя, а не логин: логин используется только для входа.
   const shown = (r) => ({ id: r.id, name: r.name });
   return {
     managers: rows.filter((r) => r.can_be_manager).map(shown),
-    experts: rows.filter((r) => r.can_be_expert).map(shown),
   };
 }
 

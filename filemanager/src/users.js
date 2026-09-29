@@ -14,11 +14,9 @@ const SELECT_JOINED = `
          COALESCE(p.can_db, false) AS can_db,
          COALESCE(p.can_cases, false) AS can_cases,
          COALESCE(p.can_manage, false) AS can_manage,
-         -- Умолчание TRUE, а не FALSE: у человека может не быть строки
-         -- прав вовсе, и тогда он должен оставаться в списках журнала —
-         -- ровно как было до появления этих галочек.
-         COALESCE(p.can_be_manager, true) AS can_be_manager,
-         COALESCE(p.can_be_expert, true)  AS can_be_expert
+         -- Пользователь может быть руководителем проекта. Эксперты сюда
+         -- не входят: их справочник живёт в папке «База данных/Эксперты».
+         COALESCE(p.can_be_manager, true) AS can_be_manager
   FROM users u
   LEFT JOIN fm_permissions p ON p.user_id = u.id
 `;
@@ -39,7 +37,7 @@ async function countAdmins() {
 }
 
 async function createUser({ username, password, full_name, role, can_tools, can_db, can_cases,
-  can_manage, can_be_manager = true, can_be_expert = true }) {
+  can_manage, can_be_manager = true }) {
   const hash = await bcrypt.hash(password, 12);
   // Имя не задали — берём логин. Человек без имени выглядел бы на экране
   // пустым местом, а это хуже, чем служебное слово вместо имени.
@@ -57,17 +55,17 @@ async function createUser({ username, password, full_name, role, can_tools, can_
     const user = rows[0];
     await client.query(
       `INSERT INTO fm_permissions
-         (user_id, can_tools, can_db, can_cases, can_manage, can_be_manager, can_be_expert)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (user_id, can_tools, can_db, can_cases, can_manage, can_be_manager)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [user.id, !!can_tools, !!can_db, !!can_cases, !!can_manage,
-       !!can_be_manager, !!can_be_expert]
+       !!can_be_manager]
     );
     await client.query("COMMIT");
     return {
       ...user,
       can_tools: !!can_tools, can_db: !!can_db,
       can_cases: !!can_cases, can_manage: !!can_manage,
-      can_be_manager: !!can_be_manager, can_be_expert: !!can_be_expert,
+      can_be_manager: !!can_be_manager,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -78,49 +76,8 @@ async function createUser({ username, password, full_name, role, can_tools, can_
 }
 
 /**
- * Переименование: переносим имя всюду, где оно записано ТЕКСТОМ.
- *
- * Почти везде человек хранится номером, и переименование его не задевает.
- * Исключение одно — cases.experts: специалисты проекта записаны строкой
- * через запятую, именами. Не перенести имя туда значило бы не просто
- * показать старое: сохранить такую карточку стало бы нельзя вовсе —
- * проверка справочников сказала бы «не значится специалистом» про
- * человека, который в списке есть.
- *
- * Речь именно об ИМЕНИ (full_name), а не о логине: в проектах записано
- * то, что видно на экране. Смена логина этих строк не касается вовсе —
- * логин теперь нигде, кроме входа, и не показывается.
- *
- * История «Учёта оборудования» НЕ трогается: там имя сохранено копией на
- * момент события — запись о том, что было, а не справка о том, как
- * человека зовут сейчас.
- */
-async function renameInCases(client, oldName, newName) {
-  const { rows } = await client.query(
-    `SELECT id, experts FROM cases
-      WHERE deleted_at IS NULL AND experts IS NOT NULL AND experts <> ''`
-  );
-  let touched = 0;
-  for (const row of rows) {
-    const parts = String(row.experts).split(",").map((x) => x.trim()).filter(Boolean);
-    if (!parts.includes(oldName)) continue;
-    const next = parts.map((n) => (n === oldName ? newName : n)).join(", ");
-    await client.query("UPDATE cases SET experts = $1 WHERE id = $2", [next, row.id]);
-    touched++;
-  }
-  return touched;
-}
-
-/**
- * Имя должно быть одно на всю контору.
- *
- * Причина не в аккуратности, а в устройстве данных: специалисты проекта
- * записаны строкой через запятую — ИМЕНАМИ. Два человека с одинаковым
- * именем в этой строке неразличимы, и никто — ни человек, ни система —
- * не скажет, который из них в проекте.
- *
- * Сравниваем без учёта регистра: «Иванов» и «иванов» для человека одно
- * и то же лицо, и разрешить такую пару значило бы сделать вид, что нет.
+ * Имена пользователей не должны повторяться между учётными записями.
+ * Совпадение с именем эксперта допустимо: это два независимых справочника.
  */
 async function checkNameFree(name, exceptId) {
   const { rows } = await db.query(
@@ -129,10 +86,7 @@ async function checkNameFree(name, exceptId) {
     [name, exceptId || 0]
   );
   if (rows.length) {
-    const err = new Error(
-      `Имя «${rows[0].name}» уже занято. Имена должны различаться: в проектах ` +
-      "специалисты записаны именами, и двух одинаковых там не различить."
-    );
+    const err = new Error(`Имя пользователя «${rows[0].name}» уже занято другой учётной записью.`);
     err.status = 400;
     throw err;
   }
@@ -158,8 +112,6 @@ async function updateUser(id, fields) {
     fields = { ...fields, username: clean };
   }
 
-  // Смену имени делаем отдельно и до всего остального: нужно старое имя,
-  // а после UPDATE его уже не спросишь.
   let renamed = null;
   if (fields.full_name !== undefined) {
     const clean = String(fields.full_name).trim();
@@ -196,29 +148,10 @@ async function updateUser(id, fields) {
   }
   if (userSets.length) {
     userValues.push(id);
-    if (renamed) {
-      // Имя и его следы в проектах меняем одной транзакцией: иначе
-      // сбой посередине оставил бы половину проектов ссылаться на
-      // человека, которого уже нет под таким именем.
-      const client = await db.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
-        renamed.cases = await renameInCases(client, renamed.from, renamed.to);
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-      } finally {
-        client.release();
-      }
-    } else {
-      await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
-    }
+    await db.query(`UPDATE users SET ${userSets.join(", ")} WHERE id = $${i}`, userValues);
   }
 
-  const PERM_FIELDS = ["can_tools", "can_db", "can_cases", "can_manage",
-    "can_be_manager", "can_be_expert"];
+  const PERM_FIELDS = ["can_tools", "can_db", "can_cases", "can_manage", "can_be_manager"];
   if (PERM_FIELDS.some((f) => fields[f] !== undefined)) {
     // На случай, если у пользователя ещё вообще не было своей строки прав ИСУ.
     await db.query(

@@ -358,8 +358,14 @@ app.patch("/api/admin/settings", auth.requireAuth, auth.requireAdmin, async (req
 // журнале и в карточке проекта. Править — только администратор.
 app.get("/api/lookups", auth.requireAuth, async (req, res) => {
   try {
-    const [lists, people] = await Promise.all([lookups.all(), lookups.people()]);
-    res.json({ ...lists, ...people });
+    const [lists, people, folderExperts] = await Promise.all([
+      lookups.all(), lookups.people(), expertsLib.listExperts(filesLib.safeResolve, { details: false }),
+    ]);
+    res.json({
+      ...lists,
+      ...people,
+      experts: folderExperts.map(({ name, path }) => ({ name, path })),
+    });
   } catch (err) {
     const notReady = db.notMigrated(err);
     if (notReady) return res.status(503).json({ message: notReady });
@@ -471,13 +477,13 @@ app.get("/api/disk-usage", auth.requireAuth, async (req, res) => {
 app.post("/api/users", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     const { username, password, full_name, role, can_tools, can_db, can_cases, can_manage,
-      can_be_manager, can_be_expert } = req.body || {};
+      can_be_manager } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ message: "Укажите логин и пароль" });
     }
     const user = await users.createUser({
       username, password, full_name, role, can_tools, can_db, can_cases, can_manage,
-      can_be_manager, can_be_expert,
+      can_be_manager,
     });
     res.json({ user });
   } catch (err) {
@@ -494,12 +500,9 @@ app.patch("/api/users/:id", auth.requireAuth, auth.requireAdmin, async (req, res
     const { renamed } = await users.updateUser(req.params.id, req.body || {});
     if (renamed) {
       events.log(req.user, "user_rename", {
-        name: renamed.to, details: { from: renamed.from, cases: renamed.cases || 0 },
+        name: renamed.to, details: { from: renamed.from },
       });
-      // Специалисты в файле журнала записаны именами. Файл
-      // пересобирается только при правке проекта, поэтому после
-      // переименования его надо пересобрать отдельно — иначе он ещё
-      // неделю показывал бы прежнее имя.
+      // Руководитель хранится по id, но в Excel-журнал попадает его имя.
       require("./journalExcel").regenerateJournal().catch((err) =>
         console.error("Журнал не пересобрался после переименования:", err.message));
     }
@@ -962,26 +965,7 @@ function requireExpertsAccess(req, res) {
 app.get("/api/experts", auth.requireAuth, async (req, res) => {
   try {
     if (!requireExpertsAccess(req, res)) return;
-    const dirAbs = filesLib.safeResolve(EXPERTS_DIR);
-    let entries;
-    try {
-      entries = await fs.promises.readdir(dirAbs, { withFileTypes: true });
-    } catch (err) {
-      return res.json({ experts: [] }); // папки с экспертами ещё нет — просто пустой список
-    }
-
-    const experts = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      experts.push({
-        name: entry.name,
-        path: expertsLib.expertPath(entry.name),
-        has_info: await expertsLib.hasInfo(filesLib.safeResolve, entry.name),
-        attachments: await expertsLib.listAttachments(filesLib.safeResolve, entry.name),
-      });
-    }
-    experts.sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    res.json({ experts });
+    res.json({ experts: await expertsLib.listExperts(filesLib.safeResolve) });
   } catch (err) {
     console.error("Не удалось получить список экспертов:", err);
     res.status(500).json({ message: "Не удалось получить список экспертов" });
@@ -1066,10 +1050,47 @@ app.patch("/api/experts/:name", auth.requireAuth, async (req, res) => {
     }, found.name, req.body?.name);
 
     if (result.renamed) {
+      let projects = 0;
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(
+          `SELECT id, experts FROM cases
+            WHERE deleted_at IS NULL AND experts IS NOT NULL AND experts <> ''
+            FOR UPDATE`
+        );
+        for (const row of rows) {
+          const names = expertsLib.parseCaseNames(row.experts);
+          if (!names.includes(result.from)) continue;
+          await client.query("UPDATE cases SET experts = $1 WHERE id = $2", [
+            expertsLib.replaceCaseName(row.experts, result.from, result.to), row.id,
+          ]);
+          projects++;
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        // База не приняла замену — возвращаем имя папки, чтобы справочник
+        // и карточки дел не разошлись после половины операции.
+        await expertsLib.renameExpert(filesLib.safeResolve, {
+          rebuildDocs: expertInfo.rebuildDocs,
+          readItems: expertInfo.read,
+        }, result.to, result.from).catch((rollbackErr) => {
+          console.error("Не удалось вернуть имя папки эксперта:", rollbackErr.message);
+        });
+        throw err;
+      } finally {
+        client.release();
+      }
+      await journalExcel.regenerateJournal().catch((err) => {
+        console.error("Не удалось обновить журнал после переименования эксперта:", err.message);
+      });
       events.log(req.user, "rename", {
         path: expertsLib.expertPath(result.to),
         name: `Эксперт «${result.from}» → «${result.to}»`,
+        details: { projects },
       });
+      result.projects = projects;
     }
     res.json({ ok: true, ...result });
   } catch (err) {
@@ -1150,6 +1171,17 @@ app.delete("/api/experts/:name", auth.requireAuth, auth.requireAdmin, async (req
     if (!requireExpertsAccess(req, res)) return;
     const found = await expertDirOr404(req.params.name, res);
     if (!found) return;
+
+    const { rows: used } = await db.query(
+      `SELECT id, name, experts FROM cases
+        WHERE deleted_at IS NULL AND experts IS NOT NULL AND experts <> ''`
+    );
+    const projects = used.filter((row) => expertsLib.parseCaseNames(row.experts).includes(found.name));
+    if (projects.length) {
+      return res.status(409).json({
+        message: `Эксперт участвует в проектах (${projects.length}). Сначала уберите его из карточек дел: ${projects.map((p) => p.name).join(", ")}`,
+      });
+    }
 
     await trash.moveToTrash(found.dir, req.user.id);
     events.log(req.user, "delete", { path: found.dir, name: found.name });
