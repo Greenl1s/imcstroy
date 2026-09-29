@@ -789,6 +789,38 @@ async function cancelledStatusId() {
 }
 
 /**
+ * Убирает локальную задачу, которой уже нет в Planfix.
+ *
+ * Вызывается только после однозначного ответа Planfix «Task not found».
+ * При таймауте, обрыве сети или другом отказе запись остаётся на месте.
+ */
+async function removeMissingPlanfixTask(task, user, requestedAction, error) {
+  await db.query("DELETE FROM case_tasks WHERE id = $1", [task.id]);
+  const actor = planfixPeople.actorOf(user);
+  await planfixPeople.logAction({
+    user, actor, action: "reconcile_missing", taskId: task.id,
+    planfixTaskId: task.planfix_id, caseId: task.case_id,
+    payload: {
+      requestedAction, name: task.name, reason: "task_not_found",
+      planfixError: String(error?.message || ""),
+    },
+    ok: true,
+  });
+  events.log(user, "task_deleted", {
+    path: task.folder_path,
+    name: task.name,
+    details: { case: task.case_name, reason: "Задача уже отсутствовала в Planfix" },
+  });
+  return {
+    ok: true,
+    removedMissing: true,
+    missingInPlanfix: true,
+    name: task.name,
+    message: "Задача уже отсутствовала в Planfix и удалена из ИСУ",
+  };
+}
+
+/**
  * Завершить задачу. Сначала Planfix, потом у себя: если он не согласился,
  * у нас ничего не меняется и человек видит причину, а не молчаливое
  * расхождение двух систем.
@@ -800,12 +832,18 @@ cases.post("/tasks/:id/complete", async (req, res) => {
     const [task] = await visibleTasks(rows, req.user);
     if (!task) return res.status(403).json({ message: "Нет доступа к этой задаче" });
     if (task.is_done) return res.json({ ok: true, alreadyDone: true });
+    if (!(await canWriteTask(req.user, task))) {
+      return res.status(403).json({ message: "Нет прав на изменение этой задачи" });
+    }
 
     const statusId = await doneStatusId();
     const actor = planfixPeople.actorOf(req.user);
     try {
       await planfixSync.completeTask(task.planfix_id, statusId);
     } catch (err) {
+      if (planfixSync.isTaskNotFoundError(err)) {
+        return res.json(await removeMissingPlanfixTask(task, req.user, "complete", err));
+      }
       await planfixPeople.logAction({
         user: req.user, actor, action: "complete", taskId: task.id,
         planfixTaskId: task.planfix_id, caseId: task.case_id, ok: false, error: err.message,
@@ -877,6 +915,9 @@ cases.get("/tasks/:id", async (req, res) => {
     try {
       comments = await planfixSync.listTaskComments(task.planfix_id);
     } catch (err) {
+      if (planfixSync.isTaskNotFoundError(err)) {
+        return res.status(410).json(await removeMissingPlanfixTask(task, req.user, "open", err));
+      }
       commentsError = err.message;
     }
     res.json({
@@ -1021,6 +1062,9 @@ cases.patch("/tasks/:id", async (req, res) => {
     try {
       await planfixSync.updatePlanfixTask(task.planfix_id, patch);
     } catch (err) {
+      if (planfixSync.isTaskNotFoundError(err)) {
+        return res.json(await removeMissingPlanfixTask(task, req.user, "update", err));
+      }
       await planfixPeople.logAction({
         user: req.user, actor, action: "update", taskId: task.id,
         planfixTaskId: task.planfix_id, caseId: task.case_id, payload: patch, ok: false, error: err.message,
@@ -1100,6 +1144,9 @@ cases.delete("/tasks/:id", async (req, res) => {
     try {
       await planfixSync.cancelPlanfixTask(task.planfix_id, statusId);
     } catch (err) {
+      if (planfixSync.isTaskNotFoundError(err)) {
+        return res.json(await removeMissingPlanfixTask(task, req.user, "cancel", err));
+      }
       await planfixPeople.logAction({
         user: req.user, actor, action: "cancel", taskId: task.id,
         planfixTaskId: task.planfix_id, caseId: task.case_id,
@@ -1138,6 +1185,9 @@ cases.post("/tasks/:id/comment", async (req, res) => {
     try {
       added = await planfixSync.addTaskComment(task.planfix_id, text, actor);
     } catch (err) {
+      if (planfixSync.isTaskNotFoundError(err)) {
+        return res.json(await removeMissingPlanfixTask(task, req.user, "comment", err));
+      }
       await planfixPeople.logAction({
         user: req.user, actor, action: "comment", taskId: task.id,
         planfixTaskId: task.planfix_id, caseId: task.case_id, ok: false, error: err.message,

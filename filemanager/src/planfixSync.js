@@ -66,9 +66,22 @@ async function planfixRequest(method, path, body) {
     // создаться, и повтор сделает дубль.
     err.planfixRefused = (data && data.result === "fail") || (res.status >= 400 && res.status < 500);
     err.planfixCode = data?.code != null ? Number(data.code) : null;
+    err.planfixStatus = res.status;
     throw err;
   }
   return data;
+}
+
+/**
+ * Planfix знает несколько вариантов текста для отсутствующего объекта.
+ * Отдельный признак нужен, чтобы отличить удалённую там задачу от обрыва
+ * сети: только в первом случае локальную копию безопасно убрать.
+ */
+function isTaskNotFoundError(err) {
+  const message = String(err?.message || "");
+  return /task\s+not\s+found(?:\s+by\s+id)?/i.test(message) ||
+    /задач[а-яё]*\s+не\s+найден[а-яё]*/i.test(message) ||
+    (err?.planfixStatus === 404 && /task|задач/i.test(message));
 }
 
 /**
@@ -723,7 +736,7 @@ module.exports = {
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
-  peopleToIds, completeTask, cancelPlanfixTask, fetchTask,
+  peopleToIds, completeTask, cancelPlanfixTask, fetchTask, isTaskNotFoundError,
   fetchFieldCatalogue, resolveFieldIds, projectWebUrl,
   GROUP_ID_EXPERTISE, GROUP_ID_RESEARCH,
 };
