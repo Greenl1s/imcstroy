@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-09-29.1">
+<meta name="build" content="2026-09-29.2">
 <title>ИСУ: Информационная система управления</title>
-<link rel="stylesheet" href="/style.css?v=20260929-1">
+<link rel="stylesheet" href="/style.css?v=20260929-2">
 
 <!-- Приложение: установка на устройство, работа без сети, уведомления.
      Один и тот же набор в трёх системах — адрес у них общий, значит и
@@ -1237,9 +1237,12 @@
       <label>Судья
         <input type="text" id="pfJudgeName">
       </label>
-      <label>Эксперты <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
-        <input type="text" id="pfExperts" placeholder="Через запятую">
-      </label>
+      <div class="form-field-group">
+        <span class="settings-label">Эксперты <span class="row-subtitle" style="font-weight:400;">(необязательно)</span></span>
+        <div class="picker-box" id="pfExpertsBox"></div>
+        <input type="hidden" id="pfExperts">
+        <span class="field-hint">Список берётся из папки «База данных → Эксперты».</span>
+      </div>
       <label>Описание <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
         <input type="text" id="pfDescription">
       </label>
@@ -1343,11 +1346,11 @@
       <label>Судья
         <input type="text" id="ceJudgeName">
       </label>
-      <!-- Специалистов бывает несколько, поэтому галочки, а не список.
+      <!-- Экспертов бывает несколько, поэтому галочки, а не список.
            Значение остаётся строкой через запятую: так не ломаются ни
            выгрузка, ни файл журнала в папке, ни старые записи. -->
       <div class="form-field-group">
-        <span class="settings-label">Специалисты / эксперты</span>
+        <span class="settings-label">Эксперты</span>
         <div class="picker-box" id="ceExpertsBox"></div>
         <input type="hidden" id="ceExperts">
       </div>
@@ -1420,6 +1423,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260929-1"></script>
+<script src="/app.js?v=20260929-2"></script>
 </body>
 </html>

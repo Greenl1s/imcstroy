@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-29.1";
+const APP_BUILD = "2026-09-29.2";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -2718,19 +2718,10 @@ const SECTION_RIGHTS = [
   ["can_manage", "Руководитель центра", "Ведёт производственный календарь и утверждает решения по заседаниям"],
 ];
 
-/* Кто попадает в выпадающие списки журнала регистрации.
-
-   Это не право, а роль в проектах: человек может иметь полный доступ к
-   «Делам» и при этом не значиться ни руководителем проектов, ни
-   специалистом.
-
-   Живут эти две галочки на вкладке «Справочники», в общей таблице, а не
-   в карточке каждого человека. Причина простая: решение это не про
-   одного, а про всех сразу — «кто у нас вообще руководители». В карточке
-   пришлось бы обойти шестерых, чтобы просто увидеть список. */
+/* Кто из пользователей может быть руководителем проекта. Эксперты сюда
+   не входят: они заводятся отдельными папками в «База данных → Эксперты». */
 const JOURNAL_ROLES = [
   ["can_be_manager", "Руководитель проекта"],
-  ["can_be_expert", "Специалист / эксперт"],
 ];
 
 const ACCESS_LABEL = { read: "Только смотреть", write: "Смотреть и менять", none: "Закрыто" };
@@ -2901,9 +2892,9 @@ async function showPersonDetail(userId) {
       <input type="text" data-new-name value="${escapeHtml(user.name)}" autocomplete="off">
       <button type="button" class="upload-btn" data-set-name>Сменить имя</button>
     </div>
-    <p class="access-note">Так человека зовут: это имя видят все и везде — в журнале
-    регистрации, в задачах, в «Учёте оборудования». Имена не должны повторяться: в
-    проектах специалисты записаны именами, и двух одинаковых там не различить.</p>
+    <p class="access-note">Так называется учётная запись сотрудника: имя видно в истории,
+    задачах, среди руководителей проектов и в «Учёте оборудования». Справочник экспертов
+    ведётся отдельно в «База данных → Эксперты».</p>
 
     <h3 class="access-sub">Логин и пароль</h3>
     <div class="settings-row">
@@ -3180,12 +3171,9 @@ function renderAddPersonForm() {
    группу он уходит в Planfix и какие задачи ставятся по стадиям. Тип,
    заведённый в справочнике, система просто не знала бы, как обслужить.
 
-   Руководители и специалисты — четвёртым списком, только устроенным
-   иначе: людей не заводят, они уже есть, отмечают лишь, кто в каком
-   списке участвует. Держим их здесь, рядом с остальными списками
-   журнала, а не в карточке каждого: «кто у нас руководители» — вопрос
-   про всех разом, и отвечать на него, обходя карточки по одной, значит
-   не иметь ответа вовсе. */
+   Руководители — четвёртым списком: это пользователи сайта, которым
+   разрешено руководить проектами. Эксперты управляются отдельно через
+   папку «База данных → Эксперты». */
 
 const LOOKUP_LISTS = [
   {
@@ -3243,10 +3231,11 @@ async function renderListsTab() {
     </div>
 
     <section class="settings-card" style="margin-top:20px;">
-      <h2 class="access-title">Руководители и специалисты</h2>
-      <p class="access-note">Кто попадает в выпадающие списки журнала. Отметьте галочкой —
+      <h2 class="access-title">Руководители проектов</h2>
+      <p class="access-note">Каких сотрудников можно назначать руководителями. Отметьте галочкой —
       сохраняется сразу, отдельной кнопки нет. Снятая галочка убирает человека из списка,
-      но там, где он уже записан, он остаётся: проекты задним числом не переписываются.</p>
+      но уже назначенные проекты задним числом не переписываются. Эксперты выбираются
+      только из папки «База данных → Эксперты».</p>
       <table class="access-rules roles-table">
         <thead><tr><th>Сотрудник</th>${JOURNAL_ROLES.map(([, label]) =>
           `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
@@ -6119,7 +6108,7 @@ function fillFromLookup(select, values, current, emptyLabel) {
 }
 
 /**
- * Галочки специалистов. Пишем в скрытое поле строкой через запятую —
+ * Галочки экспертов из папки «База данных/Эксперты». Пишем в скрытое поле строкой через запятую —
  * тем же видом, каким это поле жило всегда.
  */
 function fillExpertsBox(boxId, hiddenId, current, people) {
@@ -6131,13 +6120,13 @@ function fillExpertsBox(boxId, hiddenId, current, people) {
 
   box.innerHTML = (known.length || strangers.length)
     ? [...known.map((n) => [n, chosen.has(n), ""]),
-       ...strangers.map((n) => [n, true, " — не значится специалистом"])]
+       ...strangers.map((n) => [n, true, " — нет в папке экспертов"])]
         .map(([name, on, note]) => `
           <label class="picker-item">
             <input type="checkbox" value="${escapeHtml(name)}" ${on ? "checked" : ""}>
             <span>${escapeHtml(name)}<span class="access-hint">${escapeHtml(note)}</span></span>
           </label>`).join("")
-    : '<p class="empty-hint">Специалистами никто не отмечен. Отметьте в «Настройки → Сотрудники».</p>';
+    : '<p class="empty-hint">В папке «База данных → Эксперты» пока нет экспертов.</p>';
 
   const sync = () => {
     hidden.value = [...box.querySelectorAll("input:checked")].map((i) => i.value).join(", ");
@@ -6323,6 +6312,7 @@ async function openProjectForm() {
   // Руководителем может стать не всякий, а кто отмечен в настройках.
   fillSelect(document.getElementById("pfManager"),
     (lists.managers || []).map((u) => ({ value: u.id, label: u.name })), "", "Не выбран");
+  fillExpertsBox("pfExpertsBox", "pfExperts", "", lists.experts);
 
   els.projectFormOverlay.classList.remove("hidden");
 }
@@ -6739,7 +6729,7 @@ const JOURNAL_COLUMNS = [
   { key: "year",              title: "Год",                    edit: "list:years", width: 76, filter: "year" },
   { key: "description",       title: "Описание",               edit: "text", width: 240 },
   { key: "manager_id",        title: "Руководитель",           edit: "manager", width: 150, filter: "manager" },
-  { key: "experts",           title: "Специалисты / Эксперты", edit: "experts", width: 200, filter: "expert" },
+  { key: "experts",           title: "Эксперты",               edit: "experts", width: 200, filter: "expert" },
   { key: "court_or_customer", title: "Заказчик",               edit: "text", width: 230 },
   { key: "case_number",       title: "№ дела или договора",    edit: "text", width: 160 },
   { key: "party1",            title: "Сторона 1",              edit: "text", width: 170, court: true },
@@ -7120,7 +7110,7 @@ function renderJournalApplied() {
   add("expType", "Тип экспертизы");
   add("year", "Год");
   add("manager", "Руководитель");
-  add("expert", "Специалист / эксперт");
+  add("expert", "Эксперт");
 
   if (!items.length) return (node.innerHTML = "");
   node.innerHTML = items.map(([key, title, value]) =>
@@ -7268,7 +7258,7 @@ function journalEditOptions(kind, row) {
 }
 
 /**
- * Окно выбора специалистов.
+ * Окно выбора экспертов из папки «База данных/Эксперты».
  *
  * Их бывает несколько, поэтому не выпадающий список, а галочки. Пишем в
  * то же поле через запятую, каким оно было и раньше: так не ломаются ни
@@ -7279,19 +7269,19 @@ function openExpertsPicker(row, cell) {
   const box = document.getElementById("expertsPicker");
   const chosen = new Set(String(row.experts || "").split(",").map((x) => x.trim()).filter(Boolean));
   const people = journalData.experts || [];
-  // Кто записан, но специалистом больше не значится, — показываем, а не
+  // Кто записан, но папки эксперта больше нет, — показываем, а не
   // выбрасываем: сначала человек должен увидеть, что снимает.
   const strangers = [...chosen].filter((name) => !people.some((p) => p.name === name));
 
   box.innerHTML = (people.length || strangers.length)
     ? [...people.map((p) => [p.name, chosen.has(p.name), ""]),
-       ...strangers.map((n) => [n, true, " — не значится специалистом"])]
+       ...strangers.map((n) => [n, true, " — нет в папке экспертов"])]
         .map(([name, on, note]) => `
           <label class="picker-item">
             <input type="checkbox" value="${escapeHtml(name)}" ${on ? "checked" : ""}>
             <span>${escapeHtml(name)}<span class="access-hint">${escapeHtml(note)}</span></span>
           </label>`).join("")
-    : '<p class="empty-hint">Специалистами никто не отмечен. Отметьте в «Настройки → Сотрудники».</p>';
+    : '<p class="empty-hint">В папке «База данных → Эксперты» пока нет экспертов.</p>';
 
   overlay.classList.remove("hidden");
 
