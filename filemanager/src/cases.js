@@ -141,8 +141,31 @@ const CASE_LIST_QUERY = `
   WHERE c.deleted_at IS NULL
 `;
 
+/**
+ * Приводит старые полные ФИО в карточках к единому виду «Фамилия И.О.».
+ * Сокращаем только имена, которым соответствует папка эксперта: так
+ * случайная старая строка не будет ошибочно принята за другого человека.
+ */
+async function normalizeStoredCaseExperts(folderExperts) {
+  const { rows } = await db.query(
+    `SELECT id, experts FROM cases
+      WHERE deleted_at IS NULL AND experts IS NOT NULL AND experts <> ''`
+  );
+  let changed = 0;
+  for (const row of rows) {
+    const normalized = expertsLib.normalizeCaseNames(row.experts, folderExperts);
+    if (normalized === row.experts) continue;
+    await db.query("UPDATE cases SET experts = $1 WHERE id = $2", [normalized || null, row.id]);
+    changed++;
+  }
+  if (changed) await refreshJournalSafely();
+  return changed;
+}
+
 /** Живой журнал регистрации — список всех проектов. */
 cases.get("/", async (req, res) => {
+  const folderExperts = await expertsLib.listExperts(files.safeResolve, { details: false });
+  await normalizeStoredCaseExperts(folderExperts);
   const { rows } = await db.query(`${CASE_LIST_QUERY} ORDER BY c.created_at DESC`);
   res.json(courtCase.decorateCases(rows));
 });
@@ -476,10 +499,12 @@ async function journalRows(user) {
  */
 cases.get("/journal", async (req, res) => {
   try {
-    const rows = await journalRows(req.user);
     const [lists, people, folderExperts] = await Promise.all([
       lookups.all(), lookups.people(), expertsLib.listExperts(files.safeResolve, { details: false }),
     ]);
+    await normalizeStoredCaseExperts(folderExperts);
+    const rows = await journalRows(req.user);
+    const expertChoices = expertsLib.caseChoices(folderExperts);
 
     // Списки для правки — из справочников: вписать мимо них нельзя.
     // Списки для ФИЛЬТРОВ — из справочников плюс то, что уже стоит в
@@ -492,7 +517,7 @@ cases.get("/journal", async (req, res) => {
     res.json({
       rows,
       managers: people.managers,
-      experts: folderExperts.map(({ name, path }) => ({ name, path })),
+      experts: expertChoices,
       // Из чего выбирают при правке.
       lists: {
         organizations: lists.organizations,
@@ -1415,7 +1440,7 @@ async function checkLookupFields(body, existing = null) {
   }
   if (body.experts !== undefined && String(body.experts || "").trim()
       && !unchanged("experts")) {
-    const allowed = new Set(folderExperts.map((e) => e.name));
+    const allowed = new Set(expertsLib.caseChoices(folderExperts).map((e) => e.name));
     const unknown = expertsLib.parseCaseNames(body.experts)
       .filter((name) => !allowed.has(name));
     if (unknown.length) {

@@ -104,8 +104,57 @@ function parseCaseNames(raw) {
   return String(raw || "").split(",").map((name) => name.trim()).filter(Boolean);
 }
 
-function replaceCaseName(raw, from, to) {
-  return [...new Set(parseCaseNames(raw).map((name) => (name === from ? to : name)))].join(", ");
+/** «Челышков Павел Дмитриевич» → «Челышков П.Д.». */
+function shortName(raw) {
+  const clean = String(raw || "").replace(/\s+/g, " ").trim();
+  const parts = clean.split(" ").filter(Boolean);
+  if (parts.length < 2) return clean;
+
+  const initials = [];
+  for (const part of parts.slice(1)) {
+    // Уже сокращённые инициалы («П.Д.») не сокращаем повторно до «П.».
+    const compact = part.match(/^(?:[A-Za-zА-ЯЁ]\.){1,3}$/i);
+    if (compact) {
+      initials.push(...part.match(/[A-Za-zА-ЯЁ]/gi));
+      continue;
+    }
+    const first = part.match(/[A-Za-zА-ЯЁ]/i);
+    if (first) initials.push(first[0]);
+  }
+  return initials.length ? `${parts[0]} ${initials.join(".")}.` : clean;
+}
+
+/** В списках дел показываем короткое имя, сохраняя связь с папкой. */
+function caseChoices(folderExperts) {
+  const seen = new Set();
+  const result = [];
+  for (const expert of folderExperts || []) {
+    const name = shortName(expert.name);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    result.push({ name, full_name: expert.name, path: expert.path });
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+/** Полные имена из старых карточек заменяются короткими по папкам экспертов. */
+function normalizeCaseNames(raw, folderExperts) {
+  const aliases = new Map();
+  for (const expert of folderExperts || []) {
+    const short = shortName(expert.name);
+    aliases.set(expert.name, short);
+    aliases.set(short, short);
+  }
+  return [...new Set(parseCaseNames(raw).map((name) => aliases.get(name) || name))].join(", ");
+}
+
+/** При переименовании папки учитываем и полную, и короткую старую запись. */
+function replaceCaseExpert(raw, fromFull, toFull) {
+  const fromShort = shortName(fromFull);
+  const toShort = shortName(toFull);
+  return [...new Set(parseCaseNames(raw).map((name) =>
+    (name === fromFull || name === fromShort) ? toShort : name
+  ))].join(", ");
 }
 
 /**
@@ -247,5 +296,8 @@ module.exports = {
   createExpert,
   listExperts,
   parseCaseNames,
-  replaceCaseName,
+  shortName,
+  caseChoices,
+  normalizeCaseNames,
+  replaceCaseExpert,
 };

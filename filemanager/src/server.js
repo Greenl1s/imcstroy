@@ -364,7 +364,7 @@ app.get("/api/lookups", auth.requireAuth, async (req, res) => {
     res.json({
       ...lists,
       ...people,
-      experts: folderExperts.map(({ name, path }) => ({ name, path })),
+      experts: expertsLib.caseChoices(folderExperts),
     });
   } catch (err) {
     const notReady = db.notMigrated(err);
@@ -1063,7 +1063,7 @@ app.patch("/api/experts/:name", auth.requireAuth, async (req, res) => {
           const names = expertsLib.parseCaseNames(row.experts);
           if (!names.includes(result.from)) continue;
           await client.query("UPDATE cases SET experts = $1 WHERE id = $2", [
-            expertsLib.replaceCaseName(row.experts, result.from, result.to), row.id,
+            expertsLib.replaceCaseExpert(row.experts, result.from, result.to), row.id,
           ]);
           projects++;
         }
