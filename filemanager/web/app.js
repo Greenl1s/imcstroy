@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-25.3";
+const APP_BUILD = "2026-09-29.1";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -5015,8 +5015,10 @@ async function completeTask(id, btn, onDone) {
   if (task && !confirm(`Завершить задачу «${task.name}»?\nОна будет закрыта и в Planfix.`)) return;
   btn.disabled = true;
   try {
-    await apiFetch(`/api/cases/tasks/${id}/complete`, { method: "POST" });
-    showToast("Задача завершена");
+    const result = await apiFetch(`/api/cases/tasks/${id}/complete`, { method: "POST" });
+    showToast(result.removedMissing
+      ? "Задача уже отсутствовала в Planfix и убрана из ИСУ"
+      : "Задача завершена");
     if (onDone) onDone(); else loadTasksPage();
   } catch (err) {
     btn.disabled = false;
@@ -5039,8 +5041,10 @@ async function deleteTask(id, btn, onDone, knownName) {
   if (!confirm(`Убрать задачу «${name}»?\n\nВ Planfix она получит статус «Отмененная», а из ИСУ пропадёт.`)) return;
   if (btn) btn.disabled = true;
   try {
-    await apiFetch(`/api/cases/tasks/${id}`, { method: "DELETE" });
-    showToast("Задача убрана");
+    const result = await apiFetch(`/api/cases/tasks/${id}`, { method: "DELETE" });
+    showToast(result.removedMissing
+      ? "Задача уже отсутствовала в Planfix и убрана из ИСУ"
+      : "Задача убрана");
     if (onDone) onDone();
     else loadTasksPage();
   } catch (err) {
@@ -5117,6 +5121,17 @@ async function openTaskCard(id) {
     data = await apiFetch(`/api/cases/tasks/${id}`);
     await loadPlanfixPeople();
   } catch (err) {
+    if (err.data?.missingInPlanfix) {
+      closeTaskCard();
+      showToast("Задача уже отсутствовала в Planfix и убрана из ИСУ");
+      if (document.getElementById("tasksSection") &&
+          !document.getElementById("tasksSection").classList.contains("hidden")) {
+        loadTasksPage();
+      } else if (caseCardId) {
+        loadCaseCard();
+      }
+      return;
+    }
     body.innerHTML = `<div class="empty-hint" style="padding:24px;">Не удалось открыть задачу: ${escapeHtml(err.message)}</div>`;
     return;
   }
@@ -5210,10 +5225,15 @@ async function openTaskCard(id) {
     const assigneeIds = [...body.querySelectorAll("#taskCardAssignees input:checked")].map((c) => Number(c.value));
     const deadline = document.getElementById("taskCardDeadline").value || null;
     try {
-      await apiFetch(`/api/cases/tasks/${id}`, {
+      const result = await apiFetch(`/api/cases/tasks/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ assigneeIds, deadline }),
       });
+      if (result.removedMissing) {
+        showToast("Задача уже отсутствовала в Planfix и убрана из ИСУ");
+        closeTaskCard();
+        return loadTasksPage();
+      }
       showToast("Изменения ушли в Planfix");
       closeTaskCard();
       loadTasksPage();
@@ -5245,6 +5265,11 @@ async function openTaskCard(id) {
       const res = await apiFetch(`/api/cases/tasks/${id}/comment`, {
         method: "POST", body: JSON.stringify({ text }),
       });
+      if (res.removedMissing) {
+        showToast("Задача уже отсутствовала в Planfix и убрана из ИСУ");
+        closeTaskCard();
+        return loadTasksPage();
+      }
       field.value = "";
       showToast(res.authorApplied === false
         ? "Комментарий отправлен, но Planfix не дал подписать его вами — имя ушло в тексте"
