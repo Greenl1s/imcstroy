@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-29.2";
+const APP_BUILD = "2026-09-29.3";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -2994,14 +2994,11 @@ function wirePersonDetail(box, user, isAdmin, isMe) {
       if (!full_name) return showToast("Имя не может быть пустым");
       if (full_name === user.name) return showToast("Имя то же самое — менять нечего");
       try {
-        const res = await apiFetch(`/api/users/${user.id}`, {
+        await apiFetch(`/api/users/${user.id}`, {
           method: "PATCH", body: JSON.stringify({ full_name }),
         });
-        // В проектах специалисты записаны именами, и их пришлось
-        // переписать. Говорим, сколько: человек должен видеть, что
-        // правка задела не только эту карточку.
-        const fixed = res && res.renamed ? res.renamed.cases : 0;
-        showToast(fixed ? `Имя изменено, поправлено проектов: ${fixed}` : "Имя изменено");
+        // Имя пользователя не связано с экспертами в карточках дел.
+        showToast("Имя пользователя изменено");
         if (currentUser && currentUser.id === user.id) {
           currentUser.name = full_name;
           renderProfileCard();
@@ -6792,9 +6789,8 @@ function journalFilterOptions(key) {
     return all.concat((journalData?.managers || []).map((m) => ({ value: String(m.id), label: m.name })));
   }
   if (key === "expert") {
-    // В списке остаются и действующие сотрудники, и имена из старых
-    // проектов. Иначе после увольнения человека нельзя было бы найти
-    // его завершённые экспертизы.
+    // В списке остаются эксперты из папок и имена из старых проектов.
+    // Так исторические записи по-прежнему можно найти фильтром.
     const names = [
       ...(journalData?.experts || []).map((person) => person.name),
       ...(journalData?.rows || []).flatMap((row) => journalExpertNames(row.experts)),
