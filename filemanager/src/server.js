@@ -28,6 +28,7 @@ const documentTemplate = require("./documentTemplate");
 const documentGenerate = require("./documentGenerate");
 const documentDraft = require("./documentDraft");
 const pdfAttachments = require("./pdfAttachments");
+const russianName = require("./russianName");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
@@ -1666,8 +1667,9 @@ app.post("/api/documents/:type/preview", auth.requireAuth,
 
     const expertPaths = Array.isArray(data.expertPaths) ? data.expertPaths : [];
     const experts = expertPaths.length ? await readExpertsForGp(expertPaths) : [];
-    data.addedExpertsShort = experts.map((x) => x.name).join(", ");
+    data.addedExpertsShort = russianName.declineFullNames(experts.map((x) => x.name), "accusative");
     if (data.removedExpertShort && data.removedExpertShort.includes("/")) data.removedExpertShort = path.basename(data.removedExpertShort);
+    data.removedExpertShort = russianName.declineFullName(data.removedExpertShort, "genitive");
     const attachments = [];
     for (const file of req.files || []) {
       const buffer = await fs.promises.readFile(file.path);
@@ -1789,7 +1791,9 @@ async function prepareGp(req) {
     expertiseType: String(body.expertiseType || ""),
     questions,
     costText: `${formattedCost} (${body.costWords || ""})`,
+    costUnit: russianName.countForm(rawCost, "рубль", "рубля", "рублей"),
     termText: `${body.termDays || ""} (${body.termWords || ""})`,
+    termUnit: russianName.countForm(body.termDays, "рабочий день", "рабочих дня", "рабочих дней"),
     experts,
   };
 

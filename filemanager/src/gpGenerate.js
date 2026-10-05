@@ -2,6 +2,7 @@ const AdmZip = require("adm-zip");
 const path = require("path");
 const docxImages = require("./docxImages");
 const docxPlaceholders = require("./docxPlaceholders");
+const russianName = require("./russianName");
 
 const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "gp-template.docx");
 
@@ -33,6 +34,8 @@ const OPTIONAL = [
   { token: "{{Q_SUFFIX_NOUN}}", what: "окончание «вопрос(ам/у)»" },
   { token: "{{EXPERT_SUFFIX_INFO}}", what: "окончание «об эксперт(ах/е)»" },
   { token: "{{EXPERT_SUFFIX_ASSIGN}}", what: "окончание «эксперт(ам/у)»" },
+  { token: "{{COST_UNIT}}", what: "рубль/рубля/рублей" },
+  { token: "{{TERM_UNIT}}", what: "рабочий день/рабочих дня/рабочих дней" },
 ];
 
 // Экранирует спецсимволы XML и превращает переносы строк внутри значения
@@ -163,6 +166,17 @@ function buildGP(data, withAttachments, templateBuffer) {
   // первое же сохранение шаблона на сайте оставило бы в письме
   // «{{CASE_NUMBER}}» вместо номера дела — и заметили бы это в суде.
   let xml = docxPlaceholders.heal(docEntry.getData().toString("utf8"));
+  // Старые пользовательские образцы содержат неизменяемые «рублей» и
+  // «рабочих дней». Превращаем их в метки при сборке, поэтому правильное
+  // окончание работает без обязательного сброса образца к эталону.
+  xml = xml
+    .replace(" рублей с НДС", " {{COST_UNIT}} с НДС")
+    .replace(" рабочих дней с момента", " {{TERM_UNIT}} с момента")
+    .replace("АО «Научно-исследовательский центр «Строительство», имеет возможность", "АО «Научно-исследовательский центр «Строительство» имеет возможность")
+    .replace("отраслевых лабораторий, обладающим необходимым", "отраслевых лабораторий, обладающих необходимым")
+    .replace("Так же Дирекция выполняет функцию", "Также Дирекция выполняет функцию")
+    .replace("в соответствии с положениями норм № 73-ФЗ", "в соответствии с положениями Федерального закона № 73-ФЗ")
+    .replace("на основании определений Судов", "на основании определений судов");
 
   // Проверяем ДО подстановки и все метки разом. Раньше отсутствие
   // «простой» метки проходило молча: подстановка просто не находила,
@@ -190,6 +204,8 @@ function buildGP(data, withAttachments, templateBuffer) {
     "{{EXPERTISE_TYPE}}": data.expertiseType,
     "{{COST_TEXT}}": data.costText,
     "{{TERM_TEXT}}": data.termText,
+    "{{COST_UNIT}}": data.costUnit,
+    "{{TERM_UNIT}}": data.termUnit,
     "{{Q_SUFFIX_ADJ}}": questionCount > 1 ? "ым" : "ому",
     "{{Q_SUFFIX_NOUN}}": questionCount > 1 ? "ам" : "у",
     "{{EXPERT_SUFFIX_INFO}}": expertCount > 1 ? "ах" : "е",
@@ -216,7 +232,9 @@ function buildGP(data, withAttachments, templateBuffer) {
 
   let expertsXml = "";
   for (const expert of data.experts) {
-    expertsXml += nameMold.xml.replace("{{EXPERT_NAME}}", escapeXmlText(expert.name));
+    expertsXml += nameMold.xml.replace(
+      "{{EXPERT_NAME}}", escapeXmlText(russianName.declineFullName(expert.name, "dative"))
+    );
     for (const line of expert.descLines) {
       expertsXml += descMold.xml.replace("{{EXPERT_DESC_LINE}}", escapeXmlText(line));
     }

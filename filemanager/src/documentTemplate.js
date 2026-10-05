@@ -11,6 +11,9 @@ const listPath = (type) => `${typeDir(type)}/образцы.json`;
 const fileOf = (type, id) => `${typeDir(type)}/${id}.docx`;
 const backupOf = (type, id) => `${typeDir(type)}/${id}.до-правки.docx`;
 const originalOf = (type) => path.join(__dirname, "..", "templates", "documents", documentTypes.get(type).templateFile);
+const OPTIONAL_TOKENS = new Set([
+  "{{EXTENSION_DAY_UNIT}}", "{{HEARING_HOUR_UNIT}}", "{{HEARING_MINUTE_UNIT}}",
+]);
 
 function bad(message, status = 400) { const e = new Error(message); e.status = status; return e; }
 function cleanName(raw) {
@@ -26,8 +29,13 @@ function inspect(type, buffer) {
     const expected = new Set(docxPlaceholders.listPlaceholders(
       new AdmZip(originalOf(type)).getEntry("word/document.xml").getData().toString("utf8")));
     const actual = new Set(docxPlaceholders.listPlaceholders(entry.getData().toString("utf8")));
-    const missing = [...expected].filter((token) => !actual.has(token)).map((token) => ({ token }));
-    return { ok: !missing.length, broken: false, missing, missingOptional: [] };
+    const missing = [...expected]
+      .filter((token) => !OPTIONAL_TOKENS.has(token) && !actual.has(token))
+      .map((token) => ({ token }));
+    const missingOptional = [...expected]
+      .filter((token) => OPTIONAL_TOKENS.has(token) && !actual.has(token))
+      .map((token) => ({ token }));
+    return { ok: !missing.length, broken: false, missing, missingOptional };
   } catch (err) {
     return { ok: false, broken: true, message: err.message, missing: [], missingOptional: [] };
   }

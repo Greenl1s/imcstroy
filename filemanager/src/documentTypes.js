@@ -6,9 +6,9 @@ const TYPES = {
     fields: [
       ["contractDate", "Дата договора", "date", true],
       ["customerIntro", "Полное наименование заказчика", "textarea", true],
-      ["customerRepresentative", "Представитель заказчика (ФИО)", "text", true],
+      ["customerRepresentative", "Представитель заказчика — ФИО в именительном падеже (склоняется автоматически)", "text", true],
       ["customerPosition", "Должность представителя", "text", true],
-      ["customerAuthority", "Действует на основании", "text", true],
+      ["customerAuthority", "Полная фраза об основании полномочий (например: действующего на основании устава)", "text", true],
       ["workSubject", "Предмет работ", "textarea", true],
       ["questions", "Вопросы исследования", "list", true],
       ["termText", "Срок выполнения", "text", true, "20 рабочих дней"],
@@ -31,7 +31,7 @@ const TYPES = {
     allowNewProject: true,
     fields: [
       ["recipientOrganization", "Организация получателя", "text", true],
-      ["recipientPerson", "Получатель: должность и ФИО", "text", true],
+      ["recipientPerson", "Получатель: должность и ФИО в дательном падеже", "text", true],
       ["recipientGreeting", "Имя и отчество для обращения (без «Уважаемый»)", "text", true],
       ["caseNumber", "Номер дела / запроса", "text", true],
       ["expertiseType", "Вид экспертизы", "text", true],
@@ -98,7 +98,7 @@ const TYPES = {
     templateFile: "petition-review-questions.docx", group: "petition", folder: "petitions", filePrefix: "Ходатайство об ознакомлении с вопросами",
     fields: petitionCommon([
       ["courtGenitive", "Суд в родительном падеже", "text", true],
-      ["judgeGenitive", "Судья в родительном падеже", "text", true],
+      ["judgeGenitive", "Судья — ФИО в именительном падеже (склоняется автоматически)", "text", true],
       ["orderDate", "Дата определения", "date", true],
       ["questionsDueDate", "Дата предоставления вопросов", "date", true],
     ], false),
@@ -108,9 +108,9 @@ const TYPES = {
     templateFile: "petition-video-hearing.docx", group: "petition", folder: "petitions", filePrefix: "Ходатайство о веб-конференции",
     fields: petitionCommon([
       ["courtGenitive", "Суд в родительном падеже", "text", true],
-      ["judgeGenitive", "Судья в родительном падеже", "text", true],
+      ["judgeGenitive", "Судья — ФИО в именительном падеже (склоняется автоматически)", "text", true],
       ["orderDate", "Дата определения", "date", true],
-      ["calledExpertDative", "Вызываемый эксперт (кому)", "text", true, "Воровкину Павлу Александровичу"],
+      ["calledExpertDative", "Вызываемый эксперт — ФИО в именительном падеже (склоняется автоматически)", "text", true, "Воровкин Павел Александрович"],
       ["hearingDate", "Дата заседания", "date", true],
       ["hearingHour", "Часы", "number", true], ["hearingMinute", "Минуты", "number", true, "00"],
     ], false),
@@ -122,7 +122,7 @@ function petitionCommon(extra, includeOrder = true) {
     ["court", "Суд", "text", true], ["caseNumber", "Номер дела", "text", true],
     ["judge", "Судья", "text", true],
   ];
-  if (includeOrder) common.push(["orderReference", "Ссылка на определение суда", "textarea", true]);
+  if (includeOrder) common.push(["orderReference", "Продолжение фразы «В соответствии с определением судьи…»", "textarea", true]);
   return common.concat(extra);
 }
 

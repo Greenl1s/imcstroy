@@ -1,17 +1,18 @@
 const AdmZip = require("adm-zip");
 const docxPlaceholders = require("./docxPlaceholders");
 const docxImages = require("./docxImages");
+const russianName = require("./russianName");
 
 function escapeXml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .split(/\r?\n/).join('</w:t><w:br/><w:t xml:space="preserve">');
 }
-function dateRu(value) {
+function dateRu(value, withYearAbbreviation = true) {
   if (!value) return "";
   const d = new Date(`${value}T12:00:00`);
   if (Number.isNaN(d.getTime())) return String(value);
   const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} г.`;
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}${withYearAbbreviation ? " г." : ""}`;
 }
 function money(value) {
   const n = Number(String(value || "0").replace(/\s/g, "").replace(",", "."));
@@ -114,7 +115,8 @@ function composed(type, data) {
   const paymentClause = `с предоплатой ${data.prepaymentPercent || 100}%, на основании выставленного Исполнителем счёта, что составляет ${money(amount)} (${numberWords(amount)}) рублей 00 копеек, в том числе НДС ${vatPercent}% — ${money(vat)} (${numberWords(Math.round(vat))}) рублей 00 копеек`;
   return {
     CONTRACT_DATE: dateRu(data.contractDate), CUSTOMER_INTRO: data.customerIntro,
-    CUSTOMER_REPRESENTATIVE: data.customerRepresentative, CUSTOMER_POSITION: data.customerPosition,
+    CUSTOMER_REPRESENTATIVE: russianName.declineFullName(data.customerRepresentative, "genitive"),
+    CUSTOMER_POSITION: data.customerPosition,
     CUSTOMER_AUTHORITY: data.customerAuthority,
     EXECUTOR_INTRO: "директора дирекции научно-технических проектов и экспертиз Воровкина Павла Александровича, действующего на основании доверенности №86 от 05.03.2025 г.",
     WORK_SUBJECT: data.workSubject, TERM_TEXT: data.termText, COST_CLAUSE: costClause,
@@ -130,12 +132,18 @@ function composed(type, data) {
     COURT: data.court, CASE_NUMBER: data.caseNumber, JUDGE: data.judge, ORDER_REFERENCE: data.orderReference,
     REMOVED_EXPERT_SHORT: data.removedExpertShort, ADDED_EXPERTS_SHORT: data.addedExpertsShort,
     ADDITIONAL_MATERIALS_INTRO: data.additionalMaterialsIntro, INSPECTION_KIND: data.inspectionKind,
-    INSPECTION_DETAILS: data.inspectionDetails, EXTENSION_REASON: data.extensionReason,
+    INSPECTION_DETAILS: `${data.caseNumber || ""}. ${data.inspectionDetails || ""}`.trim(),
+    EXTENSION_REASON: data.extensionReason,
     EXTENSION_DAYS: data.extensionDays, EXTENSION_FROM: data.extensionFrom, EXPANSION_BASIS: data.expansionBasis,
-    COURT_GENITIVE: data.courtGenitive, JUDGE_GENITIVE: data.judgeGenitive,
-    ORDER_DATE: dateRu(data.orderDate), QUESTIONS_DUE_DATE: dateRu(data.questionsDueDate),
-    CALLED_EXPERT_DATIVE: data.calledExpertDative, HEARING_DATE: dateRu(data.hearingDate),
+    EXTENSION_DAY_UNIT: russianName.countForm(data.extensionDays, "рабочий день", "рабочих дня", "рабочих дней"),
+    COURT_GENITIVE: data.courtGenitive,
+    JUDGE_GENITIVE: russianName.declineFullName(data.judgeGenitive || data.judge, "genitive"),
+    ORDER_DATE: dateRu(data.orderDate, false), QUESTIONS_DUE_DATE: dateRu(data.questionsDueDate, false),
+    CALLED_EXPERT_DATIVE: russianName.declineFullName(data.calledExpertDative, "dative"),
+    HEARING_DATE: dateRu(data.hearingDate, false),
     HEARING_HOUR: String(data.hearingHour || "").padStart(2, "0"), HEARING_MINUTE: String(data.hearingMinute || "").padStart(2, "0"),
+    HEARING_HOUR_UNIT: russianName.countForm(data.hearingHour, "час", "часа", "часов"),
+    HEARING_MINUTE_UNIT: russianName.countForm(data.hearingMinute, "минута", "минуты", "минут"),
   };
 }
 function generate(type, data, templateBuffer, { experts = [], attachmentFiles = [] } = {}) {
@@ -143,6 +151,41 @@ function generate(type, data, templateBuffer, { experts = [], attachmentFiles = 
   const entry = zip.getEntry("word/document.xml");
   if (!entry) throw Object.assign(new Error("Образец повреждён: нет word/document.xml"), { status: 400 });
   let xml = docxPlaceholders.heal(entry.getData().toString("utf8"));
+  // Известные формулировки исправляем и в пользовательских образцах,
+  // уже сохранённых на сервере. Поэтому обновление не требует сбрасывать
+  // вручную отредактированные шаблоны к исходным.
+  xml = xml
+    .replaceAll("определением Судьи", "определением судьи")
+    .replaceAll("по Делу", "по делу")
+    .replaceAll("прошу Суд", "прошу суд")
+    .replaceAll("поставленным Судом", "поставленным судом")
+    .replaceAll("разъяснениями Суда", "разъяснениями суда")
+    .replaceAll("представленные на исследования материалы", "представленные на исследование материалы")
+    .replace(
+      "{{CUSTOMER_INTRO}}, именуемое в дальнейшем «Заказчик», в лице {{CUSTOMER_REPRESENTATIVE}}, {{CUSTOMER_AUTHORITY}} с одной стороны», и",
+      "{{CUSTOMER_INTRO}} (далее — «Заказчик»), в лице {{CUSTOMER_REPRESENTATIVE}}, {{CUSTOMER_AUTHORITY}}, с одной стороны, и"
+    )
+    .replace("АО «Научно-исследовательский центр «Строительство», в настоящее время", "АО «Научно-исследовательский центр «Строительство» в настоящее время");
+  if (type === "petition_replace_expert") {
+    // Совместимость с уже сохранёнными образцами: старая фраза содержала
+    // жёсткое «её» и ошибалась для эксперта-мужчины. Обе позиции удаляемого
+    // эксперта теперь требуют родительного падежа, независимо от пола.
+    xml = xml
+      .replace(", для проведения судебной экспертизы прошу суд вывести её из группы экспертов, а вместо ", " прошу суд вместо ")
+      .replace(", для проведения судебной экспертизы прошу Суд вывести её из группы экспертов, а вместо ", " прошу суд вместо ")
+      .replace(" добавить в группу экспертов ", " включить в группу экспертов ");
+  }
+  if (type === "petition_extension") {
+    xml = xml.replace(" рабочих дней с ", " {{EXTENSION_DAY_UNIT}} с ");
+  }
+  if (type === "petition_video_hearing") {
+    xml = xml
+      .replace(" часов ", " {{HEARING_HOUR_UNIT}} ")
+      .replace(" минут", " {{HEARING_MINUTE_UNIT}}");
+  }
+  if (type === "petition_request_evidence") {
+    xml = xml.replace("В связи с открывшимся обстоятельством, прошу", "В связи с этим прошу");
+  }
   if (xml.includes("{{QUESTION_ITEM}}")) xml = repeatParagraph(xml, "{{QUESTION_ITEM}}", data.questions);
   if (xml.includes("{{MATERIAL_ITEM}}")) xml = repeatParagraph(xml, "{{MATERIAL_ITEM}}", data.materials);
   if (xml.includes("{{APPLICATION_ITEM}}")) xml = repeatParagraph(xml, "{{APPLICATION_ITEM}}", data.applications);
