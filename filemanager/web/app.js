@@ -2593,8 +2593,9 @@ function fillDocumentFromCase() {
   if (!kase) return;
   const values = {
     court: kase.court_or_customer || "", caseNumber: kase.case_number || "", judge: kase.judge_name || "",
+    judgeGenitive: kase.judge_name || "",
     expertiseType: kase.expertise_type || "",
-    orderReference: `определением ${kase.judge_name || "судьи"} ${kase.court_or_customer || "суда"} по делу № ${kase.case_number || ""}`,
+    orderReference: `по делу № ${kase.case_number || ""}`,
   };
   for (const [name, value] of Object.entries(values)) {
     const input = document.getElementById(documentFieldId(name));
