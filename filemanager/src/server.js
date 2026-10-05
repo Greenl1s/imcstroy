@@ -27,6 +27,7 @@ const documentTypes = require("./documentTypes");
 const documentTemplate = require("./documentTemplate");
 const documentGenerate = require("./documentGenerate");
 const documentDraft = require("./documentDraft");
+const pdfAttachments = require("./pdfAttachments");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
@@ -1670,9 +1671,17 @@ app.post("/api/documents/:type/preview", auth.requireAuth,
     const attachments = [];
     for (const file of req.files || []) {
       const buffer = await fs.promises.readFile(file.path);
-      if (!docxImages.imageSize(buffer)) throw gpFail(`Файл «${file.originalname}» не является изображением JPEG или PNG`);
+      const isPdf = file.mimetype === "application/pdf" || /\.pdf$/i.test(file.originalname);
+      if (isPdf) {
+        attachments.push(...await pdfAttachments.pdfToImages(buffer, file.originalname));
+        continue;
+      }
+      if (!docxImages.imageSize(buffer)) {
+        throw gpFail(`Файл «${file.originalname}» должен быть изображением JPEG/PNG или документом PDF`);
+      }
       attachments.push({ name: file.originalname, buffer });
     }
+    if (attachments.length > 80) throw gpFail("В приложении получилось больше 80 изображений. Разделите документ на несколько файлов");
     const { item: sample, buffer: templateBuffer } = await documentTemplate.readSample(filesLib.safeResolve, type.id, data.templateId);
     const state = documentTemplate.inspect(type.id, templateBuffer);
     if (!state.ok) throw gpFail(`Образец «${sample.name}» повреждён: не хватает ${state.missing.map((x) => x.token).join(", ")}`);
@@ -1767,13 +1776,19 @@ async function prepareGp(req) {
 
   const experts = await readExpertsForGp(expertPaths);
 
+  const rawCost = String(body.costAmount || "").replace(/[\s\u00a0]+/g, "");
+  if (!/^\d+(?:[.,]\d+)?$/.test(rawCost)) throw gpFail("Стоимость должна быть указана цифрами");
+  const [rubles, kopecks] = rawCost.replace(",", ".").split(".");
+  const formattedCost = rubles.replace(/\B(?=(\d{3})+(?!\d))/g, " ") +
+    (kopecks ? `,${kopecks}` : "");
+
   const data = {
     courtHeader: String(body.courtHeader || ""),
     caseNumber: String(body.caseNumber || ""),
     courtGenitive: String(body.courtGenitive || ""),
     expertiseType: String(body.expertiseType || ""),
     questions,
-    costText: `${body.costAmount || ""} (${body.costWords || ""})`,
+    costText: `${formattedCost} (${body.costWords || ""})`,
     termText: `${body.termDays || ""} (${body.termWords || ""})`,
     experts,
   };
@@ -1791,7 +1806,7 @@ async function prepareGp(req) {
 
   return {
     kase, gpOutputDir, data, experts, expertPaths, templateBuffer,
-    caseId, ...gpFileNames(body.caseNumber),
+    caseId, questions, ...gpFileNames(body.caseNumber),
   };
 }
 
@@ -1804,6 +1819,11 @@ app.post("/api/gp/generate", auth.requireAuth, async (req, res) => {
     const destDir = filesLib.safeResolve(p.gpOutputDir);
     await fs.promises.mkdir(destDir, { recursive: true });
     assertNamesFree(destDir, [p.plainName, p.withDocsName]);
+
+    await db.query(
+      "UPDATE cases SET questions = $2::jsonb, updated_at = now() WHERE id = $1",
+      [p.caseId, JSON.stringify(p.questions)]
+    );
 
     const written = await writeGpFiles(req, p.gpOutputDir, destDir, {
       plainName: p.plainName, withDocsName: p.withDocsName,
@@ -1867,6 +1887,7 @@ app.post("/api/gp/preview", auth.requireAuth, async (req, res) => {
         plainName: p.plainName,
         withDocsName: p.withDocsName,
         expertPaths: p.expertPaths,
+        questions: p.questions,
       },
     });
 
@@ -1954,6 +1975,11 @@ app.post("/api/gp/preview/:id/save", auth.requireAuth, async (req, res) => {
     const destDir = filesLib.safeResolve(meta.gpOutputDir);
     await fs.promises.mkdir(destDir, { recursive: true });
     assertNamesFree(destDir, [meta.plainName, meta.withDocsName]);
+
+    await db.query(
+      "UPDATE cases SET questions = $2::jsonb, updated_at = now() WHERE id = $1",
+      [meta.caseId, JSON.stringify(meta.questions || [])]
+    );
 
     const written = await writeGpFiles(req, meta.gpOutputDir, destDir, {
       plainName: meta.plainName, withDocsName: meta.withDocsName,
@@ -2199,7 +2225,7 @@ app.post("/api/trash/:id/restore", auth.requireAuth, async (req, res) => {
   }
 });
 
-app.delete("/api/trash/:id", auth.requireAuth, async (req, res) => {
+app.delete("/api/trash/:id", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     const entry = await trash.getEntry(req.params.id);
     await trash.purge(req.params.id, req.user);
@@ -2210,8 +2236,8 @@ app.delete("/api/trash/:id", auth.requireAuth, async (req, res) => {
   }
 });
 
-// Очистка вручную: сотрудник убирает своё, администратор — всю корзину.
-app.post("/api/trash/empty", auth.requireAuth, async (req, res) => {
+// Окончательно удалять файлы может только администратор.
+app.post("/api/trash/empty", auth.requireAuth, auth.requireAdmin, async (req, res) => {
   try {
     const removed = await trash.empty(req.user);
     events.log(req.user, "trash_empty", { details: { removed } });

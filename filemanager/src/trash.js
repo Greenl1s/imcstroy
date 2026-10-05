@@ -183,7 +183,9 @@ async function restore(id, user) {
 async function purge(id, user) {
   const entry = await getEntry(id);
   if (!entry) throw Object.assign(new Error("Запись не найдена"), { status: 404 });
-  if (user && !canManage(user, entry)) throw Object.assign(new Error("Нет прав на удаление"), { status: 403 });
+  if (user && user.role !== "admin") {
+    throw Object.assign(new Error("Окончательно удалять файлы может только администратор"), { status: 403 });
+  }
 
   await fsp.rm(path.join(trashRootAbs(), entry.storage_key), { recursive: true, force: true });
   await db.query("DELETE FROM fm_trash WHERE id = $1", [id]);
@@ -210,8 +212,11 @@ async function purgeCaseTasksSafely(originalPath) {
   }
 }
 
-/** Очистка вручную: сотрудник чистит своё, администратор — всю корзину. */
+/** Очистка вручную доступна только администратору. */
 async function empty(user) {
+  if (!user || user.role !== "admin") {
+    throw Object.assign(new Error("Очищать корзину может только администратор"), { status: 403 });
+  }
   const entries = await listTrash(user);
   for (const entry of entries) await purge(entry.id, user);
   return entries.length;

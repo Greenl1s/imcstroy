@@ -132,6 +132,12 @@ function validateName(type, name) {
   return clean;
 }
 
+function normalizeQuestions(value) {
+  if (value == null || value === "") return [];
+  const list = Array.isArray(value) ? value : String(value).split(/\r?\n/);
+  return list.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 100);
+}
+
 // Удалённые проекты (папку убрали в корзину) в списках не показываем:
 // запись остаётся в базе ради истории, но выбирать её больше нельзя.
 const CASE_LIST_QUERY = `
@@ -1456,6 +1462,7 @@ cases.post("/", async (req, res) => {
       type, name, stage, direct_assignment,
       court_or_customer, case_number, manager_id, experts, year, description,
       organization, party1, party2, judge_name, expertise_type,
+      questions,
       batchId, fileAssignments,
     } = req.body || {};
 
@@ -1484,12 +1491,12 @@ cases.post("/", async (req, res) => {
             SET deleted_at = NULL, type = $2, stage = $3, status = 'waiting', is_cancelled = false,
                 court_or_customer = $4, case_number = $5, manager_id = $6, experts = $7, year = $8,
                 description = $9, organization = $10, party1 = $11, party2 = $12, judge_name = $13,
-                folder_path = $14, expertise_type = $15, updated_at = now()
+                folder_path = $14, expertise_type = $15, questions = $16::jsonb, updated_at = now()
           WHERE id = $1 RETURNING *`,
         [deletedTwin[0].id, type, stage, court_or_customer || null, case_number || null,
          manager_id || null, experts || null, year || null, description || null,
          organization || null, party1 || null, party2 || null, judge_name || null, folderPath,
-         expertise_type || null]
+         expertise_type || null, JSON.stringify(normalizeQuestions(questions))]
       );
       const restored = revived[0];
       await db.query(
@@ -1507,13 +1514,13 @@ cases.post("/", async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO cases
          (type, name, stage, status, court_or_customer, case_number, manager_id, experts, year, description,
-          organization, party1, party2, judge_name, folder_path, expertise_type)
-       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          organization, party1, party2, judge_name, folder_path, expertise_type, questions)
+       VALUES ($1,$2,$3,'waiting',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
        RETURNING *`,
       [type, cleanName, stage, court_or_customer || null, case_number || null,
        manager_id || null, experts || null, year || null, description || null,
        organization || null, party1 || null, party2 || null, judge_name || null, folderPath,
-       expertise_type || null]
+       expertise_type || null, JSON.stringify(normalizeQuestions(questions))]
     );
     const created = rows[0];
 
@@ -1590,6 +1597,11 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
       values.push(req.body[f] === "" ? null : req.body[f]);
       sets.push(`${f} = $${values.length}`);
     }
+  }
+
+  if (req.body?.questions !== undefined) {
+    values.push(JSON.stringify(normalizeQuestions(req.body.questions)));
+    sets.push(`questions = $${values.length}::jsonb`);
   }
 
   if (req.body?.type !== undefined) {
