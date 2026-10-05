@@ -912,9 +912,10 @@ app.post("/api/equipment/adopt-file", auth.requireAuth, async (req, res) => {
     const adopted = await equipment.adoptUploadedFile(
       Number(req.body?.id), String(req.body?.path || ""), req.body?.kind
     );
-    res.json({ adopted });
+    if (!adopted) return res.status(404).json({ message: "Прибор не найден" });
+    res.json({ adopted: true });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.status || 500).json({ message: err.message });
   }
 });
 
@@ -2371,7 +2372,7 @@ app.post("/api/upload", auth.requireAuth, upload.single("file"), cleanupTempUplo
     const relDest = (req.body.path || "/").replace(/\/+$/, "") + "/" + (rawRelativePath || fixedName).split(path.sep).join("/");
     events.log(req.user, "upload", { path: relDest, name: path.basename(destPath) });
 
-    res.json({ ok: true });
+    res.json({ ok: true, path: relDest, name: path.basename(destPath) });
   } catch (err) {
     console.error("Не удалось загрузить файл:", err);
     res.status(400).json({ message: "Не удалось загрузить файл: " + err.message });
