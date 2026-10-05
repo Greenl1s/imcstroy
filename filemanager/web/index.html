@@ -945,12 +945,9 @@
       </section>
 
       <label>ФИО эксперта
-        <span class="settings-row">
-          <input type="text" id="expertInfoName" maxlength="120" autocomplete="off">
-          <button type="button" class="upload-btn" id="expertInfoRename">Переименовать</button>
-        </span>
+        <input type="text" id="expertInfoName" maxlength="120" autocomplete="off">
         <span class="field-hint">Так эксперт подписан в гарантийном письме и так называется
-        его папка. Уже созданные письма не меняются — они лежат готовыми файлами.</span>
+        его папка. Новое ФИО применяется вместе с кнопкой «Сохранить». Уже созданные письма не меняются.</span>
       </label>
 
       <p class="access-note" id="expertInfoImported" style="display:none;"></p>
@@ -1011,7 +1008,7 @@
      ещё ничего нет: письмо лежит в черновике. -->
 <div id="gpPreviewFull" class="tpl-full hidden">
   <div class="tpl-full-bar">
-    <span class="tpl-full-title" id="gpPreviewTitle">Предпросмотр письма</span>
+    <span class="tpl-full-title" id="gpPreviewTitle">Редактор письма</span>
     <span class="gp-preview-tabs">
       <button type="button" class="gp-preview-tab on" data-gp-view="plain">Без приложения</button>
       <button type="button" class="gp-preview-tab" data-gp-view="docs">С приложением</button>
@@ -1054,14 +1051,14 @@
       </label>
       <div id="documentFields" class="document-fields"></div>
       <p id="documentFormError" class="error-text"></p>
-      <div class="modal-actions"><button class="primary" type="submit">Предпросмотр</button></div>
+      <div class="modal-actions"><button class="primary" type="submit">Открыть редактор</button></div>
     </form>
   </div>
 </div>
 
 <div id="documentPreviewFull" class="tpl-full hidden">
   <div class="tpl-full-bar">
-    <span class="tpl-full-title" id="documentPreviewTitle">Предпросмотр документа</span>
+    <span class="tpl-full-title" id="documentPreviewTitle">Редактор документа</span>
     <span class="tpl-full-hint">Документ можно поправить вручную перед сохранением</span>
     <span class="gp-preview-acts">
       <button type="button" class="tpl-full-close" id="documentPreviewBack">Вернуться и изменить</button>
@@ -1166,10 +1163,7 @@
       </div>
 
       <div class="modal-actions">
-        <!-- Не «Создать»: письмо сначала показывается целиком, и только
-             из предпросмотра сохраняется в дело. Кнопка должна обещать
-             ровно то, что сделает. -->
-        <button class="primary" type="submit">Предпросмотр</button>
+        <button class="primary" type="submit">Открыть редактор</button>
       </div>
     </form>
   </div>
@@ -1245,6 +1239,9 @@
       </div>
       <label>Описание <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
         <input type="text" id="pfDescription">
+      </label>
+      <label>Вопросы из запроса <span class="row-subtitle" style="font-weight:400;">(по одному в строке)</span>
+        <textarea id="pfQuestions" rows="5" placeholder="1. Первый вопрос&#10;2. Второй вопрос"></textarea>
       </label>
 
       <div>
@@ -1356,6 +1353,9 @@
       </div>
       <label>Описание
         <input type="text" id="ceDescription">
+      </label>
+      <label>Вопросы из запроса <span class="row-subtitle" style="font-weight:400;">(по одному в строке)</span>
+        <textarea id="ceQuestions" rows="5"></textarea>
       </label>
 
       <p id="caseEditError" class="error-text"></p>

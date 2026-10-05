@@ -637,7 +637,8 @@ async function loadTrash() {
 
 function renderTrash() {
   els.trashList.innerHTML = "";
-  els.trashEmptyBtn.classList.toggle("hidden", trashItems.length === 0);
+  const canPurge = currentUser?.role === "admin";
+  els.trashEmptyBtn.classList.toggle("hidden", !canPurge || trashItems.length === 0);
 
   if (trashItems.length === 0) {
     els.trashList.innerHTML = '<div class="empty-hint">Корзина пуста<br>Сюда попадает всё, что вы удаляете</div>';
@@ -668,11 +669,11 @@ function renderTrash() {
       <span class="left-days${soon ? " warn" : ""}">${trashDaysText(item.days_left)}</span>
       <span class="trash-actions">
         <button class="row-btn" data-act="restore">Восстановить</button>
-        <button class="row-btn danger" data-act="purge">Удалить</button>
+        ${canPurge ? '<button class="row-btn danger" data-act="purge">Удалить навсегда</button>' : ""}
       </span>
     `;
     row.querySelector('[data-act="restore"]').addEventListener("click", () => restoreFromTrash(item));
-    row.querySelector('[data-act="purge"]').addEventListener("click", () => purgeFromTrash(item));
+    row.querySelector('[data-act="purge"]')?.addEventListener("click", () => purgeFromTrash(item));
     els.trashList.appendChild(row);
   }
 }
@@ -706,10 +707,8 @@ async function purgeFromTrash(item) {
 els.trashRefreshBtn.addEventListener("click", () => loadTrash());
 
 els.trashEmptyBtn.addEventListener("click", async () => {
-  const what = currentUser && currentUser.role === "admin"
-    ? "всю корзину"
-    : "всё, что вы удаляли";
-  if (!confirm(`Очистить ${what}? Вернуть будет нельзя.`)) return;
+  if (currentUser?.role !== "admin") return showToast("Очищать корзину может только администратор");
+  if (!confirm("Очистить всю корзину? Вернуть файлы будет нельзя.")) return;
   try {
     const { removed } = await apiFetch("/api/trash/empty", { method: "POST" });
     showToast(removed > 0 ? `Корзина очищена: ${removed}` : "Корзина уже пуста");
@@ -1826,39 +1825,6 @@ async function loadExpertScans(name) {
   });
 }
 
-/**
- * Переименование эксперта.
- *
- * Отдельной кнопкой, а не вместе с сохранением сведений: это правка,
- * которая задевает проекты, и делать её заодно, между делом, нельзя.
- */
-bind(document.getElementById("expertInfoRename"), "click", async () => {
-  const field = document.getElementById("expertInfoName");
-  const next = field.value.trim();
-  const was = expertInfoState.name;
-  if (!next) return showToast("Укажите ФИО");
-  if (next === was) return showToast("Имя то же самое — менять нечего");
-  if (!confirm(`Переименовать «${was}» в «${next}»?\n\n` +
-    "Поменяется имя папки и оба файла сведений. Уже созданные письма не изменятся — " +
-    "они лежат готовыми файлами.")) return;
-
-  try {
-    const res = await apiFetch(`/api/experts/${encodeURIComponent(was)}`, {
-      method: "PATCH", body: JSON.stringify({ name: next }),
-    });
-    showToast(`Эксперт переименован в «${res.to || next}»`);
-    forgetLookups();
-    await openExpertInfo(res.to || next, { only: Boolean(expertInfoOnly) });
-    if (currentPath.startsWith(EXPERTS_PATH)) {
-      // Стояли в папке эксперта — её больше нет под прежним именем.
-      renderFolder(expertInfoOnly ? `${EXPERTS_PATH}/${res.to || next}` : currentPath);
-    }
-  } catch (err) {
-    field.value = was;
-    settingsError(err);
-  }
-});
-
 bind(document.getElementById("expertInfoDelete"), "click", async () => {
   if (!currentUser || currentUser.role !== "admin") {
     return showToast("Удалять экспертов может только администратор");
@@ -1937,6 +1903,20 @@ bind(document.getElementById("expertInfoSaveBtn"), "click", async (e) => {
   const label = button.textContent;
   button.textContent = "Сохраняем…";
   try {
+    const enteredName = document.getElementById("expertInfoName").value.trim();
+    if (!enteredName) throw new Error("Укажите ФИО эксперта");
+    const oldName = expertInfoState.name;
+    if (enteredName !== oldName) {
+      const renamed = await apiFetch(`/api/experts/${encodeURIComponent(oldName)}`, {
+        method: "PATCH", body: JSON.stringify({ name: enteredName }),
+      });
+      expertInfoState.name = renamed.to || enteredName;
+      if (currentPath === `${EXPERTS_PATH}/${oldName}`) {
+        currentPath = `${EXPERTS_PATH}/${expertInfoState.name}`;
+      }
+      forgetLookups();
+      showToast(`Эксперт переименован в «${expertInfoState.name}»`);
+    }
     const res = await apiFetch(`/api/experts/${encodeURIComponent(expertInfoState.name)}/info`, {
       method: "PUT", body: JSON.stringify({ items }),
     });
@@ -1944,7 +1924,7 @@ bind(document.getElementById("expertInfoSaveBtn"), "click", async (e) => {
       ? `Сохранено, но не нашлись сканы: ${res.missing.join(", ")}`
       : "Сведения сохранены — оба файла пересобраны");
     if (openPreview && res.preview_path) {
-      const url = `/office.html?mode=view&path=${encodeURIComponent(res.preview_path)}`;
+      const url = `/office.html?path=${encodeURIComponent(res.preview_path)}`;
       if (previewTab) previewTab.location.href = url;
       else window.open(url, "_blank");
     } else if (previewTab) {
@@ -2405,6 +2385,49 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeCreateMenus();
 });
 
+/**
+ * Единый Escape для окон приложения. Обработчик работает в capture-фазе,
+ * чтобы один Esc закрыл только верхнее окно, а старые локальные обработчики
+ * не успели одновременно закрыть ещё и окно под ним.
+ */
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+
+  const fullscreens = [
+    ["documentPreviewFull", "documentPreviewBack"],
+    ["gpPreviewFull", "gpPreviewBack"],
+    ["tplFullscreen", "tplFullClose"],
+  ];
+  for (const [panelId, closeId] of fullscreens) {
+    const panel = document.getElementById(panelId);
+    if (panel && !panel.classList.contains("hidden")) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      document.getElementById(closeId)?.click();
+      return;
+    }
+  }
+
+  const overlays = [...document.querySelectorAll(".modal-overlay:not(.hidden)")];
+  const overlay = overlays[overlays.length - 1];
+  if (overlay) {
+    const close = overlay.querySelector(".modal-header .back-btn, .modal-header [id$='CloseBtn']");
+    if (close) {
+      event.preventDefault(); event.stopImmediatePropagation(); close.click(); return;
+    }
+  }
+
+  const openMenu = document.querySelector(
+    "#itemContextMenu:not(.hidden), #jrFilterMenu, .stage-menu:not(.hidden), #createSideMenu:not(.hidden), #documentMenu:not(.hidden), #caseMoreMenu:not(.hidden)"
+  );
+  if (openMenu) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    openMenu.classList.add("hidden");
+    closeCreateMenus();
+    if (typeof closeStageMenus === "function") closeStageMenus();
+    if (typeof closeJournalFilterMenu === "function") closeJournalFilterMenu();
+  }
+}, true);
+
 /** Открыта ли сейчас папка (а не две колонки «Главной»). */
 function isFolderViewOpen() {
   return Boolean(els.folderView) && !els.folderView.classList.contains("hidden");
@@ -2522,7 +2545,7 @@ function documentFieldHtml(field) {
     if (kind === "expert-multi") return `<fieldset class="document-expert-picker" data-document-field="${name}" data-kind="expert-multi"><legend>${escapeHtml(title)}${required ? " *" : ""}</legend>${documentExperts.map((x) => `<label><input type="checkbox" value="${escapeHtml(x.path)}"><span>${escapeHtml(x.name)}</span></label>`).join("")}</fieldset>`;
     return `<label>${escapeHtml(title)}<select id="${documentFieldId(name)}" data-document-field="${name}" data-kind="${kind}"${req}><option value="">Выберите…</option>${options}</select></label>`;
   }
-  if (kind === "files") return `<label>${escapeHtml(title)}<input id="${documentFieldId(name)}" data-document-field="${name}" data-kind="files" type="file" accept="image/jpeg,image/png" multiple${req}><span class="field-hint">Фотографии JPEG или PNG будут добавлены в приложение № 2.</span></label>`;
+  if (kind === "files") return `<label>${escapeHtml(title)}<input id="${documentFieldId(name)}" data-document-field="${name}" data-kind="files" type="file" accept="image/jpeg,image/png,application/pdf,.pdf" multiple${req}><span class="field-hint">Можно выбрать JPEG, PNG или PDF. PDF автоматически превратится в изображения; отдельные крупные сканы на одной странице система постарается разделить.</span></label>`;
   return `<label>${escapeHtml(title)}<input id="${documentFieldId(name)}" data-document-field="${name}" type="${kind === "number" ? "number" : kind === "date" ? "date" : "text"}" value="${escapeHtml(value)}"${kind === "number" ? ' step="any"' : ""}${req}></label>`;
 }
 function documentListRow(value = "") {
@@ -2623,7 +2646,7 @@ if (documentUi.form) documentUi.form.addEventListener("submit", async (event) =>
     documentUi.overlay.classList.add("hidden");
     await openDocumentPreview(result);
   } catch (err) { documentUi.error.textContent = err.message; }
-  finally { button.disabled = false; button.textContent = "Предпросмотр"; }
+  finally { button.disabled = false; button.textContent = "Открыть редактор"; }
 });
 
 async function openDocumentPreview(draft) {
@@ -2653,6 +2676,8 @@ if (documentUi.previewBack) documentUi.previewBack.addEventListener("click", asy
 });
 if (documentUi.previewSave) documentUi.previewSave.addEventListener("click", async () => {
   if (!documentDraft) return;
+  const editTab = window.open("about:blank", "_blank");
+  if (editTab) editTab.document.body.textContent = "Сохраняем и открываем документ…";
   documentUi.previewSave.disabled = true; documentUi.previewSave.textContent = "Сохраняем…";
   try {
     // OnlyOffice отправляет последнюю правку при закрытии редактора.
@@ -2661,7 +2686,10 @@ if (documentUi.previewSave) documentUi.previewSave.addEventListener("click", asy
     const saved = await apiFetch(`/api/documents/preview/${encodeURIComponent(documentDraft.draftId)}/save`, { method: "POST", body: "{}" });
     documentUi.preview.classList.add("hidden"); document.body.classList.remove("no-scroll");
     showToast(`Документ «${saved.name}» сохранён`); documentDraft = null;
-  } catch (err) { alert("Не удалось сохранить документ: " + err.message); }
+    const editUrl = `/office.html?path=${encodeURIComponent(saved.path)}`;
+    if (editTab) editTab.location.href = editUrl;
+    else window.open(editUrl, "_blank");
+  } catch (err) { if (editTab) editTab.close(); alert("Не удалось сохранить документ: " + err.message); }
   finally { documentUi.previewSave.disabled = false; documentUi.previewSave.textContent = "Сохранить в дело"; }
 });
 
@@ -3644,6 +3672,7 @@ async function renderPlanfixTab() {
 /* ---------- Гарантийные письма (ГП) ---------- */
 
 let gpQuestionCount = 0;
+let gpCases = [];
 
 function gpAddQuestionRow(prefill) {
   gpQuestionCount++;
@@ -3652,7 +3681,7 @@ function gpAddQuestionRow(prefill) {
   row.style.cssText = "display:flex; gap:8px; align-items:flex-start;";
   row.innerHTML = `
     <span style="padding-top:8px; font-size:12px; color:var(--text-muted); min-width:16px;">${gpQuestionCount}.</span>
-    <textarea class="gp-question-input" rows="2" style="flex:1; border-radius:8px; border:1px solid var(--border-strong); padding:8px; font-size:13px; font-family:inherit;" placeholder="Текст вопроса экспертизы">${prefill || ""}</textarea>
+    <textarea class="gp-question-input" rows="2" style="flex:1; border-radius:8px; border:1px solid var(--border-strong); padding:8px; font-size:13px; font-family:inherit;" placeholder="Текст вопроса экспертизы">${escapeHtml(prefill || "")}</textarea>
     <button type="button" class="delete-btn" title="Убрать вопрос" aria-label="Убрать вопрос">${svgTrash}</button>
   `;
   row.querySelector(".delete-btn").addEventListener("click", () => {
@@ -3714,7 +3743,7 @@ function toGenitiveCourtName(nominative) {
 
 /** Число прописью на русском (кардинальное числительное, именительный падеж). */
 function numberToWordsRu(num) {
-  num = Math.floor(Math.abs(Number(num) || 0));
+  num = Math.floor(Math.abs(Number(String(num ?? "").replace(/[\s\u00a0]+/g, "")) || 0));
   if (!num) return "";
 
   const ONES = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
@@ -3875,6 +3904,7 @@ async function fillGpTemplates() {
 
 async function openGpForm() {
   els.gpForm.reset();
+  gpCases = [];
   els.gpQuestionsList.innerHTML = "";
   gpQuestionCount = 0;
   gpAddQuestionRow();
@@ -3886,6 +3916,7 @@ async function openGpForm() {
     // завершённые проекты (гарантийное письмо имеет смысл только для
     // тех, что ещё в работе).
     const active = allCases.filter((c) => !c.is_cancelled && c.stage !== "done");
+    gpCases = active;
     els.gpCaseSelect.innerHTML = '<option value="">Выберите проект…</option>' + active
       .map((c) => `<option value="${c.id}" data-court="${escapeHtml(c.court_or_customer || "")}" data-case-number="${escapeHtml(c.case_number || "")}">${escapeHtml(c.name)}</option>`)
       .join("");
@@ -3965,6 +3996,12 @@ els.gpCaseSelect.addEventListener("change", () => {
     els.gpCourtRaw.value = court;
   }
   if (caseNumber) els.gpCaseNumber.value = caseNumber;
+  const project = gpCases.find((item) => String(item.id) === String(opt.value));
+  els.gpQuestionsList.innerHTML = "";
+  gpQuestionCount = 0;
+  if (project && Array.isArray(project.questions) && project.questions.length) {
+    project.questions.forEach((question) => gpAddQuestionRow(question));
+  } else gpAddQuestionRow();
   updateCourtGenitive();
 });
 
@@ -3978,6 +4015,8 @@ els.gpCourtHeader.addEventListener("input", () => {
 // Стоимость и срок — пользователь вводит только цифры, текстовая форма
 // (для документа) пишется сама, поле для неё нередактируемое.
 els.gpCostAmount.addEventListener("input", () => {
+  const digits = els.gpCostAmount.value.replace(/\D/g, "");
+  els.gpCostAmount.value = digits.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   els.gpCostWords.value = capitalizeFirst(numberToWordsRu(els.gpCostAmount.value));
 });
 els.gpTermDays.addEventListener("input", () => {
@@ -4045,7 +4084,7 @@ els.gpForm.addEventListener("submit", async (e) => {
     alert("Не удалось собрать письмо: " + err.message);
   } finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = "Предпросмотр";
+    submitBtn.textContent = "Открыть редактор";
   }
 });
 
@@ -4159,6 +4198,8 @@ document.addEventListener("keydown", (e) => {
 
 bind(document.getElementById("gpPreviewSave"), "click", async () => {
   if (!gpPreviewState) return;
+  const editTab = window.open("about:blank", "_blank");
+  if (editTab) editTab.document.body.textContent = "Сохраняем и открываем письмо…";
   const button = document.getElementById("gpPreviewSave");
   button.disabled = true;
   button.textContent = "Сохраняем…";
@@ -4173,6 +4214,9 @@ bind(document.getElementById("gpPreviewSave"), "click", async () => {
     gpPreviewState = null;
     hideGpPreview();
     els.gpForm.reset();
+    const editUrl = `/office.html?path=${encodeURIComponent(result.path)}`;
+    if (editTab) editTab.location.href = editUrl;
+    else window.open(editUrl, "_blank");
     // Файлов два: рабочий и тот, что уходит в суд. Если сканов нет ни у
     // кого, второго не будет — и об этом надо сказать сразу, а не дать
     // человеку искать его в папке.
@@ -4188,6 +4232,7 @@ bind(document.getElementById("gpPreviewSave"), "click", async () => {
       loadColumnList("cases");
     }
   } catch (err) {
+    if (editTab) editTab.close();
     alert("Не удалось сохранить письмо: " + err.message);
   } finally {
     button.disabled = false;
@@ -6314,6 +6359,13 @@ async function openProjectForm() {
   els.projectFormOverlay.classList.remove("hidden");
 }
 
+function questionsFromTextarea(id) {
+  return document.getElementById(id).value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^\d+[.)]\s*/, ""))
+    .filter(Boolean);
+}
+
 els.projectFormCloseBtn.addEventListener("click", () => els.projectFormOverlay.classList.add("hidden"));
 
 /* ---- Правка карточки уже заведённого проекта ----
@@ -6377,6 +6429,8 @@ async function openCaseEdit(project) {
   set("ceParty2", project.party2);
   set("ceJudgeName", project.judge_name);
   set("ceDescription", project.description);
+  document.getElementById("ceQuestions").value = Array.isArray(project.questions)
+    ? project.questions.join("\n") : "";
 
   // Название папки не переименовываем — говорим об этом сразу, чтобы
   // никто не ждал, что «ЭКСПЕРТИЗА НИЦ» станет «ЭКС.ЭКСПЕРТИЗА НИЦ».
@@ -6441,6 +6495,7 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
         judge_name: val("ceJudgeName") || null,
         experts: val("ceExperts") || null,
         description: val("ceDescription") || null,
+        questions: questionsFromTextarea("ceQuestions"),
       }),
     });
     closeCaseEdit();
@@ -7774,6 +7829,7 @@ els.projectForm.addEventListener("submit", async (event) => {
     judge_name: document.getElementById("pfJudgeName").value.trim() || null,
     experts: document.getElementById("pfExperts").value.trim() || null,
     description: document.getElementById("pfDescription").value.trim() || null,
+    questions: questionsFromTextarea("pfQuestions"),
     ...(uploaded ? { batchId: uploaded.batchId, fileAssignments: uploaded.fileAssignments } : {}),
   };
 
