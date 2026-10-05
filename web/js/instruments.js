@@ -1051,8 +1051,10 @@ export function showInstrumentForm(item = null, { copyFrom = null } = {}) {
         <div class="actions" style="margin-top:4px;">
           <button type="button" class="secondary" data-pick-photo>Выбрать с БД</button>
           <button type="button" class="secondary" data-upload-photo>С компьютера</button>
+          <button type="button" class="secondary" data-paste-photo>Вставить из буфера</button>
           <span class="row-subtitle" data-photo-status></span>
         </div>
+        <span class="field-hint">Для скриншота нажмите «Вставить из буфера» или используйте Ctrl+V прямо в этом окне.</span>
         <input type="file" accept="image/*" multiple hidden data-photo-input>
       </div>
       <div class="form-field-group">
@@ -1124,6 +1126,7 @@ export function showInstrumentForm(item = null, { copyFrom = null } = {}) {
   form.querySelector('[data-pick-photo]').onclick = () => {
     openFilemanagerPicker((path, name) => {
       pickedPhotoPath = path;
+      form.querySelector('[data-photo-input]').value = '';
       form.querySelector('[data-photo-status]').textContent = `Выбрано: ${name}`;
     }, folderFor('Изображения'));
   };
@@ -1131,6 +1134,7 @@ export function showInstrumentForm(item = null, { copyFrom = null } = {}) {
   form.querySelector('[data-pick-document]').onclick = () => {
     openFilemanagerPicker((path, name) => {
       pickedDocumentPath = path;
+      form.querySelector('[data-document-input]').value = '';
       form.querySelector('[data-document-status]').textContent = `Выбрано: ${name}`;
     }, folderFor('Поверка'));
   };
@@ -1157,6 +1161,71 @@ export function showInstrumentForm(item = null, { copyFrom = null } = {}) {
       }
     };
   }
+
+  /* Вставка скриншота из буфера. Изображение превращается в обычный File
+     и дальше проходит тот же путь, что файл с компьютера: сохраняется в
+     «База данных/Оборудование/.../Изображения» и привязывается к карточке. */
+  const photoInput = form.querySelector('[data-photo-input]');
+  const pastePhotoButton = form.querySelector('[data-paste-photo]');
+  const photoStatus = form.querySelector('[data-photo-status]');
+
+  const clipboardFileName = (type, index = 0) => {
+    const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+      'image/gif': 'gif' })[type] || 'png';
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace(/\.\d{3}Z$/, '');
+    return `Фото из буфера ${stamp}${index ? `-${index + 1}` : ''}.${ext}`;
+  };
+
+  const addClipboardImages = (blobs) => {
+    const images = Array.from(blobs || []).filter((blob) => blob?.type?.startsWith('image/'));
+    if (!images.length) return false;
+    const transfer = new DataTransfer();
+    // Источники взаимоисключающие: последнее действие пользователя
+    // определяет фотографию карточки. Иначе ранее выбранный файл с
+    // компьютера оставался первым, а вставленный скриншот только лежал
+    // рядом в папке и не показывался на карточке.
+    images.forEach((blob, index) => transfer.items.add(new File(
+      [blob], clipboardFileName(blob.type, index),
+      { type: blob.type || 'image/png', lastModified: Date.now() }
+    )));
+    photoInput.files = transfer.files;
+    photoInput.dispatchEvent(new Event('change'));
+    pickedPhotoPath = null;
+    photoStatus.textContent = images.length === 1
+      ? `Из буфера: ${transfer.files[transfer.files.length - 1].name}`
+      : `Из буфера добавлено: ${images.length}`;
+    return true;
+  };
+
+  form.addEventListener('paste', (event) => {
+    const images = Array.from(event.clipboardData?.items || [])
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile()).filter(Boolean);
+    if (!addClipboardImages(images)) return;
+    event.preventDefault();
+    toast('Фото из буфера добавлено. Нажмите «Сохранить»');
+  });
+
+  pastePhotoButton.onclick = async () => {
+    pastePhotoButton.focus();
+    // Chromium умеет прочитать картинку по нажатию кнопки. Если браузер
+    // запретил доступ (или это Safari), остаётся одинаково рабочий Ctrl+V.
+    if (navigator.clipboard?.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        const blobs = [];
+        for (const item of items) {
+          const type = item.types.find((value) => value.startsWith('image/'));
+          if (type) blobs.push(await item.getType(type));
+        }
+        if (addClipboardImages(blobs)) {
+          toast('Фото из буфера добавлено. Нажмите «Сохранить»');
+          return;
+        }
+      } catch { /* браузер не разрешил чтение — предлагаем обычную вставку */ }
+    }
+    photoStatus.textContent = 'Теперь нажмите Ctrl+V';
+  };
 
   /* ------------------------------------------------------------------
      Снять свидетельство камерой.
@@ -1355,13 +1424,19 @@ async function uploadToInstrumentFolder(instrumentId, fileList, kind) {
     form.append('path', dir);
     form.append('relativePath', file.name);
     const res = await fetch(`${base}/api/upload`, { method: 'POST', credentials: 'include', body: form });
-    if (!res.ok) throw new Error(`Не удалось загрузить «${file.name}»`);
+    const uploaded = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(uploaded.message || `Не удалось загрузить «${file.name}»`);
+    const uploadedPath = uploaded.path || `${dir}/${file.name}`;
     if (first) {
-      await fetch(`${base}/api/equipment/adopt-file`, {
+      const adoptedRes = await fetch(`${base}/api/equipment/adopt-file`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: instrumentId, path: `${dir}/${file.name}`, kind }),
-      }).catch(() => {});
+        body: JSON.stringify({ id: instrumentId, path: uploadedPath, kind }),
+      });
+      const adopted = await adoptedRes.json().catch(() => ({}));
+      if (!adoptedRes.ok || !adopted.adopted) {
+        throw new Error(adopted.message || `Файл «${file.name}» загружен в ИСУ, но не привязан к карточке`);
+      }
       first = false;
     }
   }
