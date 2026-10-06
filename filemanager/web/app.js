@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-09-29.3";
+const APP_BUILD = "2026-10-06.1";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -6344,6 +6344,11 @@ async function openProjectForm() {
   els.projectFormError.textContent = "";
   els.projectForm.reset();
   resetPendingProjectFiles();
+  const questions = document.getElementById("pfQuestionsList");
+  if (questions) {
+    questions.innerHTML = "";
+    addProjectQuestionRow();
+  }
 
   // Справочники читаем заново: администратор мог только что завести
   // новую структуру или год, и увидеть их надо сразу, а не после
@@ -6359,6 +6364,39 @@ async function openProjectForm() {
 
   els.projectFormOverlay.classList.remove("hidden");
 }
+
+/** Вопросы нового проекта оформлены так же, как вопросы в форме ГП. */
+function addProjectQuestionRow(prefill = "") {
+  const list = document.getElementById("pfQuestionsList");
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "gp-question-row project-question-row";
+  row.style.cssText = "display:flex; gap:8px; align-items:flex-start;";
+  row.innerHTML = `
+    <span class="project-question-number" style="padding-top:8px; font-size:12px; color:var(--text-muted); min-width:16px;"></span>
+    <textarea class="project-question-input" rows="2" style="flex:1; border-radius:8px; border:1px solid var(--border-strong); padding:8px; font-size:13px; font-family:inherit;" placeholder="Текст вопроса из запроса">${escapeHtml(prefill)}</textarea>
+    <button type="button" class="delete-btn" title="Убрать вопрос" aria-label="Убрать вопрос">${svgTrash}</button>`;
+  row.querySelector(".delete-btn").addEventListener("click", () => {
+    row.remove();
+    renumberProjectQuestions();
+  });
+  list.appendChild(row);
+  renumberProjectQuestions();
+}
+
+function renumberProjectQuestions() {
+  document.querySelectorAll("#pfQuestionsList .project-question-row").forEach((row, index) => {
+    row.querySelector(".project-question-number").textContent = `${index + 1}.`;
+  });
+}
+
+function projectQuestionsFromRows() {
+  return [...document.querySelectorAll("#pfQuestionsList .project-question-input")]
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+}
+
+bind(document.getElementById("pfAddQuestionBtn"), "click", () => addProjectQuestionRow());
 
 function questionsFromTextarea(id) {
   return document.getElementById(id).value
@@ -6503,6 +6541,8 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
     showToast("Карточка проекта сохранена");
     // Баннер и список групп зависят от того, что мы только что изменили.
     caseTypeByFolder = null;
+    registryCases = null;
+    journalData = null;
     renderCaseBanner(updated);
     if (!els.folderView.classList.contains("hidden")) renderFolderRows();
   } catch (err) {
@@ -7118,9 +7158,10 @@ function journalCellHtml(row, col) {
   }
 
   const value = journalValue(row, col.key);
-  // Правку показываем только там, где она действительно возможна:
-  // архив не трогаем, и без права записи на папку дела тоже.
-  const editable = col.edit && row.can_write && !journalIsArchive(row);
+  // Архивные проекты остаются рабочими записями: исправить реквизит
+  // можно и после завершения. Сервер сохранит ту же строку проекта и
+  // синхронизирует её с Planfix; стадия и итог при этом не меняются.
+  const editable = col.edit && row.can_write;
   const cls = ["jr-cell", editable ? "jr-editable" : "", value ? "" : "jr-empty"].filter(Boolean).join(" ");
   const text = value || JOURNAL_EMPTY[col.key] || "—";
   // data-jr-key-label читает CSS: на телефоне строка разворачивается
@@ -7136,8 +7177,7 @@ function renderJournalFoot() {
   const shown = journalRowsShown.length;
   document.getElementById("journalFoot").innerHTML = `
     <span>${shown === total ? `Строк: ${total}` : `Показано ${shown} из ${total}`}</span>
-    <span class="jr-foot-hint">Таблица прокручивается вбок — там поля судебных экспертиз${
-      journalTab === "archive" ? "" : ". Щелчок по ячейке — правка, Esc — отмена"}</span>`;
+    <span class="jr-foot-hint">Таблица прокручивается вбок — там поля судебных экспертиз. Щелчок по ячейке — правка, Esc — отмена</span>`;
 }
 
 function journalHasFilters() {
@@ -7345,6 +7385,8 @@ function openExpertsPicker(row, cell) {
         method: "PATCH", body: JSON.stringify({ experts: value || null }),
       });
       Object.assign(row, saved);
+      registryCases = null;
+      caseTypeByFolder = null;
       overlay.classList.add("hidden");
       const shown = journalValue(row, "experts");
       cell.textContent = shown || JOURNAL_EMPTY.experts || "—";
@@ -7415,6 +7457,8 @@ async function commitJournalEdit(rawValue) {
     // сервер мог значение привести (например, номер дела) — и на экране
     // должно быть то, что действительно записалось.
     Object.assign(row, saved);
+    registryCases = null;
+    caseTypeByFolder = null;
     if (key === "manager_id") {
       const manager = (journalData.managers || []).find((m) => String(m.id) === value);
       row.manager_name = manager ? manager.name : null;
@@ -7830,7 +7874,7 @@ els.projectForm.addEventListener("submit", async (event) => {
     judge_name: document.getElementById("pfJudgeName").value.trim() || null,
     experts: document.getElementById("pfExperts").value.trim() || null,
     description: document.getElementById("pfDescription").value.trim() || null,
-    questions: questionsFromTextarea("pfQuestions"),
+    questions: projectQuestionsFromRows(),
     ...(uploaded ? { batchId: uploaded.batchId, fileAssignments: uploaded.fileAssignments } : {}),
   };
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-09-29.3">
+<meta name="build" content="2026-10-06.1">
 <title>ИСУ: Информационная система управления</title>
 <link rel="stylesheet" href="/style.css?v=20260929-3">
 
@@ -1240,9 +1240,11 @@
       <label>Описание <span class="row-subtitle" style="font-weight:400;">(необязательно)</span>
         <input type="text" id="pfDescription">
       </label>
-      <label>Вопросы из запроса <span class="row-subtitle" style="font-weight:400;">(по одному в строке)</span>
-        <textarea id="pfQuestions" rows="5" placeholder="1. Первый вопрос&#10;2. Второй вопрос"></textarea>
-      </label>
+      <div>
+        <span class="row-subtitle">Вопросы из запроса <span style="font-weight:400;">(необязательно)</span></span>
+        <div id="pfQuestionsList" style="display:flex; flex-direction:column; gap:8px; margin-top:6px;"></div>
+        <button type="button" class="secondary" id="pfAddQuestionBtn" style="margin-top:8px;">+ Добавить вопрос</button>
+      </div>
 
       <div>
         <span class="row-subtitle">Материалы <span style="font-weight:400;">(необязательно)</span></span>
