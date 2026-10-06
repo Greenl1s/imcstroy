@@ -451,7 +451,7 @@ let currentUser = null;
 // Метка сборки. Она же лежит в index.html: если страница в браузере
 // старее скрипта (а такое бывает из-за кэша), молчать об этом нельзя —
 // половина кнопок будет отсутствовать.
-const APP_BUILD = "2026-10-06.1";
+const APP_BUILD = "2026-10-06.2";
 
 function checkBuildMatch() {
   const meta = document.querySelector('meta[name="build"]');
@@ -6458,6 +6458,7 @@ async function openCaseEdit(project) {
   caseEditProject = project;
   document.getElementById("caseEditError").textContent = "";
   document.getElementById("caseEditHead").textContent = `Карточка проекта: ${project.name}`;
+  document.getElementById("caseEditDelete")?.classList.toggle("hidden", currentUser?.role !== "admin");
 
   const set = (id, value) => { document.getElementById(id).value = value == null ? "" : String(value); };
   document.getElementById("ceType").value = project.type || "";
@@ -6551,6 +6552,54 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
   } finally {
     submit.disabled = false;
   }
+});
+
+/**
+ * Удаление проекта — отдельное действие: оно затрагивает папку, журнал и
+ * Planfix. Название нужно набрать целиком, чтобы случайный щелчок по
+ * красной кнопке не удалил рабочее дело.
+ */
+async function deleteCaseProject(project, button) {
+  if (!project || currentUser?.role !== "admin") return;
+  const planfixNote = project.planfix_id
+    ? "В Planfix проект будет переведён в статус «Завершён», потому что его REST API не поддерживает удаление проектов."
+    : "Карточка проекта не связана с Planfix, поэтому изменение коснётся только ИСУ.";
+  const typed = prompt(
+    `Удалить проект «${project.name}»?\n\n` +
+    `Папка в ИСУ уйдёт в корзину. ${planfixNote}\n\n` +
+    "Для подтверждения введите точное название проекта:"
+  );
+  if (typed === null) return;
+  if (typed.trim() !== project.name) {
+    return alert("Название не совпало. Проект не удалён.");
+  }
+
+  if (button) button.disabled = true;
+  try {
+    const result = await apiFetch(`/api/cases/${project.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirmName: project.name }),
+    });
+    closeCaseEdit();
+    caseCardId = null;
+    caseCardData = null;
+    caseTypeByFolder = null;
+    registryCases = null;
+    journalData = null;
+    showToast(result.planfix === "completed"
+      ? "Проект удалён из ИСУ и завершён в Planfix"
+      : "Проект удалён из ИСУ");
+    showSection("registry", true);
+    loadRegistry(true);
+  } catch (err) {
+    alert("Не удалось удалить проект: " + err.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+bind(document.getElementById("caseEditDelete"), "click", (e) => {
+  deleteCaseProject(caseEditProject, e.currentTarget);
 });
 
 
@@ -7633,6 +7682,9 @@ function renderCaseCard(data) {
     actions.push(`<button class="upload-btn" id="ccEditBtn" type="button">Редактировать</button>`);
     actions.push(`<button class="create-btn" id="ccTaskBtn" type="button" style="height:34px;">Новая задача</button>`);
   }
+  if (currentUser?.role === "admin") {
+    actions.push(`<button class="upload-btn danger-btn" id="ccDeleteBtn" type="button">Удалить проект</button>`);
+  }
   document.getElementById("caseCardActions").innerHTML = actions.join("");
 
   /* --- тело --- */
@@ -7767,6 +7819,7 @@ const CASE_ACTIONS = {
   cancel: "Проект отменён",
   court_event: "Применено решение суда",
   restore: "Проект восстановлен",
+  deleted: "Проект удалён",
 };
 
 function wireCaseCard(data) {
@@ -7783,6 +7836,9 @@ function wireCaseCard(data) {
 
   const editBtn = document.getElementById("ccEditBtn");
   if (editBtn) editBtn.addEventListener("click", () => openCaseEdit(p));
+
+  const deleteBtn = document.getElementById("ccDeleteBtn");
+  if (deleteBtn) deleteBtn.addEventListener("click", () => deleteCaseProject(p, deleteBtn));
 
   const taskBtn = document.getElementById("ccTaskBtn");
   // Проект уже известен — окно открываем с закреплённым проектом, как из
