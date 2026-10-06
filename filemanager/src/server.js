@@ -2201,6 +2201,23 @@ app.delete("/api/resources", auth.requireAuth, requireColumnAccess({ write: true
   try {
     if (rejectManagedExpertMutation(res, req.query.path)) return;
     if (rejectManagedEquipmentFolderMutation(res, req.query.path)) return;
+    // Папка заведённого проекта удаляется только специальной кнопкой в
+    // карточке. Там операция синхронизируется с Planfix; обычное удаление
+    // оставило бы активную карточку и задачи во внешней системе.
+    const cleanPath = String(req.query.path || "").replace(/\/+$/, "");
+    const { rows: managedCases } = await db.query(
+      `SELECT id, name FROM cases
+        WHERE deleted_at IS NULL
+          AND (folder_path = $1 OR folder_path LIKE $2)
+        LIMIT 1`,
+      [cleanPath, cleanPath + "/%"]
+    );
+    if (managedCases.length) {
+      return res.status(409).json({
+        message: `«${managedCases[0].name}» — зарегистрированный проект. ` +
+          "Удалите его из карточки проекта, чтобы изменение передалось в Planfix.",
+      });
+    }
     await trash.moveToTrash(req.query.path, req.user.id);
     events.log(req.user, "delete", { path: req.query.path });
     // Удалили папку проекта — сам проект больше не должен предлагаться

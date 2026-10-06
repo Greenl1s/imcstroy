@@ -316,6 +316,38 @@ async function syncProjectToPlanfix(kase) {
 }
 
 /**
+ * REST API Planfix не содержит метода удаления проектов. Поддерживаемый
+ * эквивалент для проекта, который удалили из ИСУ, — системный статус
+ * COMPLETED: проект перестаёт предлагаться при создании задач, но его
+ * карточка и история остаются в Planfix.
+ */
+async function completeProject(planfixId, kase = null) {
+  const id = Number(planfixId);
+  if (!id) return false;
+  const body = { status: "COMPLETED" };
+  // Заодно приводим пользовательское поле «Этап проекта» к финальному
+  // значению. Для уже отменённого проекта сохраняется «Отменён», для
+  // остальных будет «Завершён» — системный статус и видимое поле не
+  // должны противоречить друг другу.
+  if (kase) {
+    body.customFieldData = buildCustomFieldData({
+      ...kase,
+      stage: kase.is_cancelled ? kase.stage : "done",
+    });
+  }
+  await planfixRequest("POST", `/project/${id}`, body);
+  return true;
+}
+
+/** Уже отсутствующий в Planfix проект не должен мешать удалить его копию в ИСУ. */
+function isProjectNotFoundError(err) {
+  const message = String(err?.message || "");
+  return /project\s+not\s+found(?:\s+by\s+id)?/i.test(message) ||
+    /проект[а-яё]*\s+не\s+найден[а-яё]*/i.test(message) ||
+    (err?.planfixStatus === 404 && /project|проект/i.test(message));
+}
+
+/**
  * Список сотрудников Planfix — для выбора исполнителя и для привязки
  * аккаунтов. Идём постранично: в аккаунте больше сотни человек бывает,
  * а раньше мы молча брали только первую сотню.
@@ -733,6 +765,7 @@ async function cancelPlanfixTask(taskId, statusId) {
 
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
+  completeProject, isProjectNotFoundError,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
