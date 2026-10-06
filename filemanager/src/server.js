@@ -29,6 +29,7 @@ const documentGenerate = require("./documentGenerate");
 const documentDraft = require("./documentDraft");
 const pdfAttachments = require("./pdfAttachments");
 const russianName = require("./russianName");
+const versionedName = require("./versionedName");
 const equipment = require("./equipment");
 const { cases: caseRoutes } = require("./cases");
 const { organizations: organizationRoutes } = require("./organizations");
@@ -1636,6 +1637,11 @@ function documentOutputDir(type, kase) {
 function safeDocumentName(value) {
   return String(value || "документ").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
 }
+
+/**
+ * Возвращает свободное имя, не затирая уже созданный документ.
+ * Первая копия сохраняет привычное имя, следующие получают (2), (3)…
+ */
 function requiredDocumentFields(type, data, files) {
   for (const [name, title, kind, required] of type.fields) {
     if (!required) continue;
@@ -1690,8 +1696,9 @@ app.post("/api/documents/:type/preview", auth.requireAuth,
     const buffer = documentGenerate.generate(type.id, data, templateBuffer, { experts, attachmentFiles: attachments });
     const outputDir = documentOutputDir(type, kase);
     const suffix = safeDocumentName(data.caseNumber || kase.case_number || kase.name);
-    const fileName = `${type.filePrefix} ${suffix}.docx`;
-    if (fs.existsSync(path.join(filesLib.safeResolve(outputDir), fileName))) throw gpFail(`Файл «${fileName}» уже существует`);
+    const fileName = versionedName.one(
+      filesLib.safeResolve(outputDir), `${type.filePrefix} ${suffix}.docx`
+    );
     const draft = await documentDraft.create(filesLib.safeResolve, { userId: req.user.id, buffer, meta: {
       type: type.id, caseId, caseFolderPath: kase.folder_path, outputDir, fileName,
     } });
@@ -1739,6 +1746,15 @@ function gpFileNames(caseNumber) {
     plainName: `ГП по делу № ${safe}.docx`,
     withDocsName: `ГП по делу № ${safe} с приложением.docx`,
   };
+}
+
+/** Подбирает один номер версии сразу для ГП без приложения и с ним. */
+function availableGpFileNames(destDir, caseNumber) {
+  const base = gpFileNames(caseNumber);
+  const [plainName, withDocsName] = versionedName.group(
+    destDir, [base.plainName, base.withDocsName]
+  );
+  return { plainName, withDocsName };
 }
 
 /** Проверяем ОБА имени разом: иначе одно ляжет, а второе упадёт. */
@@ -1810,7 +1826,8 @@ async function prepareGp(req) {
 
   return {
     kase, gpOutputDir, data, experts, expertPaths, templateBuffer,
-    caseId, questions, ...gpFileNames(body.caseNumber),
+    caseId, questions,
+    ...availableGpFileNames(filesLib.safeResolve(gpOutputDir), body.caseNumber),
   };
 }
 

@@ -28,6 +28,26 @@ function checkKind(kind) {
 /** Один список. Годы сортируем числом и сверху вниз — свежие первыми. */
 async function list(kind) {
   checkKind(kind);
+  // В старых проектах тип экспертизы мог появиться до введения
+  // справочника. Он уже есть в базе и должен предлагаться в новой
+  // карточке, даже если отдельная строка fm_lookups тогда не создалась.
+  if (kind === "expertise_type") {
+    const { rows } = await db.query(
+      `SELECT value
+         FROM (
+           SELECT value, position FROM fm_lookups WHERE kind = 'expertise_type'
+           UNION ALL
+           SELECT btrim(expertise_type) AS value, 2147483647 AS position
+             FROM cases
+            WHERE deleted_at IS NULL
+              AND expertise_type IS NOT NULL
+              AND btrim(expertise_type) <> ''
+         ) source
+        GROUP BY value
+        ORDER BY MIN(position) ASC, value ASC`
+    );
+    return rows.map((r) => r.value);
+  }
   const order = kind === "year"
     ? "ORDER BY value DESC"
     : "ORDER BY position ASC, value ASC";
@@ -127,6 +147,19 @@ async function ensure(kind, rawValue) {
 async function has(kind, rawValue) {
   const value = String(rawValue ?? "").trim();
   if (!value) return true;
+  if (kind === "expertise_type") {
+    const { rows } = await db.query(
+      `SELECT 1
+         WHERE EXISTS (
+           SELECT 1 FROM fm_lookups WHERE kind = 'expertise_type' AND value = $1
+         ) OR EXISTS (
+           SELECT 1 FROM cases
+            WHERE deleted_at IS NULL AND btrim(expertise_type) = $1
+         )`,
+      [value]
+    );
+    return rows.length > 0;
+  }
   const { rows } = await db.query(
     "SELECT 1 FROM fm_lookups WHERE kind = $1 AND value = $2", [kind, value]
   );
