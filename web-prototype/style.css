@@ -1304,6 +1304,13 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
 .loan-table th { padding:14px 12px; text-align:left; background:#f3f6f8; color:#536b7c; font-weight:600; }
 .loan-table td { padding:18px 12px; border-bottom:1px solid #dde5eb; vertical-align:top; }
 .loan-table small { display:block; color:#6b7e8d; margin-top:6px; line-height:1.4; }
+.loan-instrument-cell { position:relative; }
+.loan-instrument-link { display:block; color:inherit; text-decoration:none; cursor:pointer; }
+.loan-instrument-link::after { content:''; position:absolute; inset:3px; border-radius:8px; transition:background-color .15s, box-shadow .15s; }
+.loan-instrument-link:hover::after { background:rgba(33,94,134,.06); box-shadow:inset 0 0 0 1px rgba(33,94,134,.18); }
+.loan-instrument-link:focus-visible { outline:none; }
+.loan-instrument-link:focus-visible::after { outline:2px solid #215e86; outline-offset:-2px; }
+.dark-theme .loan-instrument-link:hover::after { background:rgba(130,193,234,.08); box-shadow:inset 0 0 0 1px rgba(130,193,234,.3); }
 .loan-status { display:inline-block; border-radius:8px; padding:7px 10px; font-weight:600; white-space:nowrap; }
 .loan-status.is-active { color:#955509; background:#fff0dd; }
 .loan-status.is-returned { color:#226752; background:#e1f3eb; }
