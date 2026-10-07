@@ -132,7 +132,8 @@ export const api = {
   bulkSetCompany: (ids, company_code) => request('/instruments/bulk/set-company', { method: 'POST', body: { ids, company_code } }),
 
   // ---------- История ----------
-  loanStatistics: (filter = 'all', before = '') => request(`/history/loans?filter=${encodeURIComponent(filter)}${before ? '&before=' + encodeURIComponent(before) : ''}`),
+  loanStatistics: (filter = 'all', before = '', instrument = '') => request(`/history/loans?filter=${encodeURIComponent(filter)}${before ? '&before=' + encodeURIComponent(before) : ''}${instrument ? '&instrument=' + encodeURIComponent(instrument) : ''}`),
+  loanInstruments: (filter = 'all') => request(`/history/loan-instruments?filter=${encodeURIComponent(filter)}`),
   instrumentHistory: (id) => request(`/instruments/${id}/history`),
 
   // ---------- Комплекты ----------

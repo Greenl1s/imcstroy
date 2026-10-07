@@ -1,4 +1,4 @@
-import { renderStatistics } from './statistics.js?v=20261007-3';
+import { renderStatistics } from './statistics.js?v=20261007-4';
 import { chooseIssueProject } from './projects.js';
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
