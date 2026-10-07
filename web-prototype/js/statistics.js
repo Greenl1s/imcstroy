@@ -1,10 +1,30 @@
 import { api } from './api.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, displayNo } from './utils.js';
 
 let filter = 'all';
 let revision = 0;
 const expandedByFilter = { all: new Set(), active: new Set() };
 let returnScroll = 0;
+let searchText = '';
+
+// Та же сортировка по инвентарному номеру, что в общем списке:
+// числовое сравнение (1, 2, 10), пустые номера в конце, затем внутренний id.
+export function sortStatistics(items) {
+  return [...items].sort((a,b) => {
+    const va=a.inventory_no || null, vb=b.inventory_no || null;
+    if(va===vb) return Number(a.instrument_id)-Number(b.instrument_id);
+    if(va===null) return 1;
+    if(vb===null) return -1;
+    return String(va).localeCompare(String(vb),'ru',{numeric:true}) || Number(a.instrument_id)-Number(b.instrument_id);
+  });
+}
+
+export function matchesInstrument(item, query) {
+  const normalize = value => String(value ?? '').toLocaleLowerCase('ru-RU').replaceAll('ё','е');
+  const needle=normalize(query).trim();
+  return !needle || [item.instrument_name,item.model,item.serial_number,item.inventory_no,
+    displayNo({id:item.instrument_id,inventory_no:item.inventory_no})].some(value=>normalize(value).includes(needle));
+}
 const dateTime = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric',
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
@@ -54,8 +74,8 @@ export function instrumentRow(item) {
   const projects = Number(item.project_count);
   const time = Number(item.unknown_time_count) && !Number(item.duration_seconds) ? 'Нет точных данных' : durationText(item.duration_seconds);
   return `<tr class="loan-summary-row" data-instrument="${id}">
-    <td data-label="Прибор / модель"><a class="loan-card-link" href="?id=${encodeURIComponent(item.instrument_id)}&amp;from=statistics"><b>${escapeHtml(item.instrument_name)}</b></a>
-      <small>${[item.inventory_no,item.model,item.serial_number ? `с/н ${item.serial_number}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</small></td>
+    <td data-label="Прибор / модель"><a class="loan-card-link" href="?id=${encodeURIComponent(item.instrument_id)}&amp;from=statistics"><b>${escapeHtml(item.instrument_name)}</b> <span class="loan-card-number">${escapeHtml(displayNo({id:item.instrument_id,inventory_no:item.inventory_no}))}</span></a>
+      <small>${[item.model,item.serial_number ? `с/н ${item.serial_number}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</small></td>
     <td data-label="Выдач в проекты"><strong>${Number(item.project_loan_count) || 0}</strong><small>${projects ? `В ${projects} ${forms(projects,'проекте','разных проектах','разных проектах')}` : Number(item.loan_count) ? 'Без привязки к проекту' : 'Не выдавался'}</small></td>
     <td data-label="Общее время в работе"><b>${time}</b>${Number(item.unknown_time_count) && Number(item.duration_seconds) ? '<small>Без выдач с неизвестным временем</small>' : ''}</td>
     <td data-label="Сейчас"><span class="loan-status ${busy ? 'is-active' : item.status === 'retired' || item.status === 'booked' ? 'is-neutral' : 'is-returned'}">${caption}</span>${Number(item.active_quantity)>1 ? `<small>На руках: ${Number(item.active_quantity)} шт.</small>` : ''}</td>
@@ -76,6 +96,7 @@ export async function renderStatistics({ restore = false } = {}) {
       <button type="button" data-loan-filter="all">Все приборы</button>
       <button type="button" data-loan-filter="active">В работе</button>
     </div>
+    <div class="loan-search"><label for="loanInstrumentSearch">Поиск прибора</label><input id="loanInstrumentSearch" type="search" value="${escapeHtml(searchText)}" placeholder="Название, номер, модель или серийный номер" autocomplete="off"><small class="loan-search-count" aria-live="polite"></small></div>
     <div class="loan-results" aria-live="polite">Загружаем статистику…</div>
     <p class="loan-footnote">Название открывает карточку, остальная часть строки — историю. Общее время — сумма длительности отдельных выдач, включая текущие; количество штук её не умножает. У старых записей время может отсутствовать.</p>
   </div>`;
@@ -90,6 +111,27 @@ export async function renderStatistics({ restore = false } = {}) {
   const results = screen.querySelector('.loan-results');
   const details = new Map();
   const selectedFilter = filter;
+  let catalog = [];
+  function applySearch() {
+    const pending = [];
+    let found = 0;
+    const byId=new Map(catalog.map(item=>[String(item.instrument_id),item]));
+    for(const row of results.querySelectorAll('.loan-summary-row')) {
+      const visible=matchesInstrument(byId.get(row.dataset.instrument),searchText);
+      row.hidden=!visible;
+      const expanded=row.classList.contains('is-expanded');
+      row.nextElementSibling.hidden=!visible || !expanded;
+      if(visible) {
+        found++;
+        if(expanded && !details.get(row.dataset.instrument)?.loaded) pending.push(loadDetail(row));
+      }
+    }
+    const table=results.querySelector('.loan-summary-table');if(table) table.hidden=!found;
+    const empty=results.querySelector('.loan-search-empty');if(empty) empty.hidden=!!found || !catalog.length;
+    screen.querySelector('.loan-search-count').textContent=searchText.trim() ? `Найдено: ${found} из ${catalog.length}` : '';
+    return pending;
+  }
+  screen.querySelector('#loanInstrumentSearch').oninput = event => { searchText=event.target.value; applySearch(); };
   async function loadDetail(row, before = '') {
     const id = row.dataset.instrument;
     const detail = row.nextElementSibling.querySelector('.loan-detail');
@@ -145,16 +187,15 @@ export async function renderStatistics({ restore = false } = {}) {
         const key=button.dataset.loanFilter;
         button.textContent = `${labels[key]} (${totals[countKey[key]] || 0})`;
       }
-      results.innerHTML = data.items.length ? `<table class="loan-table loan-summary-table"><thead><tr><th>Прибор / модель</th><th>Выдач в проекты</th><th>Общее время в работе</th><th>Сейчас</th><th></th></tr></thead><tbody>${data.items.map(instrumentRow).join('')}</tbody></table>`
+      catalog=sortStatistics(data.items);
+      results.innerHTML = catalog.length ? `<table class="loan-table loan-summary-table"><thead><tr><th>Прибор / модель</th><th>Выдач в проекты</th><th>Общее время в работе</th><th>Сейчас</th><th></th></tr></thead><tbody>${catalog.map(instrumentRow).join('')}</tbody></table><div class="loan-empty loan-search-empty" hidden>Ничего не найдено</div>`
         : `<div class="loan-empty">${selectedFilter==='active' ? 'Приборов в работе нет' : 'Приборов пока нет'}</div>`;
-      const pending = [];
       for (const row of results.querySelectorAll('.loan-summary-row')) {
         if(!expandedByFilter[selectedFilter].has(row.dataset.instrument)) continue;
         row.classList.add('is-expanded');row.nextElementSibling.hidden=false;
         const button=row.querySelector('.loan-expand');button.setAttribute('aria-expanded','true');button.textContent='⌃';
-        pending.push(loadDetail(row));
       }
-      await Promise.allSettled(pending);
+      await Promise.allSettled(applySearch());
       if(restore && current === revision && !screen.classList.contains('hidden')) window.scrollTo(0,returnScroll);
     } catch (err) {
       if(current !== revision) return;
