@@ -27,6 +27,7 @@ export function loanRow(item) {
       ${quantity > 1 ? `<small>Выдано ${quantity} шт. · возвращено ${quantity-remaining} шт.</small>` : ''}</td>
     <td data-label="Сотрудник">${escapeHtml(item.holder_name)}${item.issued_to_name && item.issued_to_name !== item.holder_name ? `<small>Брал: ${escapeHtml(item.issued_to_name)}</small>` : ''}</td>
     <td data-label="Проект">${escapeHtml(item.project_name || 'Без привязки к проекту')}</td>
+    <td data-label="Место использования">${escapeHtml(item.place || 'Не указано')}</td>
     <td data-label="Выдан">${stamp(item.issued_at, item.issue_date)}</td>
     <td data-label="Возвращён">${active
       ? (item.last_returned_at ? `${stamp(item.last_returned_at)}<small>Частичный возврат; осталось ${remaining} шт.</small>` : '<span class="loan-muted">Ещё не возвращён</span>')
@@ -39,7 +40,7 @@ export async function renderStatistics() {
   const current = ++revision;
   const screen = document.getElementById('statisticsScreen');
   screen.innerHTML = `<div class="loan-panel">
-    <div class="loan-heading"><div><h2>Выдача и возврат приборов</h2><p>Время по Москве. Выдачи из обоих интерфейсов учёта.</p></div><button type="button" data-loan-refresh>Обновить</button></div>
+    <div class="loan-heading"><div><h2>Выдача и возврат приборов</h2><p>История с 07.10.2026 и все приборы на руках. Время по Москве.</p></div><button type="button" data-loan-refresh>Обновить</button></div>
     <div class="loan-filters" role="group" aria-label="Состояние выдач">
       <button type="button" data-loan-filter="all">Все</button>
       <button type="button" data-loan-filter="active">В работе</button>
@@ -71,7 +72,7 @@ export async function renderStatistics() {
         button.textContent = `${labels[key]} (${totals[countKey[key]] || 0})`;
       }
       results.innerHTML = items.length ? `<div class="loan-table-scroll"><table class="loan-table">
-        <thead><tr><th>Прибор</th><th>Сотрудник</th><th>Проект</th><th>Выдан: дата и время</th><th>Возвращён: дата и время</th><th>Состояние</th></tr></thead>
+        <thead><tr><th>Прибор</th><th>Сотрудник</th><th>Проект</th><th>Место использования</th><th>Выдан: дата и время</th><th>Возвращён: дата и время</th><th>Состояние</th></tr></thead>
         <tbody>${items.map(loanRow).join('')}</tbody></table></div>`
         : `<div class="loan-empty">${filter==='active' ? 'Приборов в работе нет' : filter==='returned' ? 'Возвращённых выдач пока нет' : 'Выдач пока нет'}</div>`;
       if (data.next) {
