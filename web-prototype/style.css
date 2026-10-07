@@ -1314,13 +1314,39 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
 .loan-status { display:inline-block; border-radius:8px; padding:7px 10px; font-weight:600; white-space:nowrap; }
 .loan-status.is-active { color:#955509; background:#fff0dd; }
 .loan-status.is-returned { color:#226752; background:#e1f3eb; }
+.loan-status.is-neutral { color:#536b7c; background:#e8edf2; }
 .loan-muted { color:#7b8792; }
 .loan-empty { padding:40px 16px; text-align:center; color:#687b8b; }
 .loan-more { margin-top:16px; }
 .loan-footnote { margin-top:18px; line-height:1.5; }
+.loan-summary-table { table-layout:fixed; border:1px solid #d6e0e7; }
+.loan-summary-table > thead th:nth-child(1) { width:43%; }
+.loan-summary-table > thead th:nth-child(2) { width:16%; }
+.loan-summary-table > thead th:nth-child(3) { width:24%; }
+.loan-summary-table > thead th:nth-child(4) { width:13%; }
+.loan-summary-table > thead th:nth-child(5) { width:4%; }
+.loan-summary-row { cursor:pointer; }
+.loan-summary-row > td { vertical-align:middle; overflow-wrap:anywhere; }
+.loan-summary-row:hover,.loan-summary-row.is-expanded { background:#edf5fb; }
+.loan-summary-row strong { font-size:20px; }
+.loan-card-link { color:#215e86; text-decoration:underline; text-decoration-color:#c2d7e6; text-underline-offset:4px; }
+.loan-card-link:focus-visible,.loan-expand:focus-visible { outline:2px solid #215e86; outline-offset:4px; border-radius:4px; }
+.loan-expand-cell { padding:8px 4px !important; }
+.loan-expand { padding:6px !important; min-width:28px; background:transparent !important; color:#215e86; border:0; box-shadow:none; font-size:22px; }
+.loan-detail-row[hidden] { display:none !important; }
+.loan-summary-table > tbody > .loan-detail-row > td { padding:0 14px 20px; background:#edf5fb; }
+.loan-detail-title { color:#567791; font-size:13px; margin:8px 8px 14px; }
+.loan-detail .loan-table-scroll { border:1px solid #d6e0e7; border-radius:10px; background:#fff; }
+.loan-history-table { min-width:920px; }
+.loan-history-table td:first-child { width:22%; }
+.loan-detail-error { color:#a63731; padding:12px; }
 .dark-theme .loan-panel { background:#19252e; border-color:#354655; }
 .dark-theme .loan-table th { background:#263642; color:#bccbd6; }
 .dark-theme .loan-table td { border-color:#354655; }
+.dark-theme .loan-summary-row:hover,.dark-theme .loan-summary-row.is-expanded,
+.dark-theme .loan-summary-table > tbody > .loan-detail-row > td { background:#233746; }
+.dark-theme .loan-detail .loan-table-scroll { background:#19252e; border-color:#354655; }
+.dark-theme .loan-card-link,.dark-theme .loan-expand { color:#9bcee9; }
 @media(max-width:760px) {
   .loan-panel { padding:14px; border-radius:12px; }
   .loan-heading { align-items:flex-start; }
@@ -1331,4 +1357,16 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
   .loan-table td { border:0; padding:7px 0; overflow-wrap:anywhere; }
   .loan-table td::before { content:attr(data-label); display:block; color:#6b7e8d; font-size:12px; margin-bottom:4px; }
   .loan-status { white-space:normal; }
+  .loan-summary-table { border:0; }
+  .loan-summary-row { position:relative; }
+  .loan-summary-row > td:first-child { padding-right:36px; }
+  .loan-summary-row > .loan-expand-cell { position:absolute; right:10px; top:12px; width:30px; }
+  .loan-expand-cell::before,.loan-detail-row > td::before { display:none !important; }
+  .loan-detail-row { padding:0 !important; border:0 !important; }
+  .loan-summary-table > tbody > .loan-detail-row > td { padding:0 8px 14px; border-radius:10px; }
+  .loan-history-table { min-width:0; }
+  .loan-detail .loan-table-scroll { border:0; background:transparent; }
+  .loan-history-table tr { background:var(--panel,#fff); }
+  .loan-history-table td:first-child { width:100%; }
+  .dark-theme .loan-history-table tr { background:#19252e; }
 }
