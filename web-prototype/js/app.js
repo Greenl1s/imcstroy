@@ -1,4 +1,4 @@
-import { renderStatistics } from './statistics.js?v=20261007-4';
+import { renderStatistics } from './statistics.js?v=20261007-5';
 import { chooseIssueProject } from './projects.js';
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
@@ -15,6 +15,7 @@ import { sheetGeometry } from './qr-sheet.js';
 
 let retiredItems = [];
 let routeRevision = 0;
+let previousRouteParams = new URLSearchParams();
 
 // ---------- Тема ----------
 
@@ -68,7 +69,7 @@ function bindEvents() {
   if (mobileBackToIsuButton) mobileBackToIsuButton.onclick = goToIsu;
 
   const backToListButton = document.getElementById('backToListButton');
-  if (backToListButton) backToListButton.onclick = () => goList();
+  if (backToListButton) backToListButton.onclick = goCardList;
 
   document.getElementById('pendingTransfersBtn').onclick = () => showPendingTransfersModal();
 
@@ -452,6 +453,8 @@ function renderRoute() {
   if (!state.currentUser) return;
   const revision = ++routeRevision;
   const params = new URLSearchParams(location.search);
+  const restoreStatistics = previousRouteParams.has('id') && previousRouteParams.get('from') === 'statistics';
+  previousRouteParams = params;
   const id = params.get('id');
   const kitId = params.get('kit');
   const pageTitle = document.getElementById('pageTitle');
@@ -467,7 +470,7 @@ function renderRoute() {
     setSidebarActive('navStatisticsButton');
     setMobileActive('mobileMenuButton');
     showScreen('statisticsScreen');
-    renderStatistics();
+    renderStatistics({ restore: restoreStatistics });
   } else if (kitId) {
     if (pageTitle) pageTitle.textContent = 'Комплект';
     setSidebarActive('navKitsButton');
@@ -485,7 +488,7 @@ function renderRoute() {
     setSidebarActive('navInstrumentsButton');
     setMobileActive('mobileInstrumentsButton');
     showScreen('cardScreen');
-    renderCard(id, goList);
+    renderCard(id, goCardList);
   } else if (params.has('retired')) {
     if (pageTitle) pageTitle.textContent = 'Списанные';
     setSidebarActive('navRetiredButton');
@@ -523,8 +526,23 @@ function goKits() {
 }
 
 function openCard(id) {
-  history.pushState(null, '', `?id=${encodeURIComponent(id)}`);
+  const params = new URLSearchParams(location.search);
+  const origin = params.has('retired') ? '&from=retired' : params.has('kits') || params.has('kit') ? '&from=kits' : '';
+  history.pushState(null, '', `?id=${encodeURIComponent(id)}${origin}`);
   renderRoute();
+}
+
+// Явный источник в URL работает и после обновления карточки, и в новой вкладке.
+// Прямые ссылки без источника по-прежнему возвращают в список приборов.
+function goCardList() {
+  const params = new URLSearchParams(location.search);
+  const origin = params.get('from');
+  if (params.has('kit') || origin === 'kits') { goKits(); return; }
+  if (origin === 'statistics' || origin === 'retired') {
+    history.pushState(null, '', origin === 'statistics' ? '?statistics' : '?retired');
+    renderRoute(); return;
+  }
+  goList();
 }
 
 function goList() {

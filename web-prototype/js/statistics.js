@@ -3,6 +3,8 @@ import { escapeHtml } from './utils.js';
 
 let filter = 'all';
 let revision = 0;
+const expandedByFilter = { all: new Set(), active: new Set() };
+let returnScroll = 0;
 const dateTime = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric',
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
@@ -52,7 +54,7 @@ export function instrumentRow(item) {
   const projects = Number(item.project_count);
   const time = Number(item.unknown_time_count) && !Number(item.duration_seconds) ? 'Нет точных данных' : durationText(item.duration_seconds);
   return `<tr class="loan-summary-row" data-instrument="${id}">
-    <td data-label="Прибор / модель"><a class="loan-card-link" href="?id=${encodeURIComponent(item.instrument_id)}"><b>${escapeHtml(item.instrument_name)}</b></a>
+    <td data-label="Прибор / модель"><a class="loan-card-link" href="?id=${encodeURIComponent(item.instrument_id)}&amp;from=statistics"><b>${escapeHtml(item.instrument_name)}</b></a>
       <small>${[item.inventory_no,item.model,item.serial_number ? `с/н ${item.serial_number}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</small></td>
     <td data-label="Выдач в проекты"><strong>${Number(item.project_loan_count) || 0}</strong><small>${projects ? `В ${projects} ${forms(projects,'проекте','разных проектах','разных проектах')}` : Number(item.loan_count) ? 'Без привязки к проекту' : 'Не выдавался'}</small></td>
     <td data-label="Общее время в работе"><b>${time}</b>${Number(item.unknown_time_count) && Number(item.duration_seconds) ? '<small>Без выдач с неизвестным временем</small>' : ''}</td>
@@ -65,7 +67,7 @@ const historyTable = items => `<div class="loan-table-scroll"><table class="loan
   <thead><tr><th>Прибор / модель</th><th>Сотрудник</th><th>Проект</th><th>Место использования</th><th>Выдан: дата и время</th><th>Возвращён: дата и время</th><th>Состояние</th></tr></thead>
   <tbody>${items.map(loanRow).join('')}</tbody></table></div>`;
 
-export async function renderStatistics() {
+export async function renderStatistics({ restore = false } = {}) {
   const current = ++revision;
   const screen = document.getElementById('statisticsScreen');
   screen.innerHTML = `<div class="loan-panel">
@@ -114,6 +116,7 @@ export async function renderStatistics() {
     const link = event.target.closest?.('.loan-card-link');
     if(link) {
       if(event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      returnScroll = window.scrollY;
       event.preventDefault(); history.pushState(null,'',link.getAttribute('href'));
       window.dispatchEvent(new PopStateEvent('popstate')); return;
     }
@@ -125,6 +128,8 @@ export async function renderStatistics() {
     const row = event.target.closest?.('.loan-summary-row');
     if(!row || event.button !== 0) return;
     const expanded=row.classList.toggle('is-expanded');
+    if(expanded) expandedByFilter[selectedFilter].add(row.dataset.instrument);
+    else expandedByFilter[selectedFilter].delete(row.dataset.instrument);
     row.nextElementSibling.hidden=!expanded;
     const button=row.querySelector('.loan-expand');button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'⌃':'⌄';
     if(expanded && !details.get(row.dataset.instrument)?.loaded) loadDetail(row);
@@ -142,6 +147,15 @@ export async function renderStatistics() {
       }
       results.innerHTML = data.items.length ? `<table class="loan-table loan-summary-table"><thead><tr><th>Прибор / модель</th><th>Выдач в проекты</th><th>Общее время в работе</th><th>Сейчас</th><th></th></tr></thead><tbody>${data.items.map(instrumentRow).join('')}</tbody></table>`
         : `<div class="loan-empty">${selectedFilter==='active' ? 'Приборов в работе нет' : 'Приборов пока нет'}</div>`;
+      const pending = [];
+      for (const row of results.querySelectorAll('.loan-summary-row')) {
+        if(!expandedByFilter[selectedFilter].has(row.dataset.instrument)) continue;
+        row.classList.add('is-expanded');row.nextElementSibling.hidden=false;
+        const button=row.querySelector('.loan-expand');button.setAttribute('aria-expanded','true');button.textContent='⌃';
+        pending.push(loadDetail(row));
+      }
+      await Promise.allSettled(pending);
+      if(restore && current === revision && !screen.classList.contains('hidden')) window.scrollTo(0,returnScroll);
     } catch (err) {
       if(current !== revision) return;
       results.innerHTML=`<div class="loan-empty">Не удалось загрузить статистику: ${escapeHtml(err.message)}</div>`;
