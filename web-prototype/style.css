@@ -1329,6 +1329,12 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
 .loan-summary-row > td { vertical-align:middle; overflow-wrap:anywhere; }
 .loan-summary-row:hover,.loan-summary-row.is-expanded { background:#edf5fb; }
 .loan-summary-row strong { font-size:20px; }
+.loan-summary-row[hidden],.loan-summary-table[hidden],.loan-search-empty[hidden] { display:none !important; }
+.loan-card-number { color:var(--muted); font-size:13px; margin-left:8px; font-weight:normal; white-space:nowrap; }
+.loan-search { margin-bottom:20px; }
+.loan-search label { display:block; font-size:14px; color:var(--muted); margin-bottom:6px; }
+.loan-search input { width:100%; min-width:0; box-sizing:border-box; }
+.loan-search-count { display:block; color:var(--muted); font-size:13px; margin-top:6px; }
 .loan-card-link { color:#215e86; text-decoration:underline; text-decoration-color:#c2d7e6; text-underline-offset:4px; }
 .loan-card-link:focus-visible,.loan-expand:focus-visible { outline:2px solid #215e86; outline-offset:4px; border-radius:4px; }
 .loan-expand-cell { padding:8px 4px !important; }
