@@ -237,7 +237,7 @@ function sortEntries(entries, sortMode, basePath = "") {
     // В корне оборудования служебные папки не должны разрывать список
     // классификаций. Они всегда последние, независимо от сортировки.
     if (basePath === "/База данных/Оборудование") {
-      const tail = (entry) => entry.name === "Архив" ? 2 : entry.name === "Не указано" ? 1 : 0;
+      const tail = (entry) => entry.name === "Удаленные" ? 3 : entry.name === "Архив" ? 2 : entry.name === "Не указано" ? 1 : 0;
       const rank = tail(a) - tail(b);
       if (rank) return rank;
     }
@@ -746,6 +746,7 @@ const EVENT_KINDS = {
   case_cancel: { label: "Отмена проекта",      tone: "del",   text: (e) => `отменил проект ${b(e.target_name)}` },
   case_edit:   { label: "Правка проекта",      tone: "stage", text: (e) => `изменил карточку проекта ${b(e.target_name)}` },
   instrument_update:{ label: "Правка прибора", tone: "edit",  text: (e) => `изменил карточку прибора ${b(e.target_name)}` },
+  instrument_restore:{ label: "Восстановление прибора", tone: "edit", text: (e) => `восстановил прибор ${b(e.target_name)}` },
   task_created:{ label: "Новая задача",        tone: "new",   text: (e) => `поставил задачу ${b(e.target_name)}` },
   task_done:   { label: "Задача завершена",    tone: "add",   text: (e) => `завершил задачу ${b(e.target_name)}` },
   task_changed:{ label: "Правка задачи",       tone: "stage", text: (e) => `изменил задачу ${b(e.target_name)}` },
@@ -1079,6 +1080,17 @@ function renderEquipmentBanner(info) {
   }
   banner.classList.remove("hidden");
 
+  const restore = document.getElementById("eqRestoreInstrument");
+  if (restore) restore.onclick = async () => {
+    if (!confirm("Восстановить этот прибор вместе с его карточкой и файлами?")) return;
+    restore.disabled = true;
+    try {
+      const result = await apiFetch(`/api/equipment/instruments/${info.instrument.id}/restore`, { method: "POST" });
+      equipmentSyncedFor = null;
+      await renderFolder(EQUIPMENT_PATH);
+      showToast(result.folderSyncPending ? "Карточка восстановлена. Перенос папки будет повторён при следующем открытии оборудования." : "Прибор восстановлен");
+    } catch (err) { showToast("Не удалось восстановить: " + err.message); restore.disabled = false; }
+  };
   const card = document.getElementById("eqOpenCard");
   if (card) {
     card.onclick = () => {
@@ -1093,6 +1105,11 @@ const EQ_STATUS = { free: "Свободен", busy: "Занят", booked: "За�
 
 /** Полоса прибора: где он, чем помечен, до какого числа поверка. */
 function instrumentStripHtml(item) {
+  if (item.deleted_at) return `<span class="eq-badge eq-muted">Удалён</span>
+    <span class="eq-strong">${escapeHtml(item.name)}</span>
+    <span class="eq-fact">Карточка, история и файлы сохранены.</span><span class="eq-spacer"></span>
+    ${currentUser?.role === "admin" ? '<button type="button" class="eq-btn eq-accent" id="eqRestoreInstrument">Восстановить прибор</button>' : ''}`;
+
   // Наличие: у прибора может быть несколько одинаковых штук, и тогда
   // «Занят» ничего не говорит — важно, осталось ли что брать.
   const qty = Number(item.qty) || 1;
@@ -1389,14 +1406,14 @@ bind(document.getElementById("instrumentForm"), "submit", async (e) => {
 bind(document.getElementById("instrumentDeleteBtn"), "click", async () => {
   if (!instrumentFormItem || currentUser?.role !== "admin") return;
   const item = instrumentFormItem;
-  if (!confirm(`Удалить прибор «${item.name}»?\n\nКарточка будет удалена, а папка с файлами переместится в «Оборудование / Архив».`)) return;
+  if (!confirm(`Удалить прибор «${item.name}»?\n\nКарточка и файлы переместятся в «Оборудование / Удаленные». Их можно восстановить.`)) return;
   const button = document.getElementById("instrumentDeleteBtn");
   button.disabled = true;
   try {
     await apiFetch(`/api/equipment/instruments/${encodeURIComponent(item.id)}`, { method: "DELETE" });
     instrumentFormItem = null;
     document.getElementById("instrumentOverlay").classList.add("hidden");
-    showToast(`Прибор «${item.name}» удалён, файлы сохранены в архиве`);
+    showToast(`Прибор «${item.name}» удалён, карточка и файлы сохранены в «Удаленные»`);
     equipmentSyncedFor = null;
     goToFolder(EQUIPMENT_PATH, buildTrailExtending(
       [{ label: "База данных", path: DB_PATH }], DB_PATH, EQUIPMENT_PATH), true);
