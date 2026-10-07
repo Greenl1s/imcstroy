@@ -79,3 +79,18 @@ export async function fetchLinkedFile(relPath, viewerId) {
   const buffer = Buffer.from(await response.arrayBuffer());
   return { buffer, contentType };
 }
+
+export async function syncEquipmentFolders() {
+  try {
+    const token = signServiceToken({ action: 'equipment-sync' });
+    const response = await fetch(`${FILEMANAGER_INTERNAL_URL}/internal/equipment-sync?token=${encodeURIComponent(token)}`,
+      { method: 'POST', signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const report = await response.json();
+    return { folderSyncPending: Boolean(report.skipped?.length) };
+  } catch (err) {
+    console.error('Equipment folder sync pending:', err.message);
+    // Карточка уже сохранена. Повторение удаления не требуется: открытие ИСУ повторит перенос.
+    return { folderSyncPending: true };
+  }
+}

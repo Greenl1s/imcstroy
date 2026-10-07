@@ -3,6 +3,11 @@ import { todayIso, toIso } from './dates.js';
 // Enforced on the locked database row, never on a client-supplied issue date.
 // The last day remains valid until midnight Moscow time. No admin exception.
 export function assertIssuable(instrument, day = todayIso()) {
+  if (instrument.deleted_at) {
+    const err = new Error('Прибор удалён. Сначала восстановите его в ИСУ.');
+    err.status = 409;
+    throw err;
+  }
   if (instrument.check_type === 'none') return;
   const until = toIso(instrument.valid_until);
   if (!until || until < day) {
@@ -15,7 +20,7 @@ export function assertIssuable(instrument, day = todayIso()) {
 
 export async function assertIssuableLocked(client, id) {
   const { rows } = await client.query(
-    'SELECT id, name, check_type, valid_until FROM instruments WHERE id = $1 FOR UPDATE', [id]
+    'SELECT id, name, check_type, valid_until, deleted_at FROM instruments WHERE id = $1 FOR UPDATE', [id]
   );
   if (!rows.length) {
     const err = new Error('Прибор не найден');
