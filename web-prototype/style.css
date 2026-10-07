@@ -1291,3 +1291,37 @@ dialog.lightbox::backdrop { background: rgba(9, 13, 17, 0.6); }
 
 .prototype-note { padding:12px 20px; background:#e9f2f8; color:#195575; font-weight:600; border-radius:12px; margin-bottom:12px; }
 .project-picker-search { width:100%; }
+
+.loan-panel { padding:24px; background:var(--panel, #fff); border:1px solid #d6e0e7; border-radius:18px; }
+.loan-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.loan-heading h2 { margin:0 0 6px; font-size:22px; }
+.loan-heading p,.loan-footnote { color:#687b8b; font-size:14px; margin:0; }
+.loan-filters { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px; }
+.loan-filters button { background:#edf1f5; border:1px solid transparent; }
+.loan-filters button.is-selected { background:#215e86; color:#fff; }
+.loan-table-scroll { overflow-x:auto; }
+.loan-table { width:100%; border-collapse:collapse; font-size:14px; }
+.loan-table th { padding:14px 12px; text-align:left; background:#f3f6f8; color:#536b7c; font-weight:600; }
+.loan-table td { padding:18px 12px; border-bottom:1px solid #dde5eb; vertical-align:top; }
+.loan-table small { display:block; color:#6b7e8d; margin-top:6px; line-height:1.4; }
+.loan-status { display:inline-block; border-radius:8px; padding:7px 10px; font-weight:600; white-space:nowrap; }
+.loan-status.is-active { color:#955509; background:#fff0dd; }
+.loan-status.is-returned { color:#226752; background:#e1f3eb; }
+.loan-muted { color:#7b8792; }
+.loan-empty { padding:40px 16px; text-align:center; color:#687b8b; }
+.loan-more { margin-top:16px; }
+.loan-footnote { margin-top:18px; line-height:1.5; }
+.dark-theme .loan-panel { background:#19252e; border-color:#354655; }
+.dark-theme .loan-table th { background:#263642; color:#bccbd6; }
+.dark-theme .loan-table td { border-color:#354655; }
+@media(max-width:760px) {
+  .loan-panel { padding:14px; border-radius:12px; }
+  .loan-heading { align-items:flex-start; }
+  .loan-heading h2 { font-size:18px; }
+  .loan-table thead { display:none; }
+  .loan-table,.loan-table tbody,.loan-table tr,.loan-table td { display:block; width:100%; }
+  .loan-table tr { padding:12px; border:1px solid #dde5eb; border-radius:12px; margin-bottom:12px; }
+  .loan-table td { border:0; padding:7px 0; overflow-wrap:anywhere; }
+  .loan-table td::before { content:attr(data-label); display:block; color:#6b7e8d; font-size:12px; margin-bottom:4px; }
+  .loan-status { white-space:normal; }
+}

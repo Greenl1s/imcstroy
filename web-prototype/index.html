@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Учёт оборудования — прототип</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./style.css?v=20260930-1">
+  <link rel="stylesheet" href="./style.css?v=20261007-1">
 
 <!-- Приложение: установка на устройство, работа без сети, уведомления.
      Один и тот же набор в трёх системах — адрес у них общий, значит и
@@ -56,6 +56,7 @@
         <nav class="sidebar-nav" aria-label="Основные разделы">
           <button id="navInstrumentsButton" class="sidebar-link is-active" type="button"><span>▣</span>Приборы</button>
           <button id="navKitsButton" class="sidebar-link" type="button"><span>▤</span>Комплекты</button>
+          <button id="navStatisticsButton" class="sidebar-link" type="button"><span>◷</span>Статистика</button>
           <button id="navScannerButton" class="sidebar-link" type="button"><span>⌾</span>Сканер</button>
           <button id="navRetiredButton" class="sidebar-link admin-only" type="button"><span>□</span>Списанные</button>
         </nav>
@@ -75,6 +76,7 @@
             <button id="menuButton" class="secondary icon-btn" type="button" aria-label="Меню">☰</button>
             <div id="menuDropdown" class="menu-dropdown hidden">
               <button id="themeToggle" type="button">Тёмная</button>
+              <button id="mobileStatisticsButton" type="button">Статистика выдач</button>
               <button id="profileButton" type="button">Профиль</button>
               <div class="menu-divider admin-only"></div>
               <button id="usersButton" class="admin-only" type="button">Пользователи</button>
@@ -157,6 +159,7 @@
       <!-- Комплекты: и список, и карточка одного комплекта
            (она же — экран проверки перед выездом). -->
       <section id="kitsScreen" class="hidden"></section>
+      <section id="statisticsScreen" class="hidden" aria-label="Статистика выдач"></section>
       <nav class="mobile-bottom-nav" aria-label="Навигация на телефоне">
         <button id="mobileInstrumentsButton" class="is-active" type="button"><span>▣</span>Приборы</button>
         <button id="mobileScannerButton" type="button"><span>⌖</span>Сканер</button>
@@ -175,6 +178,6 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.iife.js"></script>
-  <script type="module" src="./js/app.js?v=20261006-3"></script>
+  <script type="module" src="./js/app.js?v=20261007-1"></script>
 </body>
 </html>
