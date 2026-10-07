@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#12618e">
+  <title>AI-сканер приборов</title>
+  <link rel="stylesheet" href="scanner-ai.css">
+</head>
+<body>
+  <main class="scanner">
+    <header>
+      <a href="./">← К приборам</a>
+      <div><b>AI-сканер</b><span id="accountBadge">Проверяю вход…</span></div>
+    </header>
+
+    <section class="mode-panel">
+      <button class="mode active" type="button" data-mode="search">Найти прибор</button>
+      <button class="mode" id="referenceMode" type="button" data-mode="reference" hidden>Добавить эталон</button>
+      <label id="instrumentPicker" hidden>Прибор
+        <select id="instrumentSelect"><option value="">Выберите прибор</option></select>
+      </label>
+    </section>
+
+    <section class="hero">
+      <h1 id="pageTitle">Наведите камеру на прибор</h1>
+      <p id="pageHint">В кадре должен быть один прибор. Фон будет удалён на сервере до сравнения.</p>
+      <div class="camera-view">
+        <video id="cameraVideo" autoplay muted playsinline></video>
+        <div class="camera-frame"></div>
+      </div>
+      <button class="primary" id="captureButton" type="button" disabled>Распознать прибор</button>
+      <label class="gallery"><span>Выбрать готовое фото</span><input id="photoInput" type="file" accept="image/*" capture="environment"></label>
+      <div class="preview-wrap" id="previewWrap" hidden>
+        <span>Такой предмет видит система</span>
+        <img id="preview" alt="Прибор без фона">
+      </div>
+      <button class="confirm" id="saveReferenceButton" type="button" hidden>Сохранить это фото как эталон</button>
+      <div id="status" class="status">Запускаю камеру…</div>
+    </section>
+    <section id="results" class="results"></section>
+  </main>
+  <script type="module" src="js/scanner-ai.js"></script>
+</body>
+</html>

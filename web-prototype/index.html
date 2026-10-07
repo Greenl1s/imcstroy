@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Учёт оборудования — прототип</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css?v=20260930-1">
+
+<!-- Приложение: установка на устройство, работа без сети, уведомления.
+     Один и тот же набор в трёх системах — адрес у них общий, значит и
+     приложение одно. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#232a28">
+<link rel="apple-touch-icon" href="/app/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ИМС">
+<meta name="mobile-web-app-capable" content="yes">
+<script src="/app/pwa.js" defer></script>
+
+  <script>
+    // Caddy обслуживает учет и на основном домене, и внутри ИСУ.
+    // Префикс API должен соответствовать адресу открытой страницы.
+    window.API_BASE = window.API_BASE || (
+      true
+        ? '/instruments-prototype/api'
+        : '/api'
+    );
+    // Адрес файлового менеджера (ИСУ). Пусто — значит тот же домен:
+    // на боевом сервере оба сервиса живут на files.<домен>, и файлы,
+    // выбранные с компьютера, уходят прямо в него по /api/upload.
+    // Задаётся отдельно только на стенде, где сервисы на разных портах.
+    window.FILEMANAGER_BASE = window.FILEMANAGER_BASE || '';
+  </script>
+</head>
+<body>
+  <main class="shell">
+    <!-- Авторизация -->
+    <section id="authView" class="auth-view">
+      <form id="loginForm" class="panel auth-panel">
+        <h1>Учёт оборудования — прототип</h1>
+        <p>Войдите в систему</p>
+        <label>Логин<input id="loginUsername" autocomplete="username" required></label>
+        <label>Пароль<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">Войти</button>
+      </form>
+    </section>
+
+    <!-- Основное приложение -->
+    <section id="appView" class="hidden">
+      <div class="app-layout">
+      <aside class="app-sidebar">
+        <div class="sidebar-brand"><span class="sidebar-mark">ИМ</span><b>Учёт оборудования · прототип</b></div>
+        <button id="backToIsuButton" class="sidebar-back" type="button">← Вернуться в ИСУ</button>
+        <nav class="sidebar-nav" aria-label="Основные разделы">
+          <button id="navInstrumentsButton" class="sidebar-link is-active" type="button"><span>▣</span>Приборы</button>
+          <button id="navKitsButton" class="sidebar-link" type="button"><span>▤</span>Комплекты</button>
+          <button id="navScannerButton" class="sidebar-link" type="button"><span>⌾</span>Сканер</button>
+          <button id="navRetiredButton" class="sidebar-link admin-only" type="button"><span>□</span>Списанные</button>
+        </nav>
+      </aside>
+      <div class="app-content"><div class="prototype-note">Прототип · реальные приборы и общее наличие с основным учётом</div>
+      <header class="topbar">
+        <div class="topbar-title">
+          <div><span class="topbar-eyebrow">УЧЁТ ОБОРУДОВАНИЯ</span><h1 id="pageTitle">Приборы</h1></div>
+          <!-- Видна только когда открыта карточка прибора: это выход
+               из карточки, и место ему рядом с другим выходом, а не
+               в хвосте списка действий над самим прибором. -->
+          <button id="backToListButton" class="primary hidden" type="button">← К списку</button>
+        </div>
+        <div class="topbar-actions">
+          <span id="currentUserBadge" class="user-name"></span>
+          <div class="menu-wrapper">
+            <button id="menuButton" class="secondary icon-btn" type="button" aria-label="Меню">☰</button>
+            <div id="menuDropdown" class="menu-dropdown hidden">
+              <button id="themeToggle" type="button">Тёмная</button>
+              <button id="profileButton" type="button">Профиль</button>
+              <div class="menu-divider admin-only"></div>
+              <button id="usersButton" class="admin-only" type="button">Пользователи</button>
+              <button id="controlTypesButton" class="admin-only" type="button">Классификации</button>
+              <button id="companiesButton" class="admin-only" type="button">Компании</button>
+              <div class="menu-divider"></div>
+              <button id="exportAllButton" type="button">Скачать таблицу приборов</button>
+              <button id="exportExpiringButton" type="button">Окончание поверок</button>
+              <!-- Общая ручная выгрузка в ИСУ больше не нужна: код каждого
+                   прибора создаётся в его папке автоматически. Архив оставлен
+                   только для разовой печати наклеек. -->
+              <button id="downloadQrButton" type="button">Скачать все QR-коды</button>
+              <div class="menu-divider mobile-menu-only"></div>
+              <button id="mobileLogoutButton" class="mobile-menu-only menu-danger" type="button">Выйти</button>
+            </div>
+          </div>
+          <button id="logoutButton" class="danger" type="button">Выйти</button>
+        </div>
+      </header>
+
+      <!-- Список -->
+      <section id="listScreen">
+        <!-- Сводка. Каждое число — это фильтр: щелчок оставляет в списке
+             только те приборы, о которых оно говорит. -->
+        <div class="summary" id="summaryBar"></div>
+
+        <div class="toolbar panel">
+          <input id="searchInput" class="search-full" placeholder="Поиск по названию, серийному номеру, модели или инв. номеру">
+
+          <div class="toolbar-bottom">
+            <div class="toolbar-buttons">
+              <button id="addInstrumentButton" class="primary admin-only" type="button">+ Добавить прибор</button>
+              <button id="retiredButton" class="secondary admin-only compact-nav-button" type="button">Списанные</button>
+              <button id="kitsButton" class="secondary compact-nav-button" type="button">Комплекты</button>
+              <button id="recognitionScannerButton" class="secondary compact-nav-button" type="button">Найти по фото</button>
+              <button id="massToggleBtn" class="secondary" type="button">Выбрать</button>
+              <button id="mobileFiltersToggle" class="secondary mobile-filter-toggle" type="button" aria-expanded="false">Фильтры</button>
+              <button id="pendingTransfersBtn" class="danger" type="button" style="display:none;">Передачи (<span id="pendingTransfersCount">0</span>)</button>
+            </div>
+
+          </div>
+        </div>
+
+        <div id="listTable" class="list-table">
+          <div class="list-head">
+            <span>Прибор / модель</span>
+            <label class="table-filter"><span>Состояние</span><select id="conditionFilter" aria-label="Фильтр по состоянию"><option value="all">Все состояния</option><option value="free">Свободен</option><option value="busy">Занят</option><option value="booked">Забронирован</option></select></label>
+            <label class="table-filter"><span>Классификация</span><select id="controlTypeFilter" aria-label="Фильтр по классификации"><option value="all">Все классы</option><option value="none">Не указано</option></select></label>
+            <label class="table-filter"><span>Поверка</span><select id="verificationFilter" aria-label="Фильтр по поверке"><option value="all">Любая поверка</option><option value="valid">Действует</option><option value="soon">Истекает ≤ 30 дней</option><option value="expired">Просрочена</option><option value="none">Не требуется</option><option value="unset">Срок не заполнен</option></select></label>
+            <label class="table-filter"><span>Владелец</span><select id="companyFilter" aria-label="Фильтр по владельцу"><option value="all">Все владельцы</option><option value="none">Не привязан</option></select></label>
+            <span></span>
+          </div>
+          <div id="instrumentList" class="list"></div>
+        </div>
+
+        <!-- Панель массовых действий: показывается, только когда включён
+             режим «Выбрать». Все операции на виду, опасные — отдельно
+             справа, и всегда написано, сколько приборов выбрано. -->
+        <div id="massPanel" class="mass-panel hidden">
+          <span class="mass-count" id="massCount">Ничего не выбрано</span>
+          <button id="massIssueBtn" type="button">Взять</button>
+          <button id="massBookBtn" type="button">Забронировать</button>
+          <button id="massConfirmBookingBtn" type="button">Подтвердить бронь</button>
+          <button id="massReturnBtn" type="button">Вернуть</button>
+          <button id="massCancelBookingBtn" type="button">Отменить бронь</button>
+          <button id="massTransferBtn" type="button">Передать</button>
+          <button id="massQrWordBtn" type="button">QR-коды в Word</button>
+          <button id="massSetCompanyBtn" type="button">Назначить владельца</button>
+          <button id="massMakeKitBtn" type="button">Собрать комплект</button>
+          <span class="mass-spacer"></span>
+          <button id="massRetireBtn" class="admin-only mass-danger" type="button">Списать</button>
+          <button id="massDeleteBtn" class="admin-only mass-danger" type="button">Удалить</button>
+          <button id="massCancelBtn" class="mass-cancel" type="button">Отменить выбор</button>
+        </div>
+      </section>
+
+      <!-- Карточка прибора -->
+      <section id="cardScreen" class="hidden"></section>
+
+      <!-- Комплекты: и список, и карточка одного комплекта
+           (она же — экран проверки перед выездом). -->
+      <section id="kitsScreen" class="hidden"></section>
+      <nav class="mobile-bottom-nav" aria-label="Навигация на телефоне">
+        <button id="mobileInstrumentsButton" class="is-active" type="button"><span>▣</span>Приборы</button>
+        <button id="mobileScannerButton" type="button"><span>⌖</span>Сканер</button>
+        <button id="mobileKitsButton" type="button"><span>▤</span>Комплекты</button>
+        <button id="mobileBackToIsuButton" type="button"><span>↩</span>В ИСУ</button>
+        <button id="mobileMenuButton" type="button"><span>☰</span>Ещё</button>
+      </nav>
+      </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="modal"></dialog>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.iife.js"></script>
+  <script type="module" src="./js/app.js?v=20261006-3"></script>
+</body>
+</html>
