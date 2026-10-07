@@ -1,3 +1,4 @@
+import { findIssueProject } from '../issueProjects.js';
 import { Router } from 'express';
 import { query, transaction } from '../db.js';
 import { requireAuth } from '../auth.js';
@@ -365,13 +366,15 @@ kits.post('/:id/issue', async (req, res) => {
     try {
       const instrument = await transaction(async (client) => {
         await assertIssuableLocked(client, instrumentId);
+        const project = await findIssueProject(client, req.user, req.body?.project_id);
+        const place = project ? [`Проект: ${project.name}`, taken_where].filter(Boolean).join(" · ") : taken_where;
         const { rows } = await client.query(
           `UPDATE instruments
               SET status = 'busy', taken_by = $2, taken_where = $3,
-                  taken_extra = $4, taken_at = $5
+                  taken_extra = $4, taken_at = $5, taken_project_id = $6
             WHERE id = $1 AND status = 'free'
             RETURNING *`,
-          [instrumentId, req.user.id, taken_where, taken_extra, taken_at]
+          [instrumentId, req.user.id, place, taken_extra, taken_at, project?.id || null]
         );
         if (!rows.length) {
           const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [instrumentId]);
@@ -386,7 +389,7 @@ kits.post('/:id/issue', async (req, res) => {
         const row = rows[0];
         await logEvent(client, {
           instrument: row, action: 'issue', actor: req.user,
-          targetName: req.user.username, place: taken_where, extra: taken_extra,
+          targetName: req.user.name || req.user.username, place: row.taken_where, extra: taken_extra,
           note: `Выдан: ${req.user.username} (комплект «${kit.name}»)`
         });
         return row;
@@ -438,7 +441,7 @@ kits.post('/:id/return', async (req, res) => {
       const instrument = await transaction(async (client) => {
         const { rows } = await client.query(
           `UPDATE instruments
-              SET status = 'free', taken_by = NULL, taken_where = NULL,
+              SET status = 'free', taken_by = NULL, taken_project_id = NULL, taken_where = NULL,
                   taken_extra = NULL, taken_at = NULL
             WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
             RETURNING *`,

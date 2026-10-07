@@ -73,7 +73,7 @@ recognition.post('/ai/preview', requireAdmin, async (req, res) => {
 });
 
 recognition.post('/ai/instruments/:id/photos', requireAdmin, async (req, res) => {
-  const exists = await query('SELECT 1 FROM instruments WHERE id = $1', [req.params.id]);
+  const exists = await query('SELECT 1 FROM instruments WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
   if (!exists.rows.length) return res.status(404).json({ error: 'Прибор не найден' });
   const count = await query('SELECT count(*)::int AS count FROM instrument_recognition_photos WHERE instrument_id = $1', [req.params.id]);
   if (count.rows[0].count >= 24) return res.status(409).json({ error: 'Для одного прибора можно сохранить до 24 фотографий' });
@@ -136,7 +136,7 @@ recognition.post('/ai/search', async (req, res) => {
 recognition.post('/instruments/:id/photos', requireAdmin, async (req, res) => {
   const descriptors = validateDescriptors(req.body?.descriptors);
   const { mimeType, bytes } = parseDataUrl(req.body?.data_url);
-  const exists = await query('SELECT 1 FROM instruments WHERE id = $1', [req.params.id]);
+  const exists = await query('SELECT 1 FROM instruments WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
   if (!exists.rows.length) return res.status(404).json({ error: 'Прибор не найден' });
   const count = await query('SELECT count(*)::int AS count FROM instrument_recognition_photos WHERE instrument_id = $1', [req.params.id]);
   if (count.rows[0].count >= 24) return res.status(409).json({ error: 'Для одного прибора можно сохранить до 24 фотографий' });

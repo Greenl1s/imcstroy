@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { query, transaction } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 import { logEvent } from '../history.js';
-import { fetchLinkedFile } from '../fileLink.js';
+import { fetchLinkedFile, syncEquipmentFolders } from '../fileLink.js';
+import { findIssueProject, listIssueProjects } from '../issueProjects.js';
 import { todayIso } from '../dates.js';
 import { assertIssuable, assertIssuableLocked } from '../issuance.js';
 
@@ -12,6 +13,18 @@ const userName = (u) => (u && (u.name || u.username)) || '';
 
 export const instruments = Router();
 instruments.use(requireAuth);
+// Старые ссылки и массовые операции не должны изменять удалённые карточки.
+instruments.use(async (req, res, next) => {
+  try {
+    const match = req.path.match(/^\/(\d+)(?:\/|$)/);
+    const ids = match ? [match[1]] : Array.isArray(req.body?.ids) ? req.body.ids.filter(x => /^\d+$/.test(String(x))) : [];
+    if (ids.length) {
+      const { rows } = await query('SELECT id FROM instruments WHERE id = ANY($1::bigint[]) AND deleted_at IS NOT NULL', [ids]);
+      if (rows.length) return res.status(409).json({ error: 'Прибор удалён. Сначала восстановите его в ИСУ → Оборудование → Удаленные.' });
+    }
+    next();
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // Сегодняшняя дата по Москве. Раньше здесь был toISOString(), считавший
 // дату по Гринвичу: с полуночи до 03:00 МСК прибор записывался вчерашним
@@ -28,11 +41,15 @@ const today = () => todayIso();
  * ошибку «прибор уже занят». Проверка «если свободен, то занять» на клиенте
  * такой гарантии не даёт в принципе.
  */
-async function transition(res, { id, actor, sql, params, action, guardMessage, buildLog }) {
+async function transition(res, { id, actor, sql, params, action, guardMessage, buildLog, projectId }) {
   try {
     const row = await transaction(async (client) => {
       if (['transfer_request', 'transfer_accept', 'confirm_booking'].includes(action)) {
         await assertIssuableLocked(client, id);
+      }
+      if (action === 'confirm_booking') {
+        const project = await findIssueProject(client, actor, projectId);
+        params = [...params, project?.id || null, project ? `Проект: ${project.name}` : null];
       }
       const { rows } = await client.query(sql, params);
       if (!rows.length) {
@@ -101,6 +118,7 @@ async function lockInstrument(client, id) {
     [id]
   );
   if (!rows.length) fail(404, 'Прибор не найден');
+  if (rows[0].deleted_at) fail(409, 'Прибор удалён. Восстановите его в ИСУ.');
   const row = rows[0];
   row.free_qty = Number(row.qty) - Number(row.held_qty);
   return row;
@@ -135,18 +153,20 @@ const pieces = (n) => `${n} шт`;
  * Выдача одной записи. Общая и для одиночной кнопки, и для групповой —
  * иначе две выдачи разошлись бы в мелочах, а мелочь здесь это остаток.
  */
-async function issueOne(client, { instrument, user, qty, where, extra, at }) {
+async function issueOne(client, { instrument, user, qty, where, extra, at, projectId = null }) {
+  const project = await findIssueProject(client, user, projectId);
+  if (project) where = [`Проект: ${project.name}`, where].filter(Boolean).join(' · ');
   assertIssuable(instrument);
   if (!isMulti(instrument)) {
     const { rows } = await client.query(
       `UPDATE instruments
-          SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5
+          SET status = 'busy', taken_by = $2, taken_where = $3, taken_extra = $4, taken_at = $5, taken_project_id = $6
         WHERE id = $1 AND status = 'free'
         RETURNING *`,
-      [instrument.id, user.id, where, extra, at]
+      [instrument.id, user.id, where, extra, at, project?.id || null]
     );
     if (!rows.length) fail(409, `«${instrument.name}» уже занят или забронирован`);
-    return { row: rows[0], qty: 1 };
+    return { row: rows[0], qty: 1, place: where };
   }
 
   if (instrument.status === 'retired') fail(409, `«${instrument.name}» списан`);
@@ -156,18 +176,22 @@ async function issueOne(client, { instrument, user, qty, where, extra, at }) {
       `а взять хотят ${pieces(qty)}`);
   }
 
+  const { rows: existing } = await client.query('SELECT project_id FROM instrument_holdings WHERE instrument_id=$1 AND user_id=$2', [instrument.id, user.id]);
+  if (existing.length && String(existing[0].project_id || '') !== String(project?.id || '')) {
+    fail(409, 'За вами уже числится этот прибор для другого проекта. Сначала верните его.');
+  }
   // Один человек — одна запись на прибор. Взял ещё штуку — прибавляется
   // к его же строке, иначе в карточке было бы «Петров — 1 шт» трижды.
   await client.query(
-    `INSERT INTO instrument_holdings (instrument_id, user_id, qty, taken_where, taken_extra, taken_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO instrument_holdings (instrument_id, user_id, qty, taken_where, taken_extra, taken_at, project_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (instrument_id, user_id) DO UPDATE
         SET qty = instrument_holdings.qty + EXCLUDED.qty,
             taken_where = COALESCE(EXCLUDED.taken_where, instrument_holdings.taken_where),
             taken_extra = COALESCE(EXCLUDED.taken_extra, instrument_holdings.taken_extra)`,
-    [instrument.id, user.id, qty, where, extra, at]
+    [instrument.id, user.id, qty, where, extra, at, project?.id || null]
   );
-  return { row: await syncMultiStatus(client, instrument.id), qty };
+  return { row: await syncMultiStatus(client, instrument.id), qty, place: where };
 }
 
 /**
@@ -178,7 +202,7 @@ async function returnOne(client, { instrument, user, isAdmin, qty, holderId }) {
   if (!isMulti(instrument)) {
     const { rows } = await client.query(
       `UPDATE instruments
-          SET status = 'free', taken_by = NULL, taken_where = NULL,
+          SET status = 'free', taken_by = NULL, taken_project_id = NULL, taken_where = NULL,
               taken_extra = NULL, taken_at = NULL
         WHERE id = $1 AND status = 'busy' AND (taken_by = $2 OR $3)
         RETURNING *`,
@@ -259,6 +283,11 @@ instruments.get('/', async (req, res) => {
       : `SELECT * FROM instruments_view WHERE status <> 'retired' ORDER BY id`
   );
   res.json(rows);
+});
+
+instruments.get('/projects', async (req, res) => {
+  try { res.json(await listIssueProjects({ query }, req.user)); }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 instruments.get('/:id', async (req, res) => {
@@ -582,27 +611,35 @@ instruments.patch('/:id', requireAdmin, async (req, res) => {
 /**
  * Удаление. Раньше строка убиралась только из массива в браузере и после
  * перезагрузки страницы возвращалась. Теперь удаление происходит в базе.
- * Запись в журнале остаётся: instrument_id станет NULL, но имя сохранено.
+ * Карточка, её идентификатор, файлы и записи журнала сохраняются для восстановления.
  */
 instruments.delete('/:id', requireAdmin, async (req, res) => {
   try {
     await transaction(async (client) => {
-      const { rows } = await client.query('SELECT * FROM instruments WHERE id = $1', [req.params.id]);
+      const { rows } = await client.query('SELECT i.*, (SELECT COUNT(*) FROM instrument_holdings h WHERE h.instrument_id=i.id) AS held_qty FROM instruments i WHERE i.id = $1 FOR UPDATE OF i', [req.params.id]);
       if (!rows.length) {
         const err = new Error('Прибор не найден');
         err.status = 404;
         throw err;
       }
+      assertDeletable(rows[0]);
       await logEvent(client, {
-        instrument: rows[0], action: 'delete', actor: req.user, note: 'Прибор удалён безвозвратно'
+        instrument: rows[0], action: 'delete', actor: req.user, note: 'Прибор перемещён в ИСУ → Оборудование → Удаленные'
       });
-      await client.query('DELETE FROM instruments WHERE id = $1', [req.params.id]);
+      await client.query('UPDATE instruments SET deleted_at = now(), deleted_by = $2 WHERE id = $1', [req.params.id, req.user.id]);
     });
-    res.json({ ok: true });
+    res.json({ ok: true, ...await syncEquipmentFolders() });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+function assertDeletable(instrument) {
+  if (instrument.deleted_at) fail(409, 'Прибор уже удалён');
+  if (instrument.status === 'busy' || instrument.status === 'booked' || instrument.taken_by || instrument.booked_by || instrument.pending_transfer_to || Number(instrument.held_qty) > 0) {
+    fail(409, 'Сначала верните прибор и снимите бронь. Удаление прибора на руках запрещено.');
+  }
+}
 
 // ---------- Массовые операции ----------
 // Взять/забронировать доступны любому пользователю (как и одиночные версии).
@@ -621,15 +658,16 @@ instruments.post('/bulk/confirm-booking', async (req, res) => {
     try {
       const instrument = await transaction(async (client) => {
         await assertIssuableLocked(client, id);
+        const project = await findIssueProject(client, req.user, req.body?.project_id);
         const { rows } = await client.query(
           `UPDATE instruments
               SET status = 'busy',
                   taken_by = booked_by, taken_at = $4, taken_extra = booked_extra,
-                  taken_where = booked_where,
+                  taken_where = concat_ws(' · ', $6::text, booked_where), taken_project_id = $5,
                   booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
             WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
             RETURNING *`,
-          [id, req.user.id, req.user.role === 'admin', today()]
+          [id, req.user.id, req.user.role === 'admin', today(), project?.id || null, project ? `Проект: ${project.name}` : null]
         );
         if (!rows.length) {
           const exists = await client.query('SELECT name FROM instruments WHERE id = $1', [id]);
@@ -900,11 +938,11 @@ instruments.post('/bulk/issue', async (req, res) => {
         // многоштучного прибора нужно, спрашивают в его карточке.
         const done = await issueOne(client, {
           instrument: found, user: req.user, qty: 1,
-          where: taken_where, extra: taken_extra, at: taken_at,
+          where: taken_where, extra: taken_extra, at: taken_at, projectId: req.body?.project_id,
         });
         await logEvent(client, {
           instrument: done.row, action: 'issue', actor: req.user,
-          targetName: userName(req.user), place: taken_where, extra: taken_extra,
+          targetName: userName(req.user), place: done.place, extra: taken_extra,
           note: isMulti(found)
             ? `Выдан: ${userName(req.user)} — ${pieces(done.qty)} (групповая выдача)`
             : `Выдан: ${userName(req.user)} (групповая выдача)`
@@ -1032,7 +1070,7 @@ instruments.post('/bulk/retire', requireAdmin, async (req, res) => {
        )
        UPDATE instruments
           SET status = 'retired', retired_at = $2,
-              taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
+              taken_by = NULL, taken_project_id = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
               booked_by = NULL, booked_for = NULL, booked_extra = NULL
         WHERE id = ANY($1::bigint[]) AND status <> 'retired'
         RETURNING *`,
@@ -1053,16 +1091,17 @@ instruments.post('/bulk/delete', requireAdmin, async (req, res) => {
   if (!ids.length) return res.status(400).json({ error: 'Не выбрано ни одного прибора' });
 
   const count = await transaction(async (client) => {
-    const { rows } = await client.query('SELECT * FROM instruments WHERE id = ANY($1::bigint[])', [ids]);
+    const { rows } = await client.query(`SELECT i.*, (SELECT COUNT(*) FROM instrument_holdings h WHERE h.instrument_id=i.id) AS held_qty FROM instruments i WHERE i.id = ANY($1::bigint[]) AND i.deleted_at IS NULL ORDER BY i.id FOR UPDATE OF i`, [ids]);
     for (const instrument of rows) {
+      assertDeletable(instrument);
       await logEvent(client, {
         instrument, action: 'delete', actor: req.user, note: 'Прибор удалён (массовая операция)'
       });
     }
-    await client.query('DELETE FROM instruments WHERE id = ANY($1::bigint[])', [ids]);
+    await client.query('UPDATE instruments SET deleted_at = now(), deleted_by = $2 WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL', [ids, req.user.id]);
     return rows.length;
   });
-  res.json({ ok: true, count });
+  res.json({ ok: true, count, ...await syncEquipmentFolders() });
 });
 
 // ---------- Операции с приборами ----------
@@ -1075,10 +1114,10 @@ instruments.post('/:id/issue', async (req, res) => {
     const id = await transaction(async (client) => {
       const instrument = await lockInstrument(client, req.params.id);
       const wanted = parseQty(req.body?.qty);
-      const done = await issueOne(client, { instrument, user: req.user, qty: wanted, where, extra, at });
+      const done = await issueOne(client, { instrument, user: req.user, qty: wanted, where, extra, at, projectId: req.body?.project_id });
       await logEvent(client, {
         instrument: done.row, action: 'issue', actor: req.user,
-        targetName: userName(req.user), place: where, extra,
+        targetName: userName(req.user), place: done.place, extra,
         note: isMulti(instrument)
           ? `Выдан: ${userName(req.user)} — ${pieces(done.qty)} (свободно ${
               instrument.free_qty - done.qty} из ${instrument.qty})`
@@ -1227,13 +1266,14 @@ instruments.post('/:id/confirm-booking', (req, res) => transition(res, {
   id: req.params.id,
   actor: req.user,
   action: 'confirm_booking',
+  projectId: req.body?.project_id,
   guardMessage: 'Прибор не забронирован или бронь оформлена другим пользователем',
   // "Место использования" не спрашиваем заново — берём то, что уже было
   // указано при бронировании (booked_where), чтобы не вводить дважды.
   sql: `UPDATE instruments
            SET status = 'busy',
                taken_by = booked_by, taken_at = $4, taken_extra = booked_extra,
-               taken_where = booked_where,
+               taken_where = concat_ws(' · ', $6::text, booked_where), taken_project_id = $5,
                booked_by = NULL, booked_for = NULL, booked_extra = NULL, booked_where = NULL
          WHERE id = $1 AND status = 'booked' AND (booked_by = $2 OR $3)
          RETURNING *`,
@@ -1259,7 +1299,7 @@ instruments.post('/:id/retire', requireAdmin, (req, res) => transition(res, {
         )
         UPDATE instruments
            SET status = 'retired', retired_at = $2,
-               taken_by = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
+               taken_by = NULL, taken_project_id = NULL, taken_where = NULL, taken_extra = NULL, taken_at = NULL,
                booked_by = NULL, booked_for = NULL, booked_extra = NULL
          WHERE id = $1 AND status <> 'retired'
          RETURNING *`,
