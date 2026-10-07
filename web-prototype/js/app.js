@@ -1,3 +1,4 @@
+import { renderStatistics } from './statistics.js';
 import { chooseIssueProject } from './projects.js';
 import { api } from './api.js';
 import { state, refresh, isAdmin } from './state.js';
@@ -91,6 +92,9 @@ function bindEvents() {
   document.getElementById('kitsButton').onclick = goKits;
   document.getElementById('recognitionScannerButton').onclick = () => { location.href = './scanner.html'; };
   document.getElementById('navInstrumentsButton').onclick = () => { setSidebarActive('navInstrumentsButton'); goList(); };
+  const goStatistics = () => { history.pushState(null, '', '?statistics'); renderRoute(); };
+  document.getElementById('navStatisticsButton').onclick = goStatistics;
+  document.getElementById('mobileStatisticsButton').onclick = goStatistics;
   document.getElementById('navKitsButton').onclick = () => { setSidebarActive('navKitsButton'); goKits(); };
   document.getElementById('navScannerButton').onclick = () => { location.href = './scanner.html'; };
   document.getElementById('navRetiredButton').onclick = () => { setSidebarActive('navRetiredButton'); showRetired(); };
@@ -439,7 +443,7 @@ function showAuth() {
  * Так работает кнопка «назад» в браузере и так ссылку можно переслать.
  */
 function showScreen(name) {
-  for (const id of ['listScreen', 'cardScreen', 'kitsScreen']) {
+  for (const id of ['listScreen', 'cardScreen', 'kitsScreen', 'statisticsScreen']) {
     document.getElementById(id).classList.toggle('hidden', id !== name);
   }
 }
@@ -458,7 +462,13 @@ function renderRoute() {
   const backToList = document.getElementById('backToListButton');
   if (backToList) backToList.classList.toggle('hidden', !id && !kitId);
 
-  if (kitId) {
+  if (params.has('statistics')) {
+    if (pageTitle) pageTitle.textContent = 'Статистика';
+    setSidebarActive('navStatisticsButton');
+    setMobileActive('mobileMenuButton');
+    showScreen('statisticsScreen');
+    renderStatistics();
+  } else if (kitId) {
     if (pageTitle) pageTitle.textContent = 'Комплект';
     setSidebarActive('navKitsButton');
     setMobileActive('mobileKitsButton');
