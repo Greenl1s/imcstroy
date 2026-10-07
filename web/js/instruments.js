@@ -893,7 +893,7 @@ function bindCardActions(item, goList) {
     after(b, () => api.restore(item.id), 'Прибор восстановлен');
   });
   on('[data-delete]', async (b) => {
-    if (!confirm('Удалить прибор безвозвратно? Это действие нельзя отменить.')) return;
+    if (!confirm('Удалить прибор с возможностью восстановления в ИСУ → Оборудование → Удаленные? Это действие нельзя отменить.')) return;
     const result = await run(() => api.deleteInstrument(item.id), { button: b, success: 'Прибор удалён' });
     if (result === null) return;
     await refresh();

@@ -4,7 +4,7 @@ import { escapeHtml, getControlTypes, setControlTypes, getCompanies, setCompanie
   qtyOf, pieces, plural } from './utils.js';
 import { openModal, closeModal, toast, setSync, run, qtyInput } from './ui.js';
 import { badgeText, showUserForm, showUsersManager } from './auth.js';
-import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js?v=20260930-1';
+import { renderCard, renderList, showInstrumentForm, FILEMANAGER_ORIGIN, showPendingTransfersModal, showControlTypesManager, showCompaniesManager } from './instruments.js?v=20261006-3';
 import { exportAllInstruments, exportExpiringInstruments } from './export.js';
 import { renderKits, renderKitCard, showKitForm } from './kits.js';
 import { displayNo, verificationBadge, verificationText, today, verificationInfo,
@@ -563,7 +563,7 @@ async function bulk(button, kind) {
 
   const question = kind === 'retire'
     ? `Списать ${ids.length} прибор(ов)?`
-    : `Удалить ${ids.length} прибор(ов) безвозвратно?`;
+    : `Удалить ${ids.length} прибор(ов) с возможностью восстановления в ИСУ → Оборудование → Удаленные?`;
   if (!confirm(question)) return;
 
   const result = await run(
