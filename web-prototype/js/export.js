@@ -1,0 +1,65 @@
+import { state } from './state.js';
+import { checkTypeText, today, controlTypeFull, companyName, qtyOf } from './utils.js';
+import { toast } from './ui.js';
+
+const HEADERS = [
+  // «Наличие» стоит сразу за названием: в таблице, которую распечатывают
+  // и несут на склад, число штук важнее модели.
+  '№ п/п', 'Наименование', 'Наличие, шт', 'Серийный номер', 'Модель',
+  'Тип документа (Поверка/калибровка)', 'Дата поверки', 'Действительно до',
+  'Классификация', 'Владелец', 'Документ'
+];
+
+const COLUMN_WIDTHS = [
+  { wch: 6 }, { wch: 35 }, { wch: 12 }, { wch: 16 }, { wch: 22 },
+  { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 25 }, { wch: 12 }
+];
+
+function toRows(items) {
+  return items.map((item, index) => [
+    index + 1,
+    item.name || '',
+    qtyOf(item),
+    item.serial_number || '',
+    item.model || '',
+    checkTypeText(item.check_type),
+    item.verification_date || '',
+    item.valid_until || '',
+    controlTypeFull(item.control_type),
+    companyName(item.company_code),
+    item.has_document ? 'Есть' : '—'
+  ]);
+}
+
+function downloadWorkbook(rows, filename) {
+  if (typeof XLSX === 'undefined') {
+    toast('Не удалось загрузить библиотеку для Excel — проверьте интернет-соединение и обновите страницу', true);
+    return;
+  }
+  const sheet = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
+  sheet['!cols'] = COLUMN_WIDTHS;
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, 'Приборы');
+  XLSX.writeFile(book, filename);
+}
+
+/** Полная таблица приборов — все, что сейчас в работе (списанные сюда не входят). */
+export function exportAllInstruments() {
+  if (!state.instruments.length) return toast('Нет приборов для выгрузки', true);
+  downloadWorkbook(toRows(state.instruments), `приборы-${today()}.xlsx`);
+}
+
+/**
+ * Только те приборы, у которых поверка/калибровка заканчивается до конца
+ * текущего года включительно — либо уже закончилась (просрочена).
+ * Приборы без даты поверки в список не попадают: сравнивать нечего.
+ */
+export function exportExpiringInstruments() {
+  const year = new Date().getFullYear();
+  const cutoff = new Date(year, 11, 31, 23, 59, 59);
+  const items = state.instruments.filter(
+    (i) => i.valid_until && new Date(i.valid_until) <= cutoff
+  );
+  if (!items.length) return toast('Нет приборов с истекающей или истёкшей поверкой', true);
+  downloadWorkbook(toRows(items), `окончание-поверок-${year}.xlsx`);
+}
