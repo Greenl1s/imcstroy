@@ -722,7 +722,7 @@ app.patch("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) =
     const { rows: currentRows } = await db.query(
       `SELECT i.*, COALESCE((SELECT SUM(h.qty)::int FROM instrument_holdings h
                              WHERE h.instrument_id = i.id), 0) AS held_qty
-         FROM instruments i WHERE i.id = $1`, [id]
+         FROM instruments i WHERE i.id = $1 AND i.deleted_at IS NULL`, [id]
     );
     if (!currentRows.length) return res.status(404).json({ message: "Прибор не найден" });
     const current = currentRows[0];
@@ -774,6 +774,28 @@ app.patch("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) =
   }
 });
 
+/** Восстановление сохраняет исходный статус, идентификатор и историю. */
+app.post("/api/equipment/instruments/:id/restore", auth.requireAuth, auth.requireAdmin, async (req, res) => {
+  let client;
+  try {
+    client = await db.connect();
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT * FROM instruments WHERE id=$1 AND deleted_at IS NOT NULL FOR UPDATE", [req.params.id]);
+    if (!rows.length) { const err = new Error("Удалённый прибор не найден"); err.status=404; throw err; }
+    await client.query("UPDATE instruments SET deleted_at=NULL, deleted_by=NULL WHERE id=$1", [rows[0].id]);
+    await client.query(`INSERT INTO history (instrument_id, instrument_name, action, actor_id, actor_name, note)
+      VALUES ($1,$2,'restore',$3,$4,'Прибор восстановлен из папки «Удаленные»')`,
+      [rows[0].id, rows[0].name, req.user.id, req.user.name || req.user.username]);
+    await client.query("COMMIT"); client.release(); client=null;
+    const report = await equipment.sync({ baseUrl: instrumentsBaseUrl(req) });
+    events.log(req.user, "instrument_restore", { name: rows[0].name });
+    res.json({ ok:true, folderSyncPending: report.skipped.length > 0 });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    res.status(err.status || 500).json({ message: err.message });
+  } finally { if (client) client.release(); }
+});
+
 /** Удаление карточки только из формы. Файлы синхронизация переносит в архив. */
 app.delete("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) => {
   let client;
@@ -790,13 +812,18 @@ app.delete("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) 
       return res.status(404).json({ message: "Прибор не найден" });
     }
     const instrument = rows[0];
+    const { rows: held } = await client.query('SELECT 1 FROM instrument_holdings WHERE instrument_id=$1 LIMIT 1', [id]);
+    if (instrument.deleted_at || instrument.status === 'busy' || instrument.status === 'booked' || instrument.taken_by || instrument.booked_by || instrument.pending_transfer_to || held.length) {
+      const err = new Error(instrument.deleted_at ? 'Прибор уже удалён' : 'Сначала верните прибор и снимите бронь');
+      err.status = 409; throw err;
+    }
     await client.query(
       `INSERT INTO history (instrument_id, instrument_name, action, actor_id, actor_name, note)
        VALUES ($1, $2, 'delete', $3, $4, $5)`,
       [instrument.id, instrument.name, req.user.id, req.user.name || req.user.username,
-       "Прибор удалён из ИСУ; папка сохранена в архиве"]
+       "Прибор перемещён в «Оборудование/Удаленные», доступно восстановление"]
     );
-    await client.query("DELETE FROM instruments WHERE id = $1", [id]);
+    await client.query("UPDATE instruments SET deleted_at=now(), deleted_by=$2 WHERE id=$1", [id, req.user.id]);
     await client.query("COMMIT");
     client.release();
     client = null;
@@ -806,7 +833,7 @@ app.delete("/api/equipment/instruments/:id", auth.requireAuth, async (req, res) 
   } catch (err) {
     if (client) await client.query("ROLLBACK").catch(() => {});
     console.error("Оборудование: не удалось удалить прибор:", err);
-    res.status(500).json({ message: "Не удалось удалить прибор: " + err.message });
+    res.status(err.status || 500).json({ message: "Не удалось удалить прибор: " + err.message });
   } finally {
     if (client) client.release();
   }
@@ -2688,6 +2715,13 @@ app.get("/internal/linked-file", async (req, res) => {
 // Эталонные снимки распознавания физически лежат в папке прибора в ИСУ.
 // Публичного доступа у этих методов нет: короткий токен подписывает API
 // «Учёта оборудования», а путь сервер строит сам по id прибора.
+app.post("/internal/equipment-sync", async (req, res) => {
+  try {
+    fileLink.verifyServiceToken(req.query.token, { action: "equipment-sync" });
+    res.json(await equipment.sync());
+  } catch (err) { res.status(err.status || 403).json({ message: err.message }); }
+});
+
 app.post("/internal/instrument-recognition/:id",
   express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "4mb" }),
   async (req, res) => {

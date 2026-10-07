@@ -35,6 +35,7 @@ const RETIRED_DIRNAME = "Списанные";
 // Сюда уезжают папки приборов, которых больше нет в «Учёте»:
 // файлы целы, но видно, что прибор из системы удалён.
 const ARCHIVE_DIRNAME = "Архив";
+const DELETED_DIRNAME = "Удаленные";
 const NO_TYPE_DIRNAME = "Не указано";
 const IMAGES_DIRNAME = "Изображения";
 const DOCS_DIRNAME = "Поверка";
@@ -100,7 +101,7 @@ function classificationDirName(controlType, typesByCode) {
 
 /** Где приборy положено лежать по его карточке. */
 function expectedFolder(instrument, typesByCode) {
-  const parent = instrument.status === "retired"
+  const parent = instrument.deleted_at ? `${EQUIPMENT_DIR}/${DELETED_DIRNAME}` : instrument.status === "retired"
     ? `${EQUIPMENT_DIR}/${RETIRED_DIRNAME}`
     : `${EQUIPMENT_DIR}/${classificationDirName(instrument.control_type, typesByCode)}`;
   return `${parent}/${instrumentFolderName(instrument)}`;
@@ -125,7 +126,7 @@ async function loadInstruments() {
   const { rows } = await db.query(
     `SELECT id, inventory_no, name, model, serial_number, control_type, company_code,
             check_type, verification_date, valid_until, comment, status,
-            taken_where, taken_at, folder_path,
+            taken_where, taken_at, folder_path, deleted_at,
             photo_link_path, document_link_path
        FROM instruments
       ORDER BY id`
@@ -142,10 +143,10 @@ async function loadInstruments() {
 async function listInstrumentsForEditor(controlType) {
   const typesByCode = await loadControlTypes();
   const params = [];
-  let where = "";
+  let where = "WHERE i.deleted_at IS NULL";
   if (controlType !== undefined && controlType !== null) {
     params.push(String(controlType));
-    where = "WHERE i.control_type IS NOT DISTINCT FROM NULLIF($1, '')";
+    where += " AND i.control_type IS NOT DISTINCT FROM NULLIF($1, '')";
   }
   const { rows } = await db.query(
     `SELECT i.*,
@@ -187,6 +188,7 @@ async function sync(options = {}) {
   }
 
   await files.ensureDir(EQUIPMENT_DIR);
+  await files.ensureDir(`${EQUIPMENT_DIR}/${DELETED_DIRNAME}`);
 
   // Папки классификаций заводим все сразу, даже пустые: человек должен
   // видеть, куда класть прибор, ещё до того как заведёт первый.
@@ -199,8 +201,10 @@ async function sync(options = {}) {
   }
 
   for (const instrument of instruments) {
-    const target = expectedFolder(instrument, typesByCode);
+    let target = expectedFolder(instrument, typesByCode);
     const current = instrument.folder_path;
+    // Сохраняем ранее выбранный свободный суффикс при конфликте имён.
+    if (current?.startsWith(target + " (") && /^ \(\d+\)$/.test(current.slice(target.length)) && await files.pathExists(current)) target = current;
 
     if (current === target && (await files.pathExists(target))) {
       // Новые служебные подпапки должны появиться и у давно созданных
@@ -214,7 +218,7 @@ async function sync(options = {}) {
 
     try {
       if (current && current !== target && (await files.pathExists(current))) {
-        await moveFolder(current, target);
+        target = await moveFolder(current, target);
         report.moved.push({ id: instrument.id, from: current, to: target });
       } else if (!(await files.pathExists(target))) {
         await files.ensureDir(target);
@@ -223,9 +227,37 @@ async function sync(options = {}) {
       for (const sub of INSTRUMENT_SUBDIRS) await files.ensureDir(`${target}/${sub}`);
       await ensureQr(instrument, target, options.baseUrl);
       if (current !== target) {
-        await db.query("UPDATE instruments SET folder_path = $1 WHERE id = $2", [target, instrument.id]);
+        const client = await db.connect();
+        try {
+          await client.query("BEGIN");
+        await client.query(
+          `UPDATE instruments SET folder_path = $1,
+            photo_link_path = CASE WHEN $3 <> '' AND left(photo_link_path, length($3) + 1) = $3 || '/' THEN $1 || substr(photo_link_path, length($3) + 1) ELSE photo_link_path END,
+            document_link_path = CASE WHEN $3 <> '' AND left(document_link_path, length($3) + 1) = $3 || '/' THEN $1 || substr(document_link_path, length($3) + 1) ELSE document_link_path END
+           WHERE id = $2`, [target, instrument.id, current || '']);
+        if (current) await client.query(
+          `UPDATE instrument_recognition_photos SET file_path = $1 || substr(file_path, length($3) + 1)
+           WHERE instrument_id = $2 AND left(file_path, length($3) + 1) = $3 || '/'`,
+          [target, instrument.id, current]);
+
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK").catch(() => {});
+          if (current && report.moved.some(m => m.id === instrument.id)) {
+            await fsp.rename(files.safeResolve(target), files.safeResolve(current)).catch(rollback => console.error("Не удалось вернуть папку после ошибки:", rollback.message));
+          }
+          throw err;
+        } finally { client.release(); }
+        instrument.folder_path = target;
       }
     } catch (err) {
+      // Если соединение/QR не удалось получить уже после переноса,
+      // вернём папку к ещё действующим ссылкам в базе.
+      if (current && report.moved.some(m => m.id === instrument.id) &&
+          await files.pathExists(target) && !(await files.pathExists(current))) {
+        await fsp.rename(files.safeResolve(target), files.safeResolve(current))
+          .catch(rollback => console.error("Не удалось вернуть папку:", rollback.message));
+      }
       // Одна неудачная папка не должна останавливать сверку остальных:
       // иначе один прибор с испорченным именем заморозил бы весь раздел.
       console.error("Оборудование: не удалось разложить прибор", instrument.id, err.message);
@@ -251,17 +283,17 @@ async function sync(options = {}) {
  * «что-то» положил человек.
  */
 async function archiveOrphans(instruments, typesByCode, report) {
-  const expected = new Set(instruments.map((i) => expectedFolder(i, typesByCode)));
+  const expected = new Set(instruments.map((i) => i.folder_path || expectedFolder(i, typesByCode)));
   const liveTypes = new Set([
     ...[...typesByCode.values()].map((t) => sanitizeSegment(t.full_name)),
-    RETIRED_DIRNAME, NO_TYPE_DIRNAME, ARCHIVE_DIRNAME,
+    RETIRED_DIRNAME, NO_TYPE_DIRNAME, ARCHIVE_DIRNAME, DELETED_DIRNAME,
   ]);
 
   let level1;
   try { level1 = await files.listDir(EQUIPMENT_DIR); } catch { return; }
 
   for (const type of level1.folders) {
-    if (type.name === ARCHIVE_DIRNAME) continue;
+    if (type.name === ARCHIVE_DIRNAME || type.name === DELETED_DIRNAME) continue;
     const typeDir = `${EQUIPMENT_DIR}/${type.name}`;
 
     let inside;
@@ -320,6 +352,7 @@ function deleteGuard(relPath) {
   }
 
   const rest = clean.slice(EQUIPMENT_DIR.length + 1).split("/");
+  if (rest[0] === DELETED_DIRNAME && rest.length <= 3) return "Удалённые карточки хранятся для восстановления. Откройте папку прибора и нажмите «Восстановить».";
 
   // Сам «Архив» — системная папка, а папки удалённых приборов внутри
   // него уже можно разбирать руками.
@@ -333,7 +366,7 @@ function deleteGuard(relPath) {
   }
   if (rest.length === 2) {
     return `Папка «${rest[1]}» принадлежит прибору. ` +
-      "Откройте её и используйте форму «Редактировать прибор» — при удалении папка с файлами уедет в архив.";
+      "Откройте её и используйте форму «Редактировать прибор» — при удалении папка с файлами уедет в «Удаленные».";
   }
   if (rest.length === 3 && INSTRUMENT_SUBDIRS.includes(rest[2])) {
     return `«${rest[2]}» — служебная папка прибора, в неё складываются файлы из формы. ` +
@@ -431,6 +464,7 @@ async function moveFolder(from, to) {
     toAbs = files.safeResolve(`${to} (${n})`);
   }
   await fsp.rename(fromAbs, toAbs);
+  return toAbs === files.safeResolve(to) ? to : `${parent}/${path.basename(toAbs)}`;
 }
 
 /**
@@ -448,7 +482,7 @@ async function describe(relPath) {
 
   if (clean === EQUIPMENT_DIR) {
     const { rows } = await db.query(
-      `SELECT control_type, status, COUNT(*)::int AS n FROM instruments GROUP BY control_type, status`
+      `SELECT control_type, status, COUNT(*)::int AS n FROM instruments WHERE deleted_at IS NULL GROUP BY control_type, status`
     ).catch(() => ({ rows: [] }));
     return {
       kind: "root",
@@ -481,6 +515,7 @@ async function describe(relPath) {
 
   const rest = clean.slice(EQUIPMENT_DIR.length + 1);
   if (!rest.includes("/")) {
+    if (rest === DELETED_DIRNAME) return { kind: "deleted", path: clean, name: rest };
     if (rest === RETIRED_DIRNAME) return { kind: "retired", path: clean, name: rest };
     if (rest === ARCHIVE_DIRNAME) return { kind: "archive", path: clean, name: rest };
     const type = [...typesByCode.values()].find((item) => sanitizeSegment(item.full_name) === rest);
@@ -499,6 +534,7 @@ function decorate(row, typesByCode) {
     model: row.model,
     serial_number: row.serial_number,
     status: row.status,
+    deleted_at: row.deleted_at,
     qty: Number(row.qty) || 1,
     held_qty: Number(row.held_qty) || 0,
     taken_by_name: row.taken_by_name,
@@ -530,7 +566,7 @@ async function strangersIn(relPath, typesByCode) {
     // «Архив» завела сама система — туда уезжают папки приборов,
     // которых больше нет в «Учёте». Называть её посторонней значило бы
     // предлагать человеку разобрать то, что разложили за него.
-    NO_TYPE_DIRNAME, RETIRED_DIRNAME, ARCHIVE_DIRNAME,
+    NO_TYPE_DIRNAME, RETIRED_DIRNAME, ARCHIVE_DIRNAME, DELETED_DIRNAME,
   ]);
   try {
     const { folders, files: fileList } = await files.listDir(relPath);
@@ -551,7 +587,7 @@ async function strangersIn(relPath, typesByCode) {
  * нет, заводит её.
  */
 async function uploadDirFor(instrumentId, kind) {
-  const { rows } = await db.query("SELECT * FROM instruments WHERE id = $1", [instrumentId]);
+  const { rows } = await db.query("SELECT * FROM instruments WHERE id = $1 AND deleted_at IS NULL", [instrumentId]);
   if (!rows.length) {
     const err = new Error("Прибор не найден");
     err.status = 404;
@@ -594,9 +630,17 @@ async function adoptUploadedFile(instrumentId, relFilePath, kind) {
 }
 
 module.exports = {
-  EQUIPMENT_DIR, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME,
+  EQUIPMENT_DIR, DELETED_DIRNAME, RETIRED_DIRNAME, NO_TYPE_DIRNAME, IMAGES_DIRNAME, DOCS_DIRNAME,
   RECOGNITION_DIRNAME, QR_FILENAME,
   instrumentFolderName, sanitizeSegment, classificationDirName, expectedFolder,
-  sync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes, listInstrumentsForEditor,
+  sync: queuedSync, describe, uploadDirFor, adoptUploadedFile, loadControlTypes, listInstrumentsForEditor,
   ensureQr, rebuildQr, qrFiles, deleteGuard,
 };
+
+// Одна сверка за раз: две вкладки не должны одновременно переносить папку.
+let syncQueue = Promise.resolve();
+function queuedSync(options) {
+  const pending = syncQueue.then(() => sync(options));
+  syncQueue = pending.catch(() => {});
+  return pending;
+}
