@@ -21,10 +21,12 @@ export function loanRow(item) {
   const quantity = Number(item.quantity);
   const active = remaining > 0;
   const caption = active ? `В работе${quantity > 1 ? ` · ${remaining} из ${quantity} шт.` : ''}` : 'Возвращён';
+  const cardId = String(item.instrument_id || '');
+  const hasCard = /^[1-9]\d*$/.test(cardId);
   return `<tr>
-    <td data-label="Прибор"><b>${escapeHtml(item.instrument_name)}</b>
+    <td data-label="Прибор"${hasCard ? ' class="loan-instrument-cell"' : ''}>${hasCard ? `<a class="loan-instrument-link" href="?id=${encodeURIComponent(cardId)}" aria-label="Открыть карточку: ${escapeHtml(item.instrument_name)}">` : ''}<b>${escapeHtml(item.instrument_name)}</b>
       <small>${[item.inventory_no, item.model, item.serial_number ? `с/н ${item.serial_number}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</small>
-      ${quantity > 1 ? `<small>Выдано ${quantity} шт. · возвращено ${quantity-remaining} шт.</small>` : ''}</td>
+      ${quantity > 1 ? `<small>Выдано ${quantity} шт. · возвращено ${quantity-remaining} шт.</small>` : ''}${hasCard ? '</a>' : ''}</td>
     <td data-label="Сотрудник">${escapeHtml(item.holder_name)}${item.issued_to_name && item.issued_to_name !== item.holder_name ? `<small>Брал: ${escapeHtml(item.issued_to_name)}</small>` : ''}</td>
     <td data-label="Проект">${escapeHtml(item.project_name || 'Без привязки к проекту')}</td>
     <td data-label="Место использования">${escapeHtml(item.place || 'Не указано')}</td>
@@ -58,6 +60,13 @@ export async function renderStatistics() {
   }
   screen.querySelector('[data-loan-refresh]').onclick = renderStatistics;
   const results = screen.querySelector('.loan-results');
+  results.addEventListener('click', event => {
+    const link = event.target.closest?.('.loan-instrument-link');
+    if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    history.pushState(null, '', link.getAttribute('href'));
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
   let items = [];
   async function load(before = '') {
     try {
