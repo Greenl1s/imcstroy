@@ -30,6 +30,18 @@
 files.{$SITE_ADDRESS} {
         encode gzip
 
+        redir /instruments-prototype /instruments-prototype/ permanent
+        handle /instruments-prototype/api/* {
+                uri strip_prefix /instruments-prototype
+                reverse_proxy api:3000
+        }
+        handle /instruments-prototype/* {
+                uri strip_prefix /instruments-prototype
+                root * /srv/prototype
+                try_files {path} /index.html
+                file_server
+        }
+
         redir /instruments /instruments/ permanent
         redir /calendar /calendar/ permanent
 

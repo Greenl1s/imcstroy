@@ -176,6 +176,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web:/srv/web:ro
+      - ./web-prototype:/srv/prototype:ro
       - ./web-calendar:/srv/calendar:ro
       - caddy-data:/data
       - caddy-config:/config
