@@ -35,24 +35,44 @@ organizations.post("/", auth.requireAdmin, async (req, res) => {
   }
 });
 
-/**
- * Удалить организацию — только администратор, и только если она уже
- * никем не используется (внешний ключ в cases не даст удалить занятую,
- * но проверяем заранее сами, чтобы показать понятную причину).
- */
+/** Структуру можно удалить после отвязки текущих и архивных проектов. */
 organizations.delete("/:name", auth.requireAdmin, async (req, res) => {
-  const name = decodeURIComponent(req.params.name);
-
-  const { rows: usedBy } = await db.query("SELECT COUNT(*)::int AS c FROM cases WHERE organization = $1", [name]);
-  if (usedBy[0].c > 0) {
-    return res.status(409).json({
-      message: `Эта организация используется в ${usedBy[0].c} проект(ах) — сначала переназначьте их`,
-    });
-  }
-
-  const { rowCount } = await db.query("DELETE FROM organizations WHERE name = $1", [name]);
-  if (!rowCount) return res.status(404).json({ message: "Организация не найдена" });
-  res.json({ ok: true });
+  // Express уже декодировал параметр, повторное декодирование ломает «%».
+  const name = req.params.name;
+  let client;
+  try {
+    client = await db.connect();
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT name FROM organizations WHERE name = $1 FOR UPDATE", [name]);
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Структура не найдена" });
+    }
+    const { rows: usedBy } = await client.query(
+      "SELECT COUNT(*)::int AS c FROM cases WHERE organization = $1 AND deleted_at IS NULL", [name]);
+    if (usedBy[0].c > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: `Структура используется в ${usedBy[0].c} проект(ах), включая архив. Выберите в них «не указано» или другую структуру.` });
+    }
+    // Удалённые проекты не блокируют справочник. Старое название остаётся
+    // в истории; при восстановлении проекта его структура будет не указана.
+    await client.query(
+      `INSERT INTO case_history (case_id, action, actor_id, note)
+       SELECT id, 'edited', $2, $3 FROM cases WHERE organization = $1 AND deleted_at IS NOT NULL`,
+      [name, req.user.id, `Удалена структура «${name}» из справочника; в удалённом проекте установлено «не указано»`]);
+    await client.query(
+      `UPDATE cases SET organization = NULL, organization_cleared_locally = true, updated_at = now()
+       WHERE organization = $1 AND deleted_at IS NOT NULL`, [name]);
+    await client.query("DELETE FROM organizations WHERE name = $1", [name]);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    console.error("Не удалось удалить структуру:", err.message);
+    res.status(err.code === "23503" ? 409 : 500).json({ message: err.code === "23503"
+      ? "Структуру назначили проекту. Обновите журнал и сначала переназначьте проект."
+      : db.notMigrated(err) || "Не удалось удалить структуру. Попробуйте ещё раз." });
+  } finally { client?.release(); }
 });
 
 module.exports = { organizations };

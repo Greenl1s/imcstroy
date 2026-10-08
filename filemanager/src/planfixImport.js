@@ -211,12 +211,16 @@ async function updateFromPlanfix(existing, parsed, report) {
     if (value == null || value === "") return;
     if (String(existing[column] || "") === String(value)) return;
     values.push(value);
-    sets.push(`${column} = $${values.length}`);
+    // Проверяем флаг в самом UPDATE: пользователь мог очистить структуру
+    // уже после чтения existing, пока выполнялись сетевые запросы импорта.
+    sets.push(column === "organization"
+      ? `organization = CASE WHEN organization_cleared_locally THEN organization ELSE ${values.length} END`
+      : `${column} = ${values.length}`);
     changes.push(label);
   };
 
   setIf("case_number", parsed.caseNumber, "номер договора");
-  setIf("organization", parsed.organization, "структура");
+  if (!existing.organization_cleared_locally) setIf("organization", parsed.organization, "структура");
   setIf("expertise_type", parsed.expertiseType, "тип экспертизы");
   setIf("status", parsed.status, "статус");
   if (!existing.planfix_id) {
@@ -284,8 +288,6 @@ async function importProjects(report) {
   for (const project of projects) {
     const parsed = readProject(project, fieldIds);
     try {
-      await noteLookupValues(parsed);
-
       if (!parsed.name) {
         report.skipped.push({ name: `#${parsed.planfixId}`, why: "в Planfix у проекта пустое наименование" });
         continue;
@@ -304,6 +306,14 @@ async function importProjects(report) {
       }
 
       const existing = await findCase(parsed);
+      if (existing?.deleted_at) {
+        skipDeleted(existing, report);
+        continue;
+      }
+      // Не возвращаем в справочник структуру из удалённого проекта или
+      // из карточки, которую пользователь явно очистил в ИСУ.
+      await noteLookupValues(existing?.organization_cleared_locally
+        ? { ...parsed, organization: null } : parsed);
       // Папка могла быть заведена руками до появления записи в журнале.
       if (!existing) {
         const found = await findExistingFolder(parsed.name);

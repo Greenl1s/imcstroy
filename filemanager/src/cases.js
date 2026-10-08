@@ -47,7 +47,7 @@ const planfixPeople = require("./planfixPeople");
  */
 async function syncPlanfixSafely(caseId) {
   try {
-    const { rows } = await db.query("SELECT * FROM cases WHERE id = $1", [caseId]);
+    const { rows } = await db.query("SELECT * FROM cases WHERE id = $1 AND deleted_at IS NULL", [caseId]);
     if (!rows.length) return;
     const kase = rows[0];
     const planfixId = await planfixSync.syncProjectToPlanfix(kase);
@@ -1492,7 +1492,8 @@ cases.post("/", async (req, res) => {
         `UPDATE cases
             SET deleted_at = NULL, type = $2, stage = $3, status = 'waiting', is_cancelled = false,
                 court_or_customer = $4, case_number = $5, manager_id = $6, experts = $7, year = $8,
-                description = $9, organization = $10, party1 = $11, party2 = $12, judge_name = $13,
+                description = $9, organization = $10, organization_cleared_locally = ($10::text IS NULL),
+                party1 = $11, party2 = $12, judge_name = $13,
                 folder_path = $14, expertise_type = $15, questions = $16::jsonb, updated_at = now()
           WHERE id = $1 RETURNING *`,
         [deletedTwin[0].id, type, stage, court_or_customer || null, case_number || null,
@@ -1601,6 +1602,12 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
     }
   }
 
+  if (req.body?.organization !== undefined) {
+    // Явное «не указано» сохраняется и при повторном импорте старой карточки.
+    values.push(req.body.organization == null || String(req.body.organization).trim() === "");
+    sets.push(`organization_cleared_locally = $${values.length}`);
+  }
+
   if (req.body?.questions !== undefined) {
     values.push(JSON.stringify(normalizeQuestions(req.body.questions)));
     sets.push(`questions = $${values.length}::jsonb`);
@@ -1644,91 +1651,65 @@ cases.patch("/:id", loadCase, requireWriteOnCaseFolder, async (req, res) => {
   syncPlanfixSafely(req.params.id);
 });
 
-/**
- * Удалить проект из ИСУ и синхронно убрать его из рабочего оборота Planfix.
- *
- * Физического DELETE для проектов в REST API Planfix нет. Поэтому там
- * ставим системный статус COMPLETED, а в ИСУ папка уезжает в корзину и
- * запись получает deleted_at. Если Planfix откажет, папку и запись
- * возвращаем: половинчатого удаления быть не должно.
- */
+/** Ссылка для первого шага удаления. Никаких изменений в обеих системах. */
+cases.get("/:id(\\d+)/deletion-check", auth.requireAdmin, loadCase, async (req, res) => {
+  try {
+    const kase = req.case;
+    const deleted = kase.planfix_id ? await planfixSync.verifyProjectDeleted(kase.planfix_id) : true;
+    res.json({ planfixDeleted: deleted, linked: !!kase.planfix_id,
+      planfixUrl: planfixSync.projectWebUrl(kase.planfix_id) });
+  } catch (err) {
+    res.status(502).json({ message: "Не удалось проверить проект в Planfix: " + err.message });
+  }
+});
+
+/** Удаляем в ИСУ только после подтверждённого отсутствия проекта в Planfix. */
 cases.delete("/:id(\\d+)", auth.requireAdmin, loadCase, async (req, res) => {
   const kase = req.case;
   if (String(req.body?.confirmName || "").trim() !== kase.name) {
     return res.status(400).json({ message: "Для подтверждения введите точное название проекта" });
   }
+  // Проверяем повторно здесь: проверка при открытии окна не даёт права
+  // удалить проект, который затем восстановили в Planfix.
+  if (kase.planfix_id) {
+    try {
+      if (!await planfixSync.verifyProjectDeleted(kase.planfix_id)) {
+        return res.status(409).json({ message: "Проект ещё существует в Planfix. Удалите его там и повторите проверку." });
+      }
+    } catch (err) {
+      return res.status(502).json({ message: "Planfix не подтвердил удаление. Проект в ИСУ сохранён: " + err.message });
+    }
+  }
 
   let trashId = null;
-  let markedDeleted = false;
-  let step = "isu";
   try {
     trashId = await trash.moveToTrash(kase.folder_path, req.user.id);
     await caseLifecycle.markDeletedByPath(kase.folder_path);
-    markedDeleted = true;
-
-    let planfix = "not_linked";
-    if (kase.planfix_id) {
-      step = "planfix";
-      try {
-        await planfixSync.completeProject(kase.planfix_id, kase);
-        planfix = "completed";
-      } catch (err) {
-        if (planfixSync.isProjectNotFoundError(err)) {
-          planfix = "already_missing";
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    // История полезна, но её сбой после принятого Planfix изменения уже
-    // нельзя превращать в откат: иначе ИСУ вернёт проект, а Planfix
-    // останется завершённым. Основная операция к этому месту закончена.
-    try {
-      await db.query(
-        `INSERT INTO case_history (case_id, action, from_stage, actor_id, note)
-         VALUES ($1, 'deleted', $2, $3, $4)`,
-        [kase.id, kase.stage, req.user.id,
-         planfix === "completed"
-           ? "Проект удалён из ИСУ; в Planfix переведён в статус «Завершён»"
-           : planfix === "already_missing"
-             ? "Проект удалён из ИСУ; в Planfix он уже отсутствовал"
-             : "Проект удалён из ИСУ; связи с Planfix не было"]
-      );
-    } catch (historyErr) {
-      console.error("Проект удалён, но запись в историю не добавилась:", historyErr.message);
-    }
-    events.log(req.user, "case_delete", {
-      path: kase.folder_path,
-      name: kase.name,
-      isDir: true,
-      details: { planfix, planfixId: kase.planfix_id || null },
-    });
-
-    res.json({ ok: true, name: kase.name, trashId, planfix });
-    refreshJournalSafely();
   } catch (err) {
-    // До ответа Planfix локальное удаление обратимо. Возвращаем папку и
-    // deleted_at, чтобы проект не пропал только в одной из двух систем.
-    const rollbackErrors = [];
+    let rollbackNote = "";
     if (trashId) {
       try {
         const restored = await trash.restore(trashId, req.user);
-        if (markedDeleted) await caseLifecycle.unmarkDeletedByPath(restored.path);
-      } catch (rollbackErr) {
-        rollbackErrors.push(rollbackErr.message);
-      }
+        await caseLifecycle.unmarkDeletedByPath(restored.path);
+      } catch (rollbackErr) { rollbackNote = " Возврат папки не удался: " + rollbackErr.message; }
     }
-    console.error("Не удалось удалить проект:", err);
-    const rollbackNote = rollbackErrors.length
-      ? ` Автоматический возврат не удался: ${rollbackErrors.join("; ")}`
-      : " Проект в ИСУ оставлен без изменений.";
-    res.status(step === "planfix" ? 502 : 400).json({
-      message: (step === "planfix"
-        ? "Planfix не принял завершение проекта: "
-        : "Не удалось переместить проект в корзину ИСУ: ") + err.message + rollbackNote,
-    });
+    return res.status(400).json({ message: "Не удалось удалить проект из ИСУ: " + err.message + rollbackNote });
   }
+
+  const planfix = kase.planfix_id ? "deleted_verified" : "not_linked";
+  try {
+    await db.query(
+      `INSERT INTO case_history (case_id, action, from_stage, actor_id, note)
+       VALUES ($1, 'deleted', $2, $3, $4)`,
+      [kase.id, kase.stage, req.user.id, kase.planfix_id
+        ? "Проект удалён из ИСУ после проверки удаления в Planfix"
+        : "Проект удалён из ИСУ; связи с Planfix не было"]
+    );
+    events.log(req.user, "case_delete", { path: kase.folder_path, name: kase.name,
+      isDir: true, details: { planfix, planfixId: kase.planfix_id || null } });
+  } catch (err) { console.error("Проект удалён, но история не записана:", err.message); }
+  res.json({ ok: true, name: kase.name, trashId, planfix });
+  refreshJournalSafely();
 });
 
 // Строгий порядок движения по стадиям — без пропусков, как в инструкции.

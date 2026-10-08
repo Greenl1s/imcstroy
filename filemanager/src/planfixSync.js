@@ -46,6 +46,7 @@ async function planfixRequest(method, path, body) {
   }
   const res = await fetch(`${baseUrl()}${path}`, {
     method,
+    signal: AbortSignal.timeout(30000),
     headers: {
       Authorization: `Bearer ${token()}`,
       "Content-Type": "application/json",
@@ -103,7 +104,10 @@ function buildCustomFieldData(kase) {
   const statusValue = STATUS_TO_PLANFIX[kase.status];
   if (statusValue) data.push({ field: { id: fieldStatus() }, value: statusValue });
 
-  if (kase.organization) data.push({ field: { id: fieldOrganization() }, value: kase.organization });
+  // Отсутствие поля в запросе означает «не менять», а не «очистить».
+  if (fieldOrganization() && (kase.organization || kase.organization_cleared_locally)) {
+    data.push({ field: { id: fieldOrganization() }, value: kase.organization || "" });
+  }
   if (kase.case_number) data.push({ field: { id: fieldCaseNumber() }, value: kase.case_number });
 
   return data;
@@ -315,28 +319,22 @@ async function syncProjectToPlanfix(kase) {
   return created.id;
 }
 
-/**
- * REST API Planfix не содержит метода удаления проектов. Поддерживаемый
- * эквивалент для проекта, который удалили из ИСУ, — системный статус
- * COMPLETED: проект перестаёт предлагаться при создании задач, но его
- * карточка и история остаются в Planfix.
- */
-async function completeProject(planfixId, kase = null) {
+/** Проверяем удаление через чтение конкретного проекта, а не общий список. */
+async function verifyProjectDeleted(planfixId) {
   const id = Number(planfixId);
-  if (!id) return false;
-  const body = { status: "COMPLETED" };
-  // Заодно приводим пользовательское поле «Этап проекта» к финальному
-  // значению. Для уже отменённого проекта сохраняется «Отменён», для
-  // остальных будет «Завершён» — системный статус и видимое поле не
-  // должны противоречить друг другу.
-  if (kase) {
-    body.customFieldData = buildCustomFieldData({
-      ...kase,
-      stage: kase.is_cancelled ? kase.stage : "done",
-    });
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Некорректный номер проекта Planfix");
+  try {
+    const result = await planfixRequest("GET", `/project/${id}`);
+    if (!result?.project || Number(result.project.id) !== id) {
+      throw new Error("Planfix не вернул карточку проекта. Удаление не подтверждено.");
+    }
+    return false;
+  } catch (err) {
+    // 401/403 — потеря доступа, а не подтверждение удаления.
+    if ([200, 400, 404].includes(err.planfixStatus) &&
+        isProjectNotFoundError(err)) return true;
+    throw err;
   }
-  await planfixRequest("POST", `/project/${id}`, body);
-  return true;
 }
 
 /** Уже отсутствующий в Planfix проект не должен мешать удалить его копию в ИСУ. */
@@ -765,7 +763,7 @@ async function cancelPlanfixTask(taskId, statusId) {
 
 module.exports = {
   syncProjectToPlanfix, buildCustomFieldData, stageValueForPlanfix, groupIdForType, planfixRequest,
-  completeProject, isProjectNotFoundError,
+  verifyProjectDeleted, isProjectNotFoundError,
   listPlanfixEmployees, createPlanfixTask, formatDateForPlanfix,
   updatePlanfixTask, addTaskComment, listTaskComments, userRef, usersRef,
   listAllProjects, listAllTasks, readTask, planfixDateToIso, probe, typeForGroup, isDoneStatus,
