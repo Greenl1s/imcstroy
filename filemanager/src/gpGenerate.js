@@ -3,6 +3,7 @@ const path = require("path");
 const docxImages = require("./docxImages");
 const docxPlaceholders = require("./docxPlaceholders");
 const russianName = require("./russianName");
+const expertiseType = require("./expertiseType");
 
 const TEMPLATE_PATH = path.join(__dirname, "..", "templates", "gp-template.docx");
 
@@ -201,7 +202,7 @@ function buildGP(data, withAttachments, templateBuffer) {
     "{{COURT_HEADER}}": data.courtHeader,
     "{{CASE_NUMBER}}": data.caseNumber,
     "{{COURT_GENITIVE}}": data.courtGenitive,
-    "{{EXPERTISE_TYPE}}": data.expertiseType,
+    "{{EXPERTISE_TYPE}}": expertiseType.forGuaranteeLetter(data.expertiseType),
     "{{COST_TEXT}}": data.costText,
     "{{TERM_TEXT}}": data.termText,
     "{{COST_UNIT}}": data.costUnit,

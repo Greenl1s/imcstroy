@@ -1696,6 +1696,9 @@ app.post("/api/documents/:type/preview", auth.requireAuth,
     if (!rows.length) throw gpFail("Проект не найден или удалён", 404);
     const kase = rows[0];
     await assertCanWriteToCase(req, kase);
+    if (!String(data.expertiseType || "").trim()) {
+      data.expertiseType = String(kase.expertise_type || "");
+    }
     requiredDocumentFields(type, data, req.files || []);
 
     const expertPaths = Array.isArray(data.expertPaths) ? data.expertPaths : [];
@@ -1831,7 +1834,7 @@ async function prepareGp(req) {
     courtHeader: String(body.courtHeader || ""),
     caseNumber: String(body.caseNumber || ""),
     courtGenitive: String(body.courtGenitive || ""),
-    expertiseType: String(body.expertiseType || ""),
+    expertiseType: String(body.expertiseType || kase.expertise_type || ""),
     questions,
     costText: `${formattedCost} (${body.costWords || ""})`,
     costUnit: russianName.countForm(rawCost, "рубль", "рубля", "рублей"),
