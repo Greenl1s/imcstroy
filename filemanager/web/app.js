@@ -6596,44 +6596,73 @@ bind(document.getElementById("caseEditForm"), "submit", async (e) => {
  * Planfix. Название нужно набрать целиком, чтобы случайный щелчок по
  * красной кнопке не удалил рабочее дело.
  */
-async function deleteCaseProject(project, button) {
-  if (!project || currentUser?.role !== "admin") return;
-  const planfixNote = project.planfix_id
-    ? "В Planfix проект будет переведён в статус «Завершён», потому что его REST API не поддерживает удаление проектов."
-    : "Карточка проекта не связана с Planfix, поэтому изменение коснётся только ИСУ.";
-  const typed = prompt(
-    `Удалить проект «${project.name}»?\n\n` +
-    `Папка в ИСУ уйдёт в корзину. ${planfixNote}\n\n` +
-    "Для подтверждения введите точное название проекта:"
-  );
-  if (typed === null) return;
-  if (typed.trim() !== project.name) {
-    return alert("Название не совпало. Проект не удалён.");
-  }
+let caseDeleteProject = null;
+let caseDeleteBusy = false;
 
+function closeCaseDelete() {
+  if (caseDeleteBusy) return;
+  document.getElementById("caseDeleteOverlay").classList.add("hidden");
+  caseDeleteProject = null;
+}
+
+async function deleteCaseProject(project, button) {
+  if (!project || currentUser?.role !== "admin" || caseDeleteBusy) return;
   if (button) button.disabled = true;
   try {
+    const check = await apiFetch(`/api/cases/${project.id}/deletion-check`);
+    caseDeleteProject = { id: project.id, name: project.name };
+    const link = document.getElementById("caseDeletePlanfixLink");
+    link.classList.toggle("hidden", !check.linked || check.planfixDeleted);
+    if (check.planfixUrl) link.href = check.planfixUrl;
+    else link.removeAttribute("href");
+    document.getElementById("caseDeleteInstructions").textContent = check.linked && !check.planfixDeleted
+      ? `Проект «${project.name}»: сначала откройте Planfix и выберите «Удалить проект» в деталях проекта. Затем вернитесь сюда. ИСУ проверит удаление, после чего переместит папку в корзину.`
+      : `Проект «${project.name}» ${check.linked ? "уже отсутствует в Planfix" : "не связан с Planfix"}. Папка проекта будет перемещена в корзину ИСУ.`;
+    document.getElementById("caseDeleteName").value = "";
+    document.getElementById("caseDeleteError").textContent = "";
+    document.getElementById("caseDeleteOverlay").classList.remove("hidden");
+    document.getElementById("caseDeleteName").focus();
+  } catch (err) { alert("Не удалось проверить удаление: " + err.message); }
+  finally { if (button) button.disabled = false; }
+}
+
+bind(document.getElementById("caseDeleteCloseBtn"), "click", closeCaseDelete);
+bind(document.getElementById("caseDeleteOverlay"), "click", e => {
+  if (e.target.id === "caseDeleteOverlay") closeCaseDelete();
+});
+bind(document.getElementById("caseDeleteForm"), "submit", async e => {
+  e.preventDefault();
+  if (!caseDeleteProject || caseDeleteBusy) return;
+  const project = caseDeleteProject;
+  const error = document.getElementById("caseDeleteError");
+  if (document.getElementById("caseDeleteName").value.trim() !== project.name) {
+    error.textContent = "Название не совпало. Проект не удалён.";
+    return;
+  }
+  const submit = document.getElementById("caseDeleteSubmit");
+  caseDeleteBusy = true;
+  submit.disabled = true;
+  error.textContent = "Проверяем удаление…";
+  try {
     const result = await apiFetch(`/api/cases/${project.id}`, {
-      method: "DELETE",
-      body: JSON.stringify({ confirmName: project.name }),
+      method: "DELETE", body: JSON.stringify({ confirmName: project.name }),
     });
+    caseDeleteBusy = false;
+    closeCaseDelete();
     closeCaseEdit();
     caseCardId = null;
     caseCardData = null;
     caseTypeByFolder = null;
     registryCases = null;
     journalData = null;
-    showToast(result.planfix === "completed"
-      ? "Проект удалён из ИСУ и завершён в Planfix"
-      : "Проект удалён из ИСУ");
+    showToast(result.planfix === "deleted_verified"
+      ? "Удаление в Planfix подтверждено. Проект перемещён в корзину ИСУ"
+      : "Проект перемещён в корзину ИСУ");
     showSection("registry", true);
     loadRegistry(true);
-  } catch (err) {
-    alert("Не удалось удалить проект: " + err.message);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
+  } catch (err) { error.textContent = err.message; }
+  finally { caseDeleteBusy = false; submit.disabled = false; }
+});
 
 bind(document.getElementById("caseEditDelete"), "click", (e) => {
   deleteCaseProject(caseEditProject, e.currentTarget);

@@ -1422,6 +1422,24 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261006-3"></script>
+<div id="caseDeleteOverlay" class="modal-overlay hidden">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="caseDeleteTitle">
+      <div class="modal-header">
+        <span id="caseDeleteTitle">Удаление проекта</span>
+        <button class="back-btn" id="caseDeleteCloseBtn" type="button">Закрыть</button>
+      </div>
+      <p id="caseDeleteInstructions"></p>
+      <p><a class="upload-btn" id="caseDeletePlanfixLink" target="_blank" rel="noopener noreferrer">Открыть проект в Planfix</a></p>
+      <form id="caseDeleteForm">
+        <label>Для подтверждения введите название проекта
+          <input id="caseDeleteName" type="text" autocomplete="off" required>
+        </label>
+        <p id="caseDeleteError" class="error-text" role="alert"></p>
+        <button class="primary" id="caseDeleteSubmit" type="submit">Проверить и удалить из ИСУ</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js?v=20261008-1"></script>
 </body>
 </html>
