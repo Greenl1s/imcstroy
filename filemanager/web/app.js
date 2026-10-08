@@ -2511,6 +2511,7 @@ let documentCatalog = null;
 let documentCurrentType = null;
 let documentCases = [];
 let documentExperts = [];
+let documentExpertiseTypes = [];
 let documentDraft = null;
 let documentEditor = null;
 
@@ -2543,15 +2544,19 @@ async function loadDocumentCatalog() {
   return documentCatalog.items;
 }
 async function loadDocumentSources() {
-  const [cases, expertsData] = await Promise.all([apiFetch("/api/cases"), apiFetch("/api/experts")]);
+  const [cases, expertsData, lists] = await Promise.all([
+    apiFetch("/api/cases"), apiFetch("/api/experts"), apiFetch("/api/lookups"),
+  ]);
   documentCases = cases.filter((c) => !c.is_cancelled);
   documentExperts = expertsData.experts || [];
+  documentExpertiseTypes = lists.expertise_types || [];
 }
 function documentFieldId(name) { return `document-field-${name}`; }
 function documentFieldHtml(field) {
   const [name, title, kind, required, initial] = field;
   const req = required ? " required" : "";
   const value = Array.isArray(initial) ? "" : (initial ?? "");
+  if (name === "expertiseType") return `<label>${escapeHtml(title)}<select id="${documentFieldId(name)}" data-document-field="${name}"${req}><option value="">Выберите вид…</option>${documentExpertiseTypes.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("")}</select></label>`;
   if (kind === "textarea") return `<label>${escapeHtml(title)}<textarea id="${documentFieldId(name)}" data-document-field="${name}" rows="3"${req}>${escapeHtml(value)}</textarea></label>`;
   if (kind === "list") {
     const values = Array.isArray(initial) && initial.length ? initial : [""];
@@ -2616,7 +2621,9 @@ function fillDocumentFromCase() {
   };
   for (const [name, value] of Object.entries(values)) {
     const input = document.getElementById(documentFieldId(name));
-    if (input && !input.value) input.value = value;
+    if (input && name === "expertiseType") {
+      fillFromLookup(input, documentExpertiseTypes, value, "Выберите вид…");
+    } else if (input && !input.value) input.value = value;
   }
 }
 if (documentUi.cases) documentUi.cases.addEventListener("change", fillDocumentFromCase);
@@ -3922,6 +3929,9 @@ async function fillGpTemplates() {
 
 async function openGpForm() {
   els.gpForm.reset();
+  const lists = await loadLookups({ fresh: true });
+  if (lists.loadError) return;
+  fillFromLookup(els.gpExpertiseType, lists.expertise_types, "", "Выберите вид…");
   gpCases = [];
   els.gpQuestionsList.innerHTML = "";
   gpQuestionCount = 0;
@@ -4015,6 +4025,8 @@ els.gpCaseSelect.addEventListener("change", () => {
   }
   if (caseNumber) els.gpCaseNumber.value = caseNumber;
   const project = gpCases.find((item) => String(item.id) === String(opt.value));
+  fillFromLookup(els.gpExpertiseType, lookupsCache?.expertise_types,
+    project?.expertise_type || "", "Выберите вид…");
   els.gpQuestionsList.innerHTML = "";
   gpQuestionCount = 0;
   if (project && Array.isArray(project.questions) && project.questions.length) {
@@ -6139,10 +6151,12 @@ async function loadLookups({ fresh = false } = {}) {
   if (lookupsCache && !fresh) return lookupsCache;
   try {
     lookupsCache = await apiFetch("/api/lookups");
-  } catch {
-    // Без справочников форма всё равно должна открыться: человек
-    // увидит пустые списки и поймёт, что настраивать.
-    lookupsCache = { organizations: [], expertise_types: [], years: [], managers: [], experts: [] };
+  } catch (err) {
+    // Ошибку запроса не кешируем как пустой справочник.
+    lookupsCache = null;
+    alert("Не удалось загрузить справочники: " + err.message +
+      ". Проверьте соединение и повторите открытие формы.");
+    return { loadError: true, organizations: [], expertise_types: [], years: [], managers: [], experts: [] };
   }
   return lookupsCache;
 }
@@ -6371,6 +6385,7 @@ async function openProjectForm() {
   // новую структуру или год, и увидеть их надо сразу, а не после
   // перезагрузки страницы.
   const lists = await loadLookups({ fresh: true });
+  if (lists.loadError) return;
   fillFromLookup(document.getElementById("pfOrganization"), lists.organizations, "", "Не выбрана");
   fillFromLookup(document.getElementById("pfExpertiseType"), lists.expertise_types, "", "Не выбран");
   fillFromLookup(document.getElementById("pfYear"), lists.years, "", "Не выбран");
@@ -6502,6 +6517,11 @@ async function openCaseEdit(project) {
   // Справочники грузим после показа окна: без них форма всё равно
   // рабочая, а ждать их незачем.
   const lists = await loadLookups({ fresh: true });
+  if (lists.loadError) {
+    document.getElementById("caseEditError").textContent = "Справочники не загружены. Закройте форму и повторите открытие.";
+    caseEditOverlay.classList.add("hidden");
+    return;
+  }
   fillFromLookup(document.getElementById("ceOrganization"), lists.organizations,
     project.organization, "Не выбрана");
   fillFromLookup(document.getElementById("ceExpertiseType"), lists.expertise_types,
