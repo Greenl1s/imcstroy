@@ -1,4 +1,4 @@
-/* НИЦ «Строительство»: оформление существующей ИСУ, версия 1.0. */
+/* НИЦ «Строительство»: оформление существующей ИСУ, версия 1.0.1. */
 :root {
   --bg-page:#f2f5fa; --bg-card:#fff; --bg-subtle:#f5f8fc;
   --border:#e3eaf3; --border-strong:#bccbdc;
@@ -62,10 +62,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .login-screen { background:radial-gradient(ellipse at 20% 10%,#dcecff,transparent 60%),var(--bg-page); }
 .login-panel { border-color:var(--border); box-shadow:0 12px 45px #143d7312; }
 @media (min-width:901px) {
-  .sidebar { overflow-y:auto; scrollbar-width:thin; scrollbar-color:#5075a5 transparent; }
-  /* Раскрытые меню выходят за панель; не обрезаем их область прокрутки. */
-  .sidebar:has(.document-menu:not(.hidden)),.sidebar:has(.create-menu:not(.hidden)) { overflow:visible; }
+  /* Панель растёт вместе со всеми пунктами. Жёсткие 100vh раньше
+     оставляли нижние кнопки за пределами синего фона. */
+  .app-screen { height:auto; min-height:100vh; min-height:100dvh; }
+  .sidebar { min-height:calc(100vh - 32px); min-height:calc(100dvh - 32px); height:auto; overflow:visible; align-self:stretch; }
   .sidebar > * { flex-shrink:0; }
+  /* Рабочая область сохраняет собственную прокрутку и высоту окна. */
+  .app-screen > .section { height:calc(100vh - 32px); height:calc(100dvh - 32px); position:sticky; top:16px; align-self:flex-start; }
 }
 @media (max-width:1100px) and (min-width:901px) {
   .app-screen { gap:16px; }
