@@ -1,4 +1,5 @@
 const $ = s => document.querySelector(s);
+const API_ROOT = new URL('api/', window.location.href).pathname.replace(/\/$/,'');
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
  calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2m4 0h2m-8 3h2"/>',
@@ -27,7 +28,7 @@ const btn=(action,label,ico='',extra='',attrs='')=>`<button class="btn ${extra}"
 const S={user:null,csrf:'',catalog:{employees:[],positions:[],workTypes:[],permissions:[],signers:[]},sheets:[],users:[],view:'home',sheet:null,week:0,allDays:false,category:'regular',search:'',busy:false,menu:false};
 const modal=$('#modal'),picker=$('#picker');let formHandler=null,confirmResolve=null,pickerState=null,toastTimer;
 function toast(message,error=false){const t=$('#toast');t.textContent=message;t.className='visible'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.className='',error?6500:3200);}
-async function api(path,method='GET',data){const r=await fetch('/api'+path,{method,headers:{...(data!==undefined?{'Content-Type':'application/json'}:{}),...(S.csrf?{'X-CSRF-Token':S.csrf}:{})},...(data!==undefined?{body:JSON.stringify(data)}:{})});const body=await r.json();if(!r.ok){if(r.status===401&&S.user){S.user=null;renderAuth(false);}const e=new Error(body.error||'Не удалось выполнить действие');e.status=r.status;throw e;}return body;}
+async function api(path,method='GET',data){const r=await fetch(API_ROOT+path,{method,headers:{...(data!==undefined?{'Content-Type':'application/json'}:{}),...(S.csrf?{'X-CSRF-Token':S.csrf}:{})},...(data!==undefined?{body:JSON.stringify(data)}:{})});const body=await r.json();if(!r.ok){if(r.status===401&&S.user){S.user=null;renderAuth(false);}const e=new Error(body.error||'Не удалось выполнить действие');e.status=r.status;throw e;}return body;}
 async function loadData(){[S.catalog,S.sheets]=await Promise.all([api('/catalog'),api('/sheets')]);}
 const initials=name=>name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 const monthTitle=m=>new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric'}).format(new Date(m+'-01T12:00:00'));
@@ -125,7 +126,7 @@ document.addEventListener('click',async event=>{
   if(a==='permission'){if(S.busy)return;S.busy=true;b.disabled=true;try{S.catalog=await api('/permissions','PUT',{positionId:b.dataset.position,workTypeId:b.dataset.work,allowed:b.dataset.allowed!=='true'});renderPage();}finally{S.busy=false;b.disabled=false;}return;}
   if(a==='rename-sheet'){openForm('Переименовать табель',field('name','Название табеля','text',S.sheet.name,true),d=>sheetMutation('','PATCH',d));return;}
   if(a==='export'){
-    const r=await fetch(`/api/sheets/${S.sheet.id}/export`);if(!r.ok){const e=await r.json();throw new Error(e.error||'Не удалось выгрузить файл');}
+    const r=await fetch(`${API_ROOT}/sheets/${S.sheet.id}/export`);if(!r.ok){const e=await r.json();throw new Error(e.error||'Не удалось выгрузить файл');}
     const url=URL.createObjectURL(await r.blob()),link=document.createElement('a');link.href=url;link.download=(S.sheet.name+' '+S.sheet.month).replace(/[<>:"/\\|?*]/g,'_')+'.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),15000);toast('Excel выгружен за весь месяц');return;
   }
   if(a==='complete'){
