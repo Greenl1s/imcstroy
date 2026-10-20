@@ -1,0 +1,215 @@
+import http from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { dirname, resolve, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { AppError, text, monthDays, safeFilename } from './domain.mjs';
+import { workbook } from './xlsx.mjs';
+
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const host=process.env.HOST || '127.0.0.1', port=Number(process.env.PORT || 3180);
+const file=resolve(process.env.DATABASE_PATH || resolve(root,'data','timesheets.sqlite'));
+mkdirSync(dirname(file),{recursive:true});
+const db=new DatabaseSync(file);
+db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,name TEXT NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','employee')),created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,csrf TEXT NOT NULL,expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS positions(id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS employees(id TEXT PRIMARY KEY,name TEXT NOT NULL,position_id TEXT NOT NULL REFERENCES positions(id),birthday TEXT NOT NULL DEFAULT '',note TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS work_types(id TEXT PRIMARY KEY,label TEXT NOT NULL,category TEXT NOT NULL CHECK(category IN ('regular','trip')),active INTEGER NOT NULL DEFAULT 1,UNIQUE(label,category));
+CREATE TABLE IF NOT EXISTS permissions(position_id TEXT NOT NULL REFERENCES positions(id),work_type_id TEXT NOT NULL REFERENCES work_types(id),PRIMARY KEY(position_id,work_type_id));
+CREATE TABLE IF NOT EXISTS signers(id TEXT PRIMARY KEY,name TEXT NOT NULL,position TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS sheets(id TEXT PRIMARY KEY,name TEXT NOT NULL,month TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('draft','completed')),revision INTEGER NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,sheet_id TEXT NOT NULL REFERENCES sheets(id),user_id TEXT NOT NULL REFERENCES users(id),action TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS sheets_status_updated ON sheets(status,updated_at);
+CREATE INDEX IF NOT EXISTS audit_sheet ON audit(sheet_id,id);
+`);
+const now=()=>new Date().toISOString();
+const hash=s=>createHash('sha256').update(s).digest('hex');
+function passwordHash(password) { const salt=randomBytes(16).toString('hex');return salt+':'+scryptSync(password,salt,64).toString('hex'); }
+function passwordMatches(password,stored) { const [salt,digest]=stored.split(':');const a=scryptSync(password,salt,64),b=Buffer.from(digest,'hex');return a.length===b.length&&timingSafeEqual(a,b); }
+function validatePassword(p) { if(typeof p!=='string'||p.length<10||p.length>200)throw new AppError('Пароль должен содержать от 10 до 200 символов');return p; }
+function username(v) { const s=text(v,'Логин',50).toLowerCase();if(!/^[a-z0-9_.-]{3,50}$/.test(s))throw new AppError('Логин: 3–50 латинских букв, цифр, точек, дефисов или подчёркиваний');return s; }
+function publicUser(u) { return {id:u.id,name:u.name,username:u.username,role:u.role}; }
+const setupToken=process.env.SETUP_TOKEN || (!['127.0.0.1','localhost','::1'].includes(host)?randomBytes(24).toString('hex'):'');
+if(!db.prepare('SELECT 1 FROM users LIMIT 1').get()&&setupToken) console.log('Код первоначальной настройки (храните в секрете): '+setupToken);
+const loginAttempts=new Map();
+function rateLimit(req,name) { const k=req.socket.remoteAddress+':'+name,t=Date.now();let r=loginAttempts.get(k);if(!r||r.until<t){r={count:0,until:t+15*60e3};loginAttempts.set(k,r);}r.count++;if(r.count>12)throw new AppError('Слишком много попыток входа. Повторите через 15 минут',429);if(loginAttempts.size>10000)for(const [key,value]of loginAttempts)if(value.until<t)loginAttempts.delete(key); }
+function secure(req) { return process.env.APP_ORIGIN?.startsWith('https://') || req.socket.encrypted; }
+function cookie(req,token,maxAge) { return `tab_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure(req)?'; Secure':''}`; }
+function issueSession(req,res,u) { const token=randomBytes(32).toString('hex'),csrf=randomBytes(24).toString('hex');db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(hash(token),u.id,csrf,Date.now()+8*60*60e3);res.setHeader('Set-Cookie',cookie(req,token,8*60*60));return {user:publicUser(u),csrf}; }
+function auth(req) { const raw=/\btab_session=([a-f0-9]{64})\b/.exec(req.headers.cookie||'')?.[1];if(!raw)return null;return db.prepare('SELECT users.*,sessions.csrf,sessions.token AS session_token FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?').get(hash(raw),Date.now())||null; }
+function admin(user) { if(user.role!=='admin')throw new AppError('Действие доступно только администратору',403); }
+function originCheck(req) { const origin=req.headers.origin;if(origin){const allowed=process.env.APP_ORIGIN||`http://${req.headers.host}`;if(origin!==allowed)throw new AppError('Запрос с другого сайта запрещён',403);} }
+async function body(req) { const parts=[];let n=0;for await(const chunk of req){n+=chunk.length;if(n>1024*1024)throw new AppError('Слишком большой запрос',413);parts.push(chunk);}try{return JSON.parse(Buffer.concat(parts).toString()||'{}');}catch{throw new AppError('Некорректный JSON');} }
+function json(res,data,status=200) {res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
+function getSheet(id) { const s=db.prepare('SELECT * FROM sheets WHERE id=?').get(id);if(!s)throw new AppError('Табель не найден',404);return JSON.parse(s.body); }
+function resultSheet(id) { const s=getSheet(id);s.history=db.prepare('SELECT action,audit.created_at AS at,users.name AS user FROM audit JOIN users ON users.id=audit.user_id WHERE sheet_id=? ORDER BY audit.id DESC LIMIT 12').all(id);return s; }
+function audit(id,user,action) { db.prepare('INSERT INTO audit(sheet_id,user_id,action,created_at) VALUES(?,?,?,?)').run(id,user.id,action,now()); }
+function change(id,data,user,action,fn,{completedAllowed=false}={}) {
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const s=getSheet(id);
+    if(data.expectedRevision!==s.revision)throw new AppError('Табель изменился в другом окне. Обновите страницу и повторите действие',409);
+    if(s.status==='completed'&&!completedAllowed)throw new AppError('Завершённый табель доступен только для просмотра. Администратор может вернуть его в работу',403);
+    fn(s);s.revision++;s.updatedAt=now();
+    db.prepare('UPDATE sheets SET name=?,status=?,revision=?,body=?,updated_at=? WHERE id=?').run(s.name,s.status,s.revision,JSON.stringify(s),s.updatedAt,id);
+    audit(id,user,action);db.exec('COMMIT');return resultSheet(id);
+  }catch(e){db.exec('ROLLBACK');throw e;}
+}
+function activeEmployee(id) { id=text(id,'Сотрудник',100);const e=db.prepare('SELECT employees.*,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE employees.id=? AND employees.active=1').get(id);if(!e)throw new AppError('Сотрудник не найден в действующей базе');return e; }
+function employeeSnapshot(e) { return {name:e.name,position:e.position,birthday:e.birthday,note:e.note,positionId:e.position_id}; }
+function positionId(name) { const v=text(name,'Должность',150),key=v.toLocaleLowerCase('ru');let p=db.prepare('SELECT id FROM positions WHERE name_key=?').get(key);if(!p){p={id:randomUUID()};db.prepare('INSERT INTO positions VALUES(?,?,?)').run(p.id,v,key);}return p.id; }
+function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
+
+async function api(req,res,url) {
+  const path=url.pathname,method=req.method;
+  if(path==='/api/session'&&method==='GET'){
+    const u=auth(req);return json(res,{...(u?{user:publicUser(u),csrf:u.csrf}:{user:null}),setupRequired:!db.prepare('SELECT 1 FROM users LIMIT 1').get(),setupTokenRequired:!!setupToken});
+  }
+  if(!['GET','HEAD'].includes(method))originCheck(req);
+  if(path==='/api/setup'&&method==='POST'){
+    const d=await body(req);rateLimit(req,'setup');
+    if(db.prepare('SELECT 1 FROM users LIMIT 1').get())throw new AppError('Первоначальная настройка уже выполнена',409);
+    if(setupToken&&d.setupToken!==setupToken)throw new AppError('Неверный код первоначальной настройки',403);
+    const u={id:randomUUID(),username:username(d.username),name:text(d.name,'ФИО',150),role:'admin'};
+    db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),u.role,now());
+    return json(res,issueSession(req,res,u),201);
+  }
+  if(path==='/api/login'&&method==='POST'){
+    const d=await body(req);rateLimit(req,String(d.username||'').toLowerCase());
+    if(typeof d.password!=='string'||d.password.length>200)throw new AppError('Неверный логин или пароль',401);
+    const u=db.prepare('SELECT * FROM users WHERE username=?').get(String(d.username||'').trim().toLowerCase());
+    const placeholder='01234567890123456789012345678901:'+Buffer.alloc(64).toString('hex');
+    if(!passwordMatches(d.password,u?.password||placeholder)||!u)throw new AppError('Неверный логин или пароль',401);
+    return json(res,issueSession(req,res,u));
+  }
+  const user=auth(req);if(!user)throw new AppError('Войдите в систему',401);
+  if(!['GET','HEAD'].includes(method)&&req.headers['x-csrf-token']!==user.csrf)throw new AppError('Сессия страницы устарела. Обновите страницу',403);
+  if(path==='/api/logout'&&method==='POST'){db.prepare('DELETE FROM sessions WHERE token=?').run(user.session_token);res.setHeader('Set-Cookie',cookie(req,'',0));return json(res,{ok:true});}
+  if(path==='/api/catalog'&&method==='GET')return json(res,catalog());
+  if(path==='/api/users'){
+    admin(user);
+    if(method==='GET')return json(res,db.prepare('SELECT id,name,username,role,created_at AS createdAt FROM users ORDER BY name').all());
+    if(method==='POST'){
+      const d=await body(req),role=d.role==='admin'?'admin':'employee';
+      const u={id:randomUUID(),name:text(d.name,'Имя пользователя',150),username:username(d.username),role};
+      db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),role,now());return json(res,publicUser(u),201);
+    }
+  }
+  if(path==='/api/permissions'&&method==='PUT'){
+    const d=await body(req);
+    d.positionId=text(d.positionId,'Должность',100);d.workTypeId=text(d.workTypeId,'Вид работы',100);
+    if(!db.prepare('SELECT 1 FROM positions WHERE id=?').get(d.positionId)||!db.prepare('SELECT 1 FROM work_types WHERE id=? AND active=1').get(d.workTypeId))throw new AppError('Должность или работа не найдена');
+    if(d.allowed===true)db.prepare('INSERT OR IGNORE INTO permissions VALUES(?,?)').run(d.positionId,d.workTypeId);else db.prepare('DELETE FROM permissions WHERE position_id=? AND work_type_id=?').run(d.positionId,d.workTypeId);
+    return json(res,catalog());
+  }
+  const reference=/^\/api\/(employees|work-types|signers)(?:\/([a-f0-9-]+))?$/.exec(path);
+  if(reference){
+    const [,kind,id]=reference,d=await body(req);let resultId=id||randomUUID();
+    const table={employees:'employees','work-types':'work_types',signers:'signers'}[kind];
+    if(id&&!db.prepare(`SELECT 1 FROM ${table} WHERE id=? AND active=1`).get(id))throw new AppError('Запись не найдена',404);
+    if(method==='DELETE'&&id){db.prepare(`UPDATE ${table} SET active=0 WHERE id=?`).run(id);return json(res,catalog());}
+    if((method==='POST'&&!id)||(method==='PUT'&&id)){
+      if(kind==='employees'){
+        const name=text(d.name,'ФИО',150),note=text(d.note,'Примечание',500,true),birthday=text(d.birthday,'Дата рождения',10,true),pid=positionId(d.position);
+        if(birthday&&(!/^\d{4}-\d{2}-\d{2}$/.test(birthday)||Number.isNaN(Date.parse(birthday))||new Date(birthday).toISOString().slice(0,10)!==birthday||birthday>now().slice(0,10)))throw new AppError('Укажите корректную дату рождения, не позднее сегодняшнего дня');
+        if(id)db.prepare('UPDATE employees SET name=?,position_id=?,birthday=?,note=? WHERE id=?').run(name,pid,birthday,note,id);
+        else db.prepare('INSERT INTO employees(id,name,position_id,birthday,note) VALUES(?,?,?,?,?)').run(resultId,name,pid,birthday,note);
+      }else if(kind==='signers'){
+        const name=text(d.name,'ФИО',150),position=text(d.position,'Должность',150);
+        if(id)db.prepare('UPDATE signers SET name=?,position=? WHERE id=?').run(name,position,id);
+        else db.prepare('INSERT INTO signers(id,name,position) VALUES(?,?,?)').run(resultId,name,position);
+      }else{
+        const label=text(d.label,'Вид работы',160),category=d.category;
+        if(!['regular','trip'].includes(category))throw new AppError('Выберите категорию работы');
+        if(id){const old=db.prepare('SELECT category FROM work_types WHERE id=?').get(id);if(old.category!==category)throw new AppError('Категорию существующей работы менять нельзя');db.prepare('UPDATE work_types SET label=? WHERE id=?').run(label,id);}
+        else{
+          const old=db.prepare('SELECT * FROM work_types WHERE label=? AND category=?').get(label,category);
+          if(old?.active)throw new AppError('Такая работа уже существует',409);
+          if(old){resultId=old.id;db.prepare('UPDATE work_types SET active=1 WHERE id=?').run(old.id);}else db.prepare('INSERT INTO work_types(id,label,category) VALUES(?,?,?)').run(resultId,label,category);
+        }
+      }
+      return json(res,{...catalog(),savedId:resultId},id?200:201);
+    }
+  }
+  if(path==='/api/sheets'&&method==='GET'){
+    return json(res,db.prepare('SELECT id,name,month,status,revision,created_at AS createdAt,updated_at AS updatedAt,body FROM sheets ORDER BY updated_at DESC').all().map(r=>{const s=JSON.parse(r.body);delete r.body;return {...r,employeeCount:s.rows.length,filledDays:s.rows.reduce((sum,x)=>sum+Object.keys(x.cells).length,0),signer:s.signerSnapshot?.name||''};}));
+  }
+  if(path==='/api/sheets'&&method==='POST'){
+    const d=await body(req);monthDays(d.month);const s={id:randomUUID(),name:text(d.name,'Название табеля',150),month:d.month,status:'draft',revision:1,rows:[],signerId:null,signerSnapshot:null,createdAt:now(),updatedAt:now(),createdBy:user.name};
+    db.prepare('INSERT INTO sheets VALUES(?,?,?,?,?,?,?,?)').run(s.id,s.name,s.month,s.status,s.revision,JSON.stringify(s),s.createdAt,s.updatedAt);
+    audit(s.id,user,'Создан табель');return json(res,resultSheet(s.id),201);
+  }
+  const match=/^\/api\/sheets\/([a-f0-9-]+)(?:\/(export|rows|cells|complete|reopen)(?:\/([a-f0-9-]+))?)?$/.exec(path);
+  if(match){
+    const [,id,action,rowId]=match;
+    if(method==='GET'&&!action)return json(res,resultSheet(id));
+    if(method==='GET'&&action==='export'){
+      const s=getSheet(id),bytes=workbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="timesheet-${s.month}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename(s.name)+' '+s.month+'.xlsx')}`,'Cache-Control':'no-store','Content-Length':bytes.length});return res.end(bytes);
+    }
+    const d=await body(req);
+    if(!action&&method==='PATCH')return json(res,change(id,d,user,'Изменены реквизиты табеля',s=>{
+      if(d.name!==undefined)s.name=text(d.name,'Название табеля',150);
+      if(d.signerId!==undefined){
+        if(d.signerId===null){s.signerId=null;s.signerSnapshot=null;}
+        else{const signer=db.prepare('SELECT * FROM signers WHERE id=? AND active=1').get(d.signerId);if(!signer)throw new AppError('Подписант не найден');s.signerId=signer.id;s.signerSnapshot={name:signer.name,position:signer.position};}
+      }
+    }));
+    if(action==='rows'&&method==='POST')return json(res,change(id,d,user,'Добавлен сотрудник в табель',s=>{
+      const e=activeEmployee(d.employeeId);if(s.rows.some(r=>r.employeeId===e.id))throw new AppError('Сотрудник уже добавлен в этот табель',409);
+      s.rows.push({id:randomUUID(),employeeId:e.id,employeeSnapshot:employeeSnapshot(e),cells:{}});
+    }));
+    if(action==='rows'&&rowId&&method==='PATCH')return json(res,change(id,d,user,'Изменён сотрудник строки',s=>{
+      const row=s.rows.find(r=>r.id===rowId);if(!row)throw new AppError('Строка не найдена',404);const e=activeEmployee(d.employeeId);
+      if(s.rows.some(r=>r.id!==rowId&&r.employeeId===e.id))throw new AppError('Сотрудник уже добавлен в табель',409);
+      if(Object.keys(row.cells).length&&d.clear!==true)throw new AppError('Подтвердите очистку работ при замене сотрудника');
+      row.employeeId=e.id;row.employeeSnapshot=employeeSnapshot(e);row.cells={};
+    }));
+    if(action==='rows'&&rowId&&method==='DELETE')return json(res,change(id,d,user,'Удалена строка сотрудника',s=>{if(!s.rows.some(r=>r.id===rowId))throw new AppError('Строка не найдена',404);s.rows=s.rows.filter(r=>r.id!==rowId);}));
+    if(action==='cells'&&method==='PUT')return json(res,change(id,d,user,'Изменена работа за день',s=>{
+      const row=s.rows.find(r=>r.id===d.rowId);if(!row)throw new AppError('Строка не найдена',404);
+      if(!Number.isInteger(d.day)||d.day<1||d.day>monthDays(s.month))throw new AppError('Такого дня нет в выбранном месяце');
+      if(d.workTypeId===null){delete row.cells[String(d.day)];return;}
+      text(d.workTypeId,'Вид работы',100);
+      const e=activeEmployee(row.employeeId),work=db.prepare('SELECT * FROM work_types WHERE id=? AND active=1').get(d.workTypeId);
+      if(!work||!db.prepare('SELECT 1 FROM permissions WHERE position_id=? AND work_type_id=?').get(e.position_id,work.id))throw new AppError('Эта работа не разрешена для должности сотрудника',403);
+      // One entry per day makes two simultaneous categories impossible at the storage level.
+      row.cells[String(d.day)]={workTypeId:work.id,category:work.category,label:work.label};
+    }));
+    if(action==='complete'&&method==='POST')return json(res,change(id,d,user,'Табель переведён в завершённые',s=>{
+      if(!s.signerSnapshot)throw new AppError('Перед завершением выберите подписанта');
+      if(!s.rows.length||!s.rows.some(r=>Object.keys(r.cells).length))throw new AppError('Добавьте сотрудника и заполните хотя бы один день');
+      s.status='completed';s.completedAt=now();s.completedBy=user.name;
+    }));
+    if(action==='reopen'&&method==='POST'){
+      admin(user);return json(res,change(id,d,user,'Администратор вернул табель в работу',s=>{if(s.status!=='completed')throw new AppError('Табель уже находится в работе');s.status='draft';delete s.completedAt;delete s.completedBy;},{completedAllowed:true}));
+    }
+  }
+  throw new AppError('Действие не найдено',404);
+}
+
+const server=http.createServer(async(req,res)=>{
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  try{
+    const url=new URL(req.url,'http://localhost');
+    if(url.pathname.startsWith('/api/'))return await api(req,res,url);
+    if(req.method!=='GET'&&req.method!=='HEAD')throw new AppError('Метод не поддерживается',405);
+    const name=url.pathname==='/'?'/index.html':decodeURIComponent(url.pathname),path=resolve(root,'public','.'+name);
+    if(!path.startsWith(resolve(root,'public')+'/')&&!path.startsWith(resolve(root,'public')+'\\'))throw new AppError('Файл не найден',404);
+    if(!existsSync(path))throw new AppError('Файл не найден',404);
+    const data=readFileSync(path),type={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.woff2':'font/woff2','.svg':'image/svg+xml'}[extname(path)]||'application/octet-stream';
+    res.writeHead(200,{'Content-Type':type,'Cache-Control':extname(path)==='.html'?'no-cache':'public, max-age=300'});res.end(req.method==='HEAD'?undefined:data);
+  }catch(error){
+    if(res.headersSent){res.destroy();return;}
+    const duplicate=String(error.message).includes('UNIQUE constraint failed');
+    const status=error.status||(duplicate?409:500),message=error.status?error.message:duplicate?'Запись с такими данными уже существует':'Ошибка сервера. Повторите действие';
+    if(status===500)console.error('Request failed:',error.message);
+    json(res,{error:message},status);
+  }
+});
+server.listen(port,host,()=>console.log(`Учёт табеля: http://${host}:${port}`));
+function stop(){server.close(()=>{db.close();process.exit(0);});}
+process.on('SIGINT',stop);process.on('SIGTERM',stop);
