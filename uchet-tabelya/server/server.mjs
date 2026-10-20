@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS sheets(id TEXT PRIMARY KEY,name TEXT NOT NULL,month T
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,sheet_id TEXT NOT NULL REFERENCES sheets(id),user_id TEXT NOT NULL REFERENCES users(id),action TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS sheets_status_updated ON sheets(status,updated_at);
 CREATE INDEX IF NOT EXISTS audit_sheet ON audit(sheet_id,id);
+CREATE INDEX IF NOT EXISTS sheets_month ON sheets(month);
 `);
 const now=()=>new Date().toISOString();
 const hash=s=>createHash('sha256').update(s).digest('hex');
@@ -62,6 +63,17 @@ function change(id,data,user,action,fn,{completedAllowed=false}={}) {
 }
 function activeEmployee(id) { id=text(id,'Сотрудник',100);const e=db.prepare('SELECT employees.*,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE employees.id=? AND employees.active=1').get(id);if(!e)throw new AppError('Сотрудник не найден в действующей базе');return e; }
 function employeeSnapshot(e) { return {name:e.name,position:e.position,birthday:e.birthday,note:e.note,positionId:e.position_id}; }
+function occupiedDays(sheet) {
+  const occupied=[];
+  for(const record of db.prepare('SELECT id,name,body FROM sheets WHERE month=? AND id<>?').all(sheet.month,sheet.id)){
+    for(const row of JSON.parse(record.body).rows)for(const day of Object.keys(row.cells))occupied.push({employeeId:row.employeeId,day:Number(day),sheetId:record.id,sheetName:record.name});
+  }
+  return occupied;
+}
+function checkDayAvailable(sheet,row,day,occupied=occupiedDays(sheet)) {
+  const conflict=occupied.find(x=>x.employeeId===row.employeeId&&x.day===Number(day));
+  if(conflict)throw new AppError(`${row.employeeSnapshot.name}: ${String(day).padStart(2,'0')}.${sheet.month.slice(5)}.${sheet.month.slice(0,4)} уже заполнено в табеле «${conflict.sheetName}». Сначала очистите этот день в другом табеле`,409);
+}
 function selectedPosition(data) {
   const p=data.positionId
     ? db.prepare('SELECT id FROM positions WHERE id=?').get(text(data.positionId,'Должность',100))
@@ -159,14 +171,28 @@ async function api(req,res,url) {
     db.prepare('INSERT INTO sheets VALUES(?,?,?,?,?,?,?,?)').run(s.id,s.name,s.month,s.status,s.revision,JSON.stringify(s),s.createdAt,s.updatedAt);
     audit(s.id,user,'Создан табель');return json(res,resultSheet(s.id),201);
   }
-  const match=/^\/api\/sheets\/([a-f0-9-]+)(?:\/(export|rows|cells|complete|reopen)(?:\/([a-f0-9-]+))?)?$/.exec(path);
+  const match=/^\/api\/sheets\/([a-f0-9-]+)(?:\/(export|rows|cells|complete|reopen|availability)(?:\/([a-f0-9-]+))?)?$/.exec(path);
   if(match){
     const [,id,action,rowId]=match;
     if(method==='GET'&&!action)return json(res,resultSheet(id));
+    if(method==='GET'&&action==='availability')return json(res,occupiedDays(getSheet(id)));
     if(method==='GET'&&action==='export'){
       const s=getSheet(id),bytes=workbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="timesheet-${s.month}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename(s.name)+' '+s.month+'.xlsx')}`,'Cache-Control':'no-store','Content-Length':bytes.length});return res.end(bytes);
     }
     const d=await body(req);
+    if(!action&&method==='DELETE'){
+      admin(user);
+      if(d.confirmDelete!==true)throw new AppError('Подтвердите окончательное удаление табеля');
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        const sheet=getSheet(id);
+        if(d.expectedRevision!==sheet.revision)throw new AppError('Табель изменился в другом окне. Обновите страницу и повторите удаление',409);
+        db.prepare('DELETE FROM audit WHERE sheet_id=?').run(id);
+        db.prepare('DELETE FROM sheets WHERE id=?').run(id);
+        db.exec('COMMIT');
+      }catch(e){db.exec('ROLLBACK');throw e;}
+      return json(res,{ok:true});
+    }
     if(!action&&method==='PATCH')return json(res,change(id,d,user,'Изменены реквизиты табеля',s=>{
       if(d.name!==undefined)s.name=text(d.name,'Название табеля',150);
       if(d.signerId!==undefined){
@@ -193,9 +219,12 @@ async function api(req,res,url) {
       const e=activeEmployee(row.employeeId),work=db.prepare('SELECT * FROM work_types WHERE id=? AND active=1').get(d.workTypeId);
       if(!work||!db.prepare('SELECT 1 FROM permissions WHERE position_id=? AND work_type_id=?').get(e.position_id,work.id))throw new AppError('Эта работа не разрешена для должности сотрудника',403);
       // One entry per day makes two simultaneous categories impossible at the storage level.
+      checkDayAvailable(s,row,d.day);
       row.cells[String(d.day)]={workTypeId:work.id,category:work.category,label:work.label};
     }));
     if(action==='complete'&&method==='POST')return json(res,change(id,d,user,'Табель переведён в завершённые',s=>{
+      const occupied=occupiedDays(s);
+      for(const row of s.rows)for(const day of Object.keys(row.cells))checkDayAvailable(s,row,day,occupied);
       if(!s.signerSnapshot)throw new AppError('Перед завершением выберите подписанта');
       if(!s.rows.length||!s.rows.some(r=>Object.keys(r.cells).length))throw new AppError('Добавьте сотрудника и заполните хотя бы один день');
       s.status='completed';s.completedAt=now();s.completedBy=user.name;
@@ -232,6 +261,6 @@ const server=http.createServer(async(req,res)=>{
     json(res,{error:message},status);
   }
 });
-server.listen(port,host,()=>console.log(`Учёт табеля: http://${host}:${port}`));
+server.listen(port,host,()=>console.log(`Табельный учёт: http://${host}:${port}`));
 function stop(){server.close(()=>{db.close();process.exit(0);});}
 process.on('SIGINT',stop);process.on('SIGTERM',stop);
