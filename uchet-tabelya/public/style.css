@@ -16,3 +16,34 @@
 .brand{white-space:normal;line-height:1.3}
 .timesheet .cell-btn.occupied{background:#f4ede2;color:#78591e;font-size:10px;box-shadow:inset 0 0 0 1px #e6d9bf}
 @media(max-width:760px){.auth-card:before{font-size:34px;line-height:1.15;letter-spacing:-.02em;text-transform:none;margin-bottom:32px}}
+
+/* 1.4.1: вход — фирменная композиция с календарной графикой. */
+.auth-screen{grid-template-columns:minmax(0,1.12fr) minmax(420px,.88fr);background:#f5f6f0}
+.auth-aside{position:relative;isolation:isolate;overflow:hidden;min-height:100svh;justify-content:flex-start;padding:clamp(64px,17vh,170px) clamp(36px,5.2vw,100px) 70px;background:radial-gradient(ellipse at 5% 0%,#47745b70,transparent 57%),radial-gradient(ellipse at 100% 100%,#7e91512b,transparent 55%),linear-gradient(145deg,#193e30 0%,#17362c 55%,#102820 100%)}
+.auth-aside:before{content:'';position:absolute;inset:0;z-index:-1;opacity:.23;background-image:linear-gradient(#c9e7c414 1px,transparent 1px),linear-gradient(90deg,#c9e7c414 1px,transparent 1px);background-size:68px 68px;mask-image:linear-gradient(140deg,#000 0%,transparent 65%)}
+.auth-aside:after{content:'';position:absolute;width:580px;height:580px;border:1px solid #c0d3a31b;border-radius:50%;left:-280px;bottom:-340px;box-shadow:0 0 0 75px #c0d3a308,0 0 0 150px #c0d3a305;z-index:-1;pointer-events:none}
+.auth-brand-lockup{display:flex;align-items:flex-start;gap:24px;position:relative;z-index:2}
+.auth-logo{width:84px;height:84px;margin-top:7px;flex-shrink:0;filter:drop-shadow(0 8px 16px #061c2a20);border:1px solid #d3ecc028;border-radius:22px}
+.auth-aside .auth-system-title{font-size:clamp(48px,4.35vw,84px);line-height:1.04;letter-spacing:-.045em;font-weight:600;max-width:none;color:#f4f7ed}
+.auth-system-title span{display:block}
+.auth-system-title span+span{color:#b9d4ad;margin-top:7px}
+.auth-brand-rule{height:3px;width:48px;background:#d4bf82;border-radius:2px;margin:34px 0 0 108px;position:relative;z-index:2}
+.auth-calendar-art{position:absolute;width:76%;max-width:550px;right:-4%;bottom:-52px;aspect-ratio:1.2;transform:rotate(-12deg);border:1px solid #d2e6c93b;border-radius:26px;background:linear-gradient(135deg,#edf5dd0e,#dceccd03);box-shadow:-28px 30px 80px #071c2330,inset 0 1px 0 #ffffff12;padding:44px 30px 30px;pointer-events:none;opacity:.85;mask-image:linear-gradient(#000 42%,transparent 98%)}
+.auth-art-binding{position:absolute;left:18%;right:18%;top:-13px;display:flex;justify-content:space-between}
+.auth-art-binding i{height:27px;width:9px;background:#8cae8e;border:1px solid #cee2bd5e;border-radius:6px}
+.auth-art-line{height:4px;width:22%;border-radius:10px;background:#e2d09a73;margin-bottom:28px}
+.auth-art-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.auth-art-grid i{aspect-ratio:1;border:1px solid #d4e5cd29;border-radius:9px;background:#e7f0de03;position:relative}
+.auth-art-grid i.marked{background:#afd1a22b;border-color:#b7d6a95e}
+.auth-art-grid i.marked:after{content:'';width:28%;height:14%;border-left:2px solid #c3ddb1a6;border-bottom:2px solid #c3ddb1a6;transform:rotate(-45deg);position:absolute;left:35%;top:37%}
+.auth-main{padding:clamp(28px,5vw,90px);background:radial-gradient(ellipse at 100% 0%,#e1e9d86b,transparent 65%),#f5f6f0}
+.auth-card{max-width:390px;background:#ffffffa8;border:1px solid #dfe6d9;border-radius:22px;padding:36px;box-shadow:0 12px 45px #243e2910}
+.auth-card .eyebrow{font-size:10px;letter-spacing:.13em;color:#51775d}
+.auth-card h2{font-size:29px;letter-spacing:-.025em;line-height:1.2}
+.auth-card p{font-size:12px;line-height:1.75;margin-bottom:24px}
+.auth-card .field input{min-height:48px;background:#fff;border-color:#cad5c5}
+.auth-card .btn.primary{min-height:48px;box-shadow:0 4px 12px #2f6b4f18}
+.auth-card:before{content:none}
+@media(min-width:1600px){.auth-calendar-art{bottom:-80px;right:2%;width:72%}}
+@media(max-width:1100px) and (min-width:761px){.auth-screen{grid-template-columns:minmax(0,1fr) minmax(370px,.9fr)}.auth-aside{padding:100px 30px 50px}.auth-brand-lockup{gap:14px}.auth-logo{width:60px;height:60px;border-radius:16px}.auth-aside .auth-system-title{font-size:44px}.auth-brand-rule{margin-left:74px}.auth-main{padding:26px}.auth-card{padding:28px}}
+@media(max-width:760px){.auth-screen{display:block;min-height:100svh;background:#f5f6f0}.auth-aside{display:flex;min-height:0;padding:38px 26px 46px;border-radius:0 0 28px 28px}.auth-brand-lockup{gap:18px;align-items:center}.auth-logo{width:60px;height:60px;margin:0;border-radius:16px}.auth-aside .auth-system-title{font-size:38px;line-height:1.03}.auth-system-title span+span{margin-top:4px}.auth-brand-rule{margin:23px 0 0 78px;width:36px;height:2px}.auth-calendar-art{width:220px;right:-56px;bottom:-96px;border-radius:15px;padding:23px 15px;opacity:.35}.auth-art-grid{gap:5px}.auth-art-grid i{border-radius:4px}.auth-art-line{margin-bottom:13px}.auth-main{min-height:0;background:transparent;padding:27px 20px 42px}.auth-card{max-width:430px;width:100%;padding:26px;border-radius:18px}.auth-card:before{content:none}.auth-card h2{font-size:26px}}
