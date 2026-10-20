@@ -1,0 +1,6 @@
+# Вставить ВНУТРЬ уже существующего блока files.{$SITE_ADDRESS} { ... }.
+# Не использовать handle_path: приложение само обрабатывает APP_BASE_PATH=/tabel.
+redir /tabel /tabel/ permanent
+handle /tabel/* {
+    reverse_proxy imcstroy-timesheets-web:3180
+}
