@@ -9,6 +9,8 @@ import { workbook } from './xlsx.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=process.env.HOST || '127.0.0.1', port=Number(process.env.PORT || 3180);
+const basePath=(process.env.APP_BASE_PATH||'').replace(/\/$/,'');
+if(basePath&&!/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(basePath))throw new Error('APP_BASE_PATH должен быть путём вида /tabel или пустой строкой');
 const file=resolve(process.env.DATABASE_PATH || resolve(root,'data','timesheets.sqlite'));
 mkdirSync(dirname(file),{recursive:true});
 const db=new DatabaseSync(file);
@@ -37,7 +39,7 @@ if(!db.prepare('SELECT 1 FROM users LIMIT 1').get()&&setupToken) console.log('К
 const loginAttempts=new Map();
 function rateLimit(req,name) { const k=req.socket.remoteAddress+':'+name,t=Date.now();let r=loginAttempts.get(k);if(!r||r.until<t){r={count:0,until:t+15*60e3};loginAttempts.set(k,r);}r.count++;if(r.count>12)throw new AppError('Слишком много попыток входа. Повторите через 15 минут',429);if(loginAttempts.size>10000)for(const [key,value]of loginAttempts)if(value.until<t)loginAttempts.delete(key); }
 function secure(req) { return process.env.APP_ORIGIN?.startsWith('https://') || req.socket.encrypted; }
-function cookie(req,token,maxAge) { return `tab_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure(req)?'; Secure':''}`; }
+function cookie(req,token,maxAge) { return `tab_session=${token}; Path=${basePath}/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure(req)?'; Secure':''}`; }
 function issueSession(req,res,u) { const token=randomBytes(32).toString('hex'),csrf=randomBytes(24).toString('hex');db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(hash(token),u.id,csrf,Date.now()+8*60*60e3);res.setHeader('Set-Cookie',cookie(req,token,8*60*60));return {user:publicUser(u),csrf}; }
 function auth(req) { const raw=/\btab_session=([a-f0-9]{64})\b/.exec(req.headers.cookie||'')?.[1];if(!raw)return null;return db.prepare('SELECT users.*,sessions.csrf,sessions.token AS session_token FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?').get(hash(raw),Date.now())||null; }
 function admin(user) { if(user.role!=='admin')throw new AppError('Действие доступно только администратору',403); }
@@ -198,6 +200,11 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   try{
     const url=new URL(req.url,'http://localhost');
+    if(basePath){
+      if(url.pathname===basePath){res.writeHead(308,{Location:basePath+'/'+url.search});return res.end();}
+      if(!url.pathname.startsWith(basePath+'/'))throw new AppError('Файл не найден',404);
+      url.pathname=url.pathname.slice(basePath.length);
+    }
     if(url.pathname.startsWith('/api/'))return await api(req,res,url);
     if(req.method!=='GET'&&req.method!=='HEAD')throw new AppError('Метод не поддерживается',405);
     const name=url.pathname==='/'?'/index.html':decodeURIComponent(url.pathname),path=resolve(root,'public','.'+name);
