@@ -65,6 +65,9 @@ function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER
 
 async function api(req,res,url) {
   const path=url.pathname,method=req.method;
+  if(path==='/api/health'&&method==='GET'){
+    db.prepare('SELECT 1').get();return json(res,{ok:true});
+  }
   if(path==='/api/session'&&method==='GET'){
     const u=auth(req);return json(res,{...(u?{user:publicUser(u),csrf:u.csrf}:{user:null}),setupRequired:!db.prepare('SELECT 1 FROM users LIMIT 1').get(),setupTokenRequired:!!setupToken});
   }
