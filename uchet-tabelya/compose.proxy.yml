@@ -1,0 +1,13 @@
+# Дополнение к compose.yml. Не запускайте этот файл отдельно.
+# Внешняя сеть должна принадлежать действующему Caddy на этом сервере.
+services:
+  timesheets:
+    networks:
+      default: {}
+      web-proxy:
+        aliases:
+          - imcstroy-timesheets-web
+networks:
+  web-proxy:
+    external: true
+    name: ${TIMESHEET_PROXY_NETWORK:?Укажите TIMESHEET_PROXY_NETWORK в .env}
