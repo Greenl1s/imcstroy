@@ -62,7 +62,13 @@ function change(id,data,user,action,fn,{completedAllowed=false}={}) {
 }
 function activeEmployee(id) { id=text(id,'Сотрудник',100);const e=db.prepare('SELECT employees.*,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE employees.id=? AND employees.active=1').get(id);if(!e)throw new AppError('Сотрудник не найден в действующей базе');return e; }
 function employeeSnapshot(e) { return {name:e.name,position:e.position,birthday:e.birthday,note:e.note,positionId:e.position_id}; }
-function positionId(name) { const v=text(name,'Должность',150),key=v.toLocaleLowerCase('ru');let p=db.prepare('SELECT id FROM positions WHERE name_key=?').get(key);if(!p){p={id:randomUUID()};db.prepare('INSERT INTO positions VALUES(?,?,?)').run(p.id,v,key);}return p.id; }
+function selectedPosition(data) {
+  const p=data.positionId
+    ? db.prepare('SELECT id FROM positions WHERE id=?').get(text(data.positionId,'Должность',100))
+    : db.prepare('SELECT id FROM positions WHERE name_key=?').get(text(data.position,'Должность',150).toLocaleLowerCase('ru'));
+  if(!p)throw new AppError('Выберите должность из списка. Новые должности добавляются кнопкой «Добавить должность»');
+  return p.id;
+}
 function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
 
 async function api(req,res,url) {
@@ -94,6 +100,12 @@ async function api(req,res,url) {
   if(!['GET','HEAD'].includes(method)&&req.headers['x-csrf-token']!==user.csrf)throw new AppError('Сессия страницы устарела. Обновите страницу',403);
   if(path==='/api/logout'&&method==='POST'){db.prepare('DELETE FROM sessions WHERE token=?').run(user.session_token);res.setHeader('Set-Cookie',cookie(req,'',0));return json(res,{ok:true});}
   if(path==='/api/catalog'&&method==='GET')return json(res,catalog());
+  if(path==='/api/positions'&&method==='POST'){
+    const d=await body(req),name=text(d.name,'Должность',150),key=name.toLocaleLowerCase('ru');
+    if(db.prepare('SELECT 1 FROM positions WHERE name_key=?').get(key))throw new AppError('Такая должность уже добавлена',409);
+    db.prepare('INSERT INTO positions VALUES(?,?,?)').run(randomUUID(),name,key);
+    return json(res,catalog(),201);
+  }
   if(path==='/api/users'){
     admin(user);
     if(method==='GET')return json(res,db.prepare('SELECT id,name,username,role,created_at AS createdAt FROM users ORDER BY name').all());
@@ -118,7 +130,7 @@ async function api(req,res,url) {
     if(method==='DELETE'&&id){db.prepare(`UPDATE ${table} SET active=0 WHERE id=?`).run(id);return json(res,catalog());}
     if((method==='POST'&&!id)||(method==='PUT'&&id)){
       if(kind==='employees'){
-        const name=text(d.name,'ФИО',150),note=text(d.note,'Примечание',500,true),birthday=text(d.birthday,'Дата рождения',10,true),pid=positionId(d.position);
+        const name=text(d.name,'ФИО',150),note=text(d.note,'Примечание',500,true),birthday=text(d.birthday,'Дата рождения',10,true),pid=selectedPosition(d);
         if(birthday&&(!/^\d{4}-\d{2}-\d{2}$/.test(birthday)||Number.isNaN(Date.parse(birthday))||new Date(birthday).toISOString().slice(0,10)!==birthday||birthday>now().slice(0,10)))throw new AppError('Укажите корректную дату рождения, не позднее сегодняшнего дня');
         if(id)db.prepare('UPDATE employees SET name=?,position_id=?,birthday=?,note=? WHERE id=?').run(name,pid,birthday,note,id);
         else db.prepare('INSERT INTO employees(id,name,position_id,birthday,note) VALUES(?,?,?,?,?)').run(resultId,name,pid,birthday,note);
