@@ -1,0 +1,12 @@
+# Добавьте этот ОТДЕЛЬНЫЙ блок в конец действующего Caddyfile.
+# Не заменяйте им Caddyfile ИСУ. Адрес — пример, замените при необходимости.
+# До подключения создайте A-запись этого адреса на IP действующего сервера.
+tabel.imcstroy.ru {
+    encode gzip
+    reverse_proxy imcstroy-timesheets-web:3180
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        -Server
+    }
+}
