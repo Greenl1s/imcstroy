@@ -1,0 +1,20 @@
+services:
+  timesheets:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3180:3180"
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:-http://127.0.0.1:3180}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+    volumes:
+      - timesheet-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+volumes:
+  timesheet-data:
