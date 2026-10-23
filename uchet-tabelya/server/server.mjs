@@ -6,6 +6,7 @@ import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, text, monthDays, safeFilename } from './domain.mjs';
 import { workbook } from './xlsx.mjs';
+import { workflowApi } from './workflow.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=process.env.HOST || '127.0.0.1', port=Number(process.env.PORT || 3180);
@@ -28,13 +29,23 @@ CREATE INDEX IF NOT EXISTS sheets_status_updated ON sheets(status,updated_at);
 CREATE INDEX IF NOT EXISTS audit_sheet ON audit(sheet_id,id);
 CREATE INDEX IF NOT EXISTS sheets_month ON sheets(month);
 `);
+// Backward-compatible migration: existing employees retain their former sections.
+const columns=db.prepare('PRAGMA table_info(users)').all().map(c=>c.name);
+if(!columns.includes('deleted_at'))db.exec('ALTER TABLE users ADD COLUMN deleted_at TEXT');
+if(!columns.includes('access_json'))db.exec(`ALTER TABLE users ADD COLUMN access_json TEXT NOT NULL DEFAULT '["timesheets","database"]'`);
+db.exec('CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at TEXT NOT NULL)');
+const sections=['timesheets','database','planning','verification','control'];
+function userAccess(u){return u.role==='admin'?sections:JSON.parse(u.access_json||'["timesheets","database"]');}
+function can(u,section){return userAccess(u).includes(section);}
+function need(u,section){if(!can(u,section))throw new AppError('Нет доступа к разделу',403);}
+function parseAccess(data){if(!Array.isArray(data)||data.some(x=>!sections.includes(x)))throw new AppError('Некорректный список разделов');return [...new Set(data)];}
 const now=()=>new Date().toISOString();
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function passwordHash(password) { const salt=randomBytes(16).toString('hex');return salt+':'+scryptSync(password,salt,64).toString('hex'); }
 function passwordMatches(password,stored) { const [salt,digest]=stored.split(':');const a=scryptSync(password,salt,64),b=Buffer.from(digest,'hex');return a.length===b.length&&timingSafeEqual(a,b); }
 function validatePassword(p) { if(typeof p!=='string'||p.length<10||p.length>200)throw new AppError('Пароль должен содержать от 10 до 200 символов');return p; }
 function username(v) { const s=text(v,'Логин',50).toLowerCase();if(!/^[a-z0-9_.-]{3,50}$/.test(s))throw new AppError('Логин: 3–50 латинских букв, цифр, точек, дефисов или подчёркиваний');return s; }
-function publicUser(u) { return {id:u.id,name:u.name,username:u.username,role:u.role}; }
+function publicUser(u) { return {id:u.id,name:u.name,username:u.username,role:u.role,access:userAccess(u)}; }
 const setupToken=process.env.SETUP_TOKEN || (!['127.0.0.1','localhost','::1'].includes(host)?randomBytes(24).toString('hex'):'');
 if(!db.prepare('SELECT 1 FROM users LIMIT 1').get()&&setupToken) console.log('Код первоначальной настройки (храните в секрете): '+setupToken);
 const loginAttempts=new Map();
@@ -42,7 +53,7 @@ function rateLimit(req,name) { const k=req.socket.remoteAddress+':'+name,t=Date.
 function secure(req) { return process.env.APP_ORIGIN?.startsWith('https://') || req.socket.encrypted; }
 function cookie(req,token,maxAge) { return `tab_session=${token}; Path=${basePath}/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure(req)?'; Secure':''}`; }
 function issueSession(req,res,u) { const token=randomBytes(32).toString('hex'),csrf=randomBytes(24).toString('hex');db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(hash(token),u.id,csrf,Date.now()+8*60*60e3);res.setHeader('Set-Cookie',cookie(req,token,8*60*60));return {user:publicUser(u),csrf}; }
-function auth(req) { const raw=/\btab_session=([a-f0-9]{64})\b/.exec(req.headers.cookie||'')?.[1];if(!raw)return null;return db.prepare('SELECT users.*,sessions.csrf,sessions.token AS session_token FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?').get(hash(raw),Date.now())||null; }
+function auth(req) { const raw=/\btab_session=([a-f0-9]{64})\b/.exec(req.headers.cookie||'')?.[1];if(!raw)return null;return db.prepare('SELECT users.*,sessions.csrf,sessions.token AS session_token FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>? AND users.deleted_at IS NULL').get(hash(raw),Date.now())||null; }
 function admin(user) { if(user.role!=='admin')throw new AppError('Действие доступно только администратору',403); }
 function originCheck(req) { const origin=req.headers.origin;if(origin){const allowed=process.env.APP_ORIGIN||`http://${req.headers.host}`;if(origin!==allowed)throw new AppError('Запрос с другого сайта запрещён',403);} }
 async function body(req) { const parts=[];let n=0;for await(const chunk of req){n+=chunk.length;if(n>1024*1024)throw new AppError('Слишком большой запрос',413);parts.push(chunk);}try{return JSON.parse(Buffer.concat(parts).toString()||'{}');}catch{throw new AppError('Некорректный JSON');} }
@@ -97,13 +108,13 @@ async function api(req,res,url) {
     if(db.prepare('SELECT 1 FROM users LIMIT 1').get())throw new AppError('Первоначальная настройка уже выполнена',409);
     if(setupToken&&d.setupToken!==setupToken)throw new AppError('Неверный код первоначальной настройки',403);
     const u={id:randomUUID(),username:username(d.username),name:text(d.name,'ФИО',150),role:'admin'};
-    db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),u.role,now());
+    db.prepare('INSERT INTO users(id,username,name,password,role,created_at) VALUES(?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),u.role,now());
     return json(res,issueSession(req,res,u),201);
   }
   if(path==='/api/login'&&method==='POST'){
     const d=await body(req);rateLimit(req,String(d.username||'').toLowerCase());
     if(typeof d.password!=='string'||d.password.length>200)throw new AppError('Неверный логин или пароль',401);
-    const u=db.prepare('SELECT * FROM users WHERE username=?').get(String(d.username||'').trim().toLowerCase());
+    const u=db.prepare('SELECT * FROM users WHERE username=? AND deleted_at IS NULL').get(String(d.username||'').trim().toLowerCase());
     const placeholder='01234567890123456789012345678901:'+Buffer.alloc(64).toString('hex');
     if(!passwordMatches(d.password,u?.password||placeholder)||!u)throw new AppError('Неверный логин или пароль',401);
     return json(res,issueSession(req,res,u));
@@ -111,6 +122,31 @@ async function api(req,res,url) {
   const user=auth(req);if(!user)throw new AppError('Войдите в систему',401);
   if(!['GET','HEAD'].includes(method)&&req.headers['x-csrf-token']!==user.csrf)throw new AppError('Сессия страницы устарела. Обновите страницу',403);
   if(path==='/api/logout'&&method==='POST'){db.prepare('DELETE FROM sessions WHERE token=?').run(user.session_token);res.setHeader('Set-Cookie',cookie(req,'',0));return json(res,{ok:true});}
+  if(await workflowApi({db,path,method,req,res,user,body,json,can}))return;
+  if(path==='/api/sheet-catalog'&&method==='GET'){
+    need(user,'timesheets');const c=catalog();c.employees=c.employees.map(({birthday,note,...e})=>({...e,birthday:'',note:''}));return json(res,c);
+  }
+  if(path==='/api/catalog'||/^\/api\/(positions|permissions|employees|work-types|signers)(\/|$)/.test(path))need(user,'database');
+  if(path.startsWith('/api/sheets'))need(user,'timesheets');
+  const userMatch=/^\/api\/users\/([a-f0-9-]+)$/.exec(path);
+  if(userMatch){
+    admin(user);const id=userMatch[1],d=await body(req);
+    const target=db.prepare('SELECT * FROM users WHERE id=? AND deleted_at IS NULL').get(id);
+    if(!target)throw new AppError('Пользователь не найден',404);
+    if(method==='DELETE'){
+      if(id===user.id)throw new AppError('Нельзя удалить собственный аккаунт',409);
+      if(d.confirmDelete!==true)throw new AppError('Подтвердите удаление пользователя');
+      if(target.role==='admin'&&db.prepare("SELECT count(*) AS n FROM users WHERE role='admin' AND deleted_at IS NULL").get().n<=1)throw new AppError('Нельзя удалить последнего администратора',409);
+      db.exec('BEGIN IMMEDIATE');try{db.prepare('UPDATE users SET deleted_at=? WHERE id=?').run(now(),id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+      return json(res,{ok:true});
+    }
+    if(method==='PATCH'){
+      const access=parseAccess(d.access);
+      if(target.role==='admin')throw new AppError('У администратора всегда доступны все разделы');
+      db.prepare('UPDATE users SET access_json=? WHERE id=?').run(JSON.stringify(access),id);
+      return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)));
+    }
+  }
   if(path==='/api/catalog'&&method==='GET')return json(res,catalog());
   if(path==='/api/positions'&&method==='POST'){
     const d=await body(req),name=text(d.name,'Должность',150),key=name.toLocaleLowerCase('ru');
@@ -120,11 +156,11 @@ async function api(req,res,url) {
   }
   if(path==='/api/users'){
     admin(user);
-    if(method==='GET')return json(res,db.prepare('SELECT id,name,username,role,created_at AS createdAt FROM users ORDER BY name').all());
+    if(method==='GET')return json(res,db.prepare('SELECT * FROM users WHERE deleted_at IS NULL ORDER BY name').all().map(u=>({...publicUser(u),createdAt:u.created_at})));
     if(method==='POST'){
       const d=await body(req),role=d.role==='admin'?'admin':'employee';
       const u={id:randomUUID(),name:text(d.name,'Имя пользователя',150),username:username(d.username),role};
-      db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),role,now());return json(res,publicUser(u),201);
+      const access=d.access===undefined?['timesheets','database']:parseAccess(d.access);db.prepare('INSERT INTO users(id,username,name,password,role,created_at,access_json) VALUES(?,?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),role,now(),JSON.stringify(access));return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(u.id)),201);
     }
   }
   if(path==='/api/permissions'&&method==='PUT'){
