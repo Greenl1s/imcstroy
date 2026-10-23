@@ -57,3 +57,12 @@
 .workflow-table{min-width:740px}.workflow-table td{padding:12px}.workflow-table input{width:100%;min-width:140px;padding:11px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--text);font:inherit}
 .access-options{margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:10px}.access-options legend{font-weight:600;font-size:13px;padding:0 5px}.access-options label{display:flex;gap:10px;align-items:center;padding:7px 0;font-size:13px}.access-options input{width:18px;height:18px;accent-color:var(--green)}.access-options small{display:block;color:var(--muted);line-height:1.6;margin-top:12px}
 .rail{overflow-y:auto}.rail>*{flex-shrink:0}
+
+/* 1.6: текстовые действия не сжимаются до размеров кнопки-иконки. */
+.row-actions.user-actions{gap:8px;justify-content:flex-start;flex-wrap:wrap;min-width:210px}
+.row-actions.user-actions .btn:not(.icon){width:auto;min-width:92px;min-height:38px;padding:8px 12px;flex-shrink:0;white-space:nowrap;line-height:1.3}
+.row-actions.user-actions .btn svg{width:16px;height:16px;flex-shrink:0}
+.roles-panel{margin-top:22px}.role-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 12px;border-bottom:1px solid var(--line)}.role-row small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
+.role-editor{display:grid;gap:12px;max-height:48vh;overflow:auto;padding:3px 6px 10px 0;margin-top:14px}.role-editor .access-options{margin:0}.role-editor label{align-items:flex-start;line-height:1.5}.role-editor input{flex-shrink:0;margin-top:1px}.role-tools{display:flex;gap:8px;margin-top:20px}
+dialog:has(.role-editor){width:720px;max-height:94vh;overflow:auto}
+@media(max-width:760px){.role-row{flex-wrap:wrap}.row-actions.user-actions{min-width:190px}.row-actions.user-actions .btn:not(.icon){min-width:84px}}
