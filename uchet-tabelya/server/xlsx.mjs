@@ -4,7 +4,7 @@ import { monthDays, shortName } from './domain.mjs';
 const esc = value => String(value ?? '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const crcTable = Array.from({length:256}, (_, i) => { let n=i; for(let j=0;j<8;j++) n=(n&1)?0xedb88320^(n>>>1):n>>>1; return n>>>0; });
 function crc32(b) { let c=0xffffffff; for(const x of b)c=crcTable[(c^x)&255]^(c>>>8); return (c^0xffffffff)>>>0; }
-function zip(files) {
+export function zip(files) {
   const chunks=[], central=[]; let offset=0;
   for (const [name, content] of Object.entries(files)) {
     const n=Buffer.from(name), raw=Buffer.from(content), packed=deflateRawSync(raw), crc=crc32(raw);

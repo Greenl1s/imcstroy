@@ -6,6 +6,8 @@ import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, text, monthDays, safeFilename } from './domain.mjs';
 import { workbook } from './xlsx.mjs';
+import {initMonthly,monthlyAdminApi} from './monthly.mjs';
+import {gridWorkbook} from './grid-xlsx.mjs';
 import { workflowApi } from './workflow.mjs';
 import { permissionGroups,allPermissions,normalizePermissions } from './permissions.mjs';
 
@@ -35,6 +37,7 @@ const columns=db.prepare('PRAGMA table_info(users)').all().map(c=>c.name);
 if(!columns.includes('deleted_at'))db.exec('ALTER TABLE users ADD COLUMN deleted_at TEXT');
 if(!columns.includes('access_json'))db.exec(`ALTER TABLE users ADD COLUMN access_json TEXT NOT NULL DEFAULT '["timesheets","database"]'`);
 db.exec('CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at TEXT NOT NULL)');
+initMonthly(db);
 db.exec('CREATE TABLE IF NOT EXISTS roles(id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE,permissions_json TEXT NOT NULL)');
 if(!columns.includes('custom_role_id'))db.exec('ALTER TABLE users ADD COLUMN custom_role_id TEXT REFERENCES roles(id)');
 const sections=['timesheets','database','planning','verification','control'];
@@ -42,7 +45,7 @@ function userPermissions(u){
  if(u.role==='admin')return allPermissions;
  if(u.custom_role_id){const role=db.prepare('SELECT permissions_json FROM roles WHERE id=?').get(u.custom_role_id);return role?JSON.parse(role.permissions_json):[];}
  const access=JSON.parse(u.access_json||'["timesheets","database"]');
- return allPermissions.filter(p=>{const group=p.split('.')[0];return !['timesheets.reopen','timesheets.delete'].includes(p)&&(access.includes(group)||access.includes('database')&&['employees','positions','workTypes','permissions','signers'].includes(group));});
+ return allPermissions.filter(p=>{const group=p.split('.')[0];return !['timesheets.reopen','timesheets.delete'].includes(p)&&(access.includes(group)||access.includes('database')&&['employees','positions','workTypes','permissions','signers','polygons','planWorks'].includes(group));});
 }
 function userAccess(u){return sections.filter(k=>userPermissions(u).includes(k+'.view'));}
 function can(u,key){return userPermissions(u).includes(key.includes('.')?key:key+'.view');}
@@ -78,13 +81,14 @@ function change(id,data,user,action,fn,{completedAllowed=false}={}) {
     const s=getSheet(id);
     if(data.expectedRevision!==s.revision)throw new AppError('Табель изменился в другом окне. Обновите страницу и повторите действие',409);
     if(s.status==='completed'&&!completedAllowed)throw new AppError('Завершённый табель доступен только для просмотра. Администратор может вернуть его в работу',403);
+    if(s.generated)throw new AppError('Сформированный табель доступен только для просмотра',403);
     fn(s);s.revision++;s.updatedAt=now();
     db.prepare('UPDATE sheets SET name=?,status=?,revision=?,body=?,updated_at=? WHERE id=?').run(s.name,s.status,s.revision,JSON.stringify(s),s.updatedAt,id);
     audit(id,user,action);db.exec('COMMIT');return resultSheet(id);
   }catch(e){db.exec('ROLLBACK');throw e;}
 }
 function activeEmployee(id) { id=text(id,'Сотрудник',100);const e=db.prepare('SELECT employees.*,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE employees.id=? AND employees.active=1').get(id);if(!e)throw new AppError('Сотрудник не найден в действующей базе');return e; }
-function employeeSnapshot(e) { return {name:e.name,position:e.position,birthday:e.birthday,note:e.note,positionId:e.position_id}; }
+function employeeSnapshot(e) { return {name:e.name,position:e.position,department:e.department,birthday:e.birthday,note:e.note,positionId:e.position_id}; }
 function occupiedDays(sheet) {
   const occupied=[];
   for(const record of db.prepare('SELECT id,name,body FROM sheets WHERE month=? AND id<>?').all(sheet.month,sheet.id)){
@@ -103,7 +107,7 @@ function selectedPosition(data) {
   if(!p)throw new AppError('Выберите должность из списка. Новые должности добавляются кнопкой «Добавить должность»');
   return p.id;
 }
-function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
+function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.department,employees.coefficient,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
 
 async function api(req,res,url) {
   const path=url.pathname,method=req.method;
@@ -133,9 +137,10 @@ async function api(req,res,url) {
   const user=auth(req);if(!user)throw new AppError('Войдите в систему',401);
   if(!['GET','HEAD'].includes(method)&&req.headers['x-csrf-token']!==user.csrf)throw new AppError('Сессия страницы устарела. Обновите страницу',403);
   if(path==='/api/logout'&&method==='POST'){db.prepare('DELETE FROM sessions WHERE token=?').run(user.session_token);res.setHeader('Set-Cookie',cookie(req,'',0));return json(res,{ok:true});}
-  if(await workflowApi({db,path,method,req,res,user,body,json,can}))return;
+  if(await monthlyAdminApi({db,path,method,req,res,user,body,json,can}))return;
+  if(await workflowApi({db,path,method,req,res,user,body,json,can,exportFile:(res,s)=>{const bytes=gridWorkbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename=monthly-${s.month}.xlsx`,'Cache-Control':'no-store'});res.end(bytes);}}))return;
   if(path==='/api/sheet-catalog'&&method==='GET'){
-    need(user,'timesheets');const c=catalog();c.employees=c.employees.map(({birthday,note,...e})=>({...e,birthday:'',note:''}));return json(res,c);
+    need(user,'timesheets');const c=catalog();c.employees=c.employees.map(({birthday,note,coefficient,...e})=>({...e,birthday:'',note:''}));return json(res,c);
   }
   if(path==='/api/catalog'||/^\/api\/(positions|permissions|employees|work-types|signers)(\/|$)/.test(path))need(user,'database');
   if(path.startsWith('/api/sheets'))need(user,'timesheets');
@@ -220,8 +225,16 @@ async function api(req,res,url) {
       if(kind==='employees'){
         const name=text(d.name,'ФИО',150),note=text(d.note,'Примечание',500,true),birthday=text(d.birthday,'Дата рождения',10,true),pid=selectedPosition(d);
         if(birthday&&(!/^\d{4}-\d{2}-\d{2}$/.test(birthday)||Number.isNaN(Date.parse(birthday))||new Date(birthday).toISOString().slice(0,10)!==birthday||birthday>now().slice(0,10)))throw new AppError('Укажите корректную дату рождения, не позднее сегодняшнего дня');
+        if(d.department!==undefined)text(d.department,'Подразделение',150,true);
+        if(d.coefficient!==undefined&&String(d.coefficient).trim()&&!/^\d{1,6}(?:[.,]\d{1,6})?$/.test(String(d.coefficient).trim()))throw new AppError('Коэффициент: неотрицательное число, до 6 знаков после запятой');
         if(id)db.prepare('UPDATE employees SET name=?,position_id=?,birthday=?,note=? WHERE id=?').run(name,pid,birthday,note,id);
         else db.prepare('INSERT INTO employees(id,name,position_id,birthday,note) VALUES(?,?,?,?,?)').run(resultId,name,pid,birthday,note);
+        if(d.department!==undefined)db.prepare('UPDATE employees SET department=? WHERE id=?').run(text(d.department,'Подразделение',150,true),resultId);
+        if(d.coefficient!==undefined){
+          const v=String(d.coefficient).trim().replace(',','.');
+          if(v&&!/^\d{1,6}(?:\.\d{1,6})?$/.test(v))throw new AppError('Коэффициент: неотрицательное число, до 6 знаков после запятой');
+          db.prepare('UPDATE employees SET coefficient=? WHERE id=?').run(v||null,resultId);
+        }
       }else if(kind==='signers'){
         const name=text(d.name,'ФИО',150),position=text(d.position,'Должность',150);
         if(id)db.prepare('UPDATE signers SET name=?,position=? WHERE id=?').run(name,position,id);
@@ -240,7 +253,7 @@ async function api(req,res,url) {
     }
   }
   if(path==='/api/sheets'&&method==='GET'){
-    return json(res,db.prepare('SELECT id,name,month,status,revision,created_at AS createdAt,updated_at AS updatedAt,body FROM sheets ORDER BY updated_at DESC').all().map(r=>{const s=JSON.parse(r.body);delete r.body;return {...r,employeeCount:s.rows.length,filledDays:s.rows.reduce((sum,x)=>sum+Object.keys(x.cells).length,0),signer:s.signerSnapshot?.name||''};}));
+    return json(res,db.prepare('SELECT id,name,month,status,revision,created_at AS createdAt,updated_at AS updatedAt,body FROM sheets ORDER BY updated_at DESC').all().map(r=>{const s=JSON.parse(r.body);delete r.body;return {...r,employeeCount:s.rows.length,filledDays:s.rows.reduce((sum,x)=>sum+Object.keys(x.cells).length,0),signer:s.signerSnapshot?.name||'',polygonId:s.polygonId||null,polygonNumber:s.polygonNumber,polygonName:s.polygonName,generated:!!s.generated,format:s.format};}));
   }
   if(path==='/api/sheets'&&method==='POST'){
     const d=await body(req);monthDays(d.month);const s={id:randomUUID(),name:text(d.name,'Название табеля',150),month:d.month,status:'draft',revision:1,rows:[],signerId:null,signerSnapshot:null,createdAt:now(),updatedAt:now(),createdBy:user.name};
@@ -253,7 +266,7 @@ async function api(req,res,url) {
     if(method==='GET'&&!action)return json(res,resultSheet(id));
     if(method==='GET'&&action==='availability')return json(res,occupiedDays(getSheet(id)));
     if(method==='GET'&&action==='export'){
-      const s=getSheet(id),bytes=workbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="timesheet-${s.month}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename(s.name)+' '+s.month+'.xlsx')}`,'Cache-Control':'no-store','Content-Length':bytes.length});return res.end(bytes);
+      const s=getSheet(id),bytes=s.format==='polygon-v2'?gridWorkbook(s):workbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="timesheet-${s.month}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename(s.name)+' '+s.month+'.xlsx')}`,'Cache-Control':'no-store','Content-Length':bytes.length});return res.end(bytes);
     }
     const d=await body(req);
     if(!action&&method==='DELETE'){
