@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { AppError, text, monthDays, safeFilename } from './domain.mjs';
 import { workbook } from './xlsx.mjs';
 import { workflowApi } from './workflow.mjs';
+import { permissionGroups,allPermissions,normalizePermissions } from './permissions.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=process.env.HOST || '127.0.0.1', port=Number(process.env.PORT || 3180);
@@ -34,10 +35,20 @@ const columns=db.prepare('PRAGMA table_info(users)').all().map(c=>c.name);
 if(!columns.includes('deleted_at'))db.exec('ALTER TABLE users ADD COLUMN deleted_at TEXT');
 if(!columns.includes('access_json'))db.exec(`ALTER TABLE users ADD COLUMN access_json TEXT NOT NULL DEFAULT '["timesheets","database"]'`);
 db.exec('CREATE TABLE IF NOT EXISTS workflows(id TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at TEXT NOT NULL)');
+db.exec('CREATE TABLE IF NOT EXISTS roles(id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE,permissions_json TEXT NOT NULL)');
+if(!columns.includes('custom_role_id'))db.exec('ALTER TABLE users ADD COLUMN custom_role_id TEXT REFERENCES roles(id)');
 const sections=['timesheets','database','planning','verification','control'];
-function userAccess(u){return u.role==='admin'?sections:JSON.parse(u.access_json||'["timesheets","database"]');}
-function can(u,section){return userAccess(u).includes(section);}
-function need(u,section){if(!can(u,section))throw new AppError('Нет доступа к разделу',403);}
+function userPermissions(u){
+ if(u.role==='admin')return allPermissions;
+ if(u.custom_role_id){const role=db.prepare('SELECT permissions_json FROM roles WHERE id=?').get(u.custom_role_id);return role?JSON.parse(role.permissions_json):[];}
+ const access=JSON.parse(u.access_json||'["timesheets","database"]');
+ return allPermissions.filter(p=>{const group=p.split('.')[0];return !['timesheets.reopen','timesheets.delete'].includes(p)&&(access.includes(group)||access.includes('database')&&['employees','positions','workTypes','permissions','signers'].includes(group));});
+}
+function userAccess(u){return sections.filter(k=>userPermissions(u).includes(k+'.view'));}
+function can(u,key){return userPermissions(u).includes(key.includes('.')?key:key+'.view');}
+function need(u,key){if(!can(u,key))throw new AppError('Нет права на это действие',403);}
+function checkedPermissions(values){try{return normalizePermissions(values);}catch{throw new AppError('Некорректный список прав');}}
+function checkedRole(id){if(id!==null&&(!id||!db.prepare('SELECT id FROM roles WHERE id=?').get(id)))throw new AppError('Роль не найдена');return id;}
 function parseAccess(data){if(!Array.isArray(data)||data.some(x=>!sections.includes(x)))throw new AppError('Некорректный список разделов');return [...new Set(data)];}
 const now=()=>new Date().toISOString();
 const hash=s=>createHash('sha256').update(s).digest('hex');
@@ -45,7 +56,7 @@ function passwordHash(password) { const salt=randomBytes(16).toString('hex');ret
 function passwordMatches(password,stored) { const [salt,digest]=stored.split(':');const a=scryptSync(password,salt,64),b=Buffer.from(digest,'hex');return a.length===b.length&&timingSafeEqual(a,b); }
 function validatePassword(p) { if(typeof p!=='string'||p.length<10||p.length>200)throw new AppError('Пароль должен содержать от 10 до 200 символов');return p; }
 function username(v) { const s=text(v,'Логин',50).toLowerCase();if(!/^[a-z0-9_.-]{3,50}$/.test(s))throw new AppError('Логин: 3–50 латинских букв, цифр, точек, дефисов или подчёркиваний');return s; }
-function publicUser(u) { return {id:u.id,name:u.name,username:u.username,role:u.role,access:userAccess(u)}; }
+function publicUser(u) { return {id:u.id,name:u.name,username:u.username,role:u.role,access:userAccess(u),permissions:userPermissions(u),customRoleId:u.custom_role_id||null,roleName:u.role==='admin'?'Администратор':u.custom_role_id?(db.prepare('SELECT name FROM roles WHERE id=?').get(u.custom_role_id)?.name||'Без роли'):'Сотрудник'}; }
 const setupToken=process.env.SETUP_TOKEN || (!['127.0.0.1','localhost','::1'].includes(host)?randomBytes(24).toString('hex'):'');
 if(!db.prepare('SELECT 1 FROM users LIMIT 1').get()&&setupToken) console.log('Код первоначальной настройки (храните в секрете): '+setupToken);
 const loginAttempts=new Map();
@@ -128,6 +139,34 @@ async function api(req,res,url) {
   }
   if(path==='/api/catalog'||/^\/api\/(positions|permissions|employees|work-types|signers)(\/|$)/.test(path))need(user,'database');
   if(path.startsWith('/api/sheets'))need(user,'timesheets');
+  const roleMatch=/^\/api\/roles(?:\/([a-f0-9-]+))?$/.exec(path);
+  if(roleMatch){
+    admin(user);const id=roleMatch[1];
+    if(method==='GET'&&!id)return json(res,{roles:db.prepare('SELECT * FROM roles ORDER BY name').all().map(r=>({id:r.id,name:r.name,permissions:JSON.parse(r.permissions_json)})),groups:permissionGroups});
+    const d=await body(req);
+    if(method==='DELETE'&&id){
+      if(db.prepare('SELECT 1 FROM users WHERE custom_role_id=? AND deleted_at IS NULL').get(id))throw new AppError('Роль назначена пользователям. Сначала назначьте им другую роль',409);
+      if(!db.prepare('SELECT 1 FROM roles WHERE id=?').get(id))throw new AppError('Роль не найдена',404);
+      db.prepare('UPDATE users SET custom_role_id=NULL,access_json=? WHERE custom_role_id=?').run('[]',id);
+      db.prepare('DELETE FROM roles WHERE id=?').run(id);return json(res,{ok:true});
+    }
+    if(method==='POST'&&!id||method==='PATCH'&&id){
+      const name=text(d.name,'Название роли',100),permissions=checkedPermissions(d.permissions);
+      if(id){if(!db.prepare('SELECT 1 FROM roles WHERE id=?').get(id))throw new AppError('Роль не найдена',404);db.prepare('UPDATE roles SET name=?,permissions_json=? WHERE id=?').run(name,JSON.stringify(permissions),id);}
+      else db.prepare('INSERT INTO roles VALUES(?,?,?)').run(randomUUID(),name,JSON.stringify(permissions));
+      return json(res,{ok:true});
+    }
+    throw new AppError('Действие не найдено',404);
+  }
+  const resource=/^\/api\/(employees|positions|work-types|signers|permissions)(?:\/|$)/.exec(path);
+  if(resource&&method!=='GET'){
+    const group={'work-types':'workTypes'}[resource[1]]||resource[1];
+    need(user,group+'.'+(group==='permissions'?'edit':method==='POST'?'create':method==='DELETE'?'delete':'edit'));
+  }
+  if(path.startsWith('/api/sheets')){
+    const action=path.endsWith('/export')?'export':path.endsWith('/complete')?'complete':path.endsWith('/reopen')?'reopen':method==='DELETE'&&!path.includes('/rows/')?'delete':method==='POST'&&path==='/api/sheets'?'create':!['GET','HEAD'].includes(method)?'edit':'view';
+    need(user,'timesheets.'+action);
+  }
   const userMatch=/^\/api\/users\/([a-f0-9-]+)$/.exec(path);
   if(userMatch){
     admin(user);const id=userMatch[1],d=await body(req);
@@ -141,13 +180,14 @@ async function api(req,res,url) {
       return json(res,{ok:true});
     }
     if(method==='PATCH'){
-      const access=parseAccess(d.access);
+      const customRoleId=d.customRoleId===undefined?null:checkedRole(d.customRoleId);
+      const access=d.access===undefined?[]:parseAccess(d.access);
       if(target.role==='admin')throw new AppError('У администратора всегда доступны все разделы');
-      db.prepare('UPDATE users SET access_json=? WHERE id=?').run(JSON.stringify(access),id);
+      db.prepare('UPDATE users SET access_json=?,custom_role_id=? WHERE id=?').run(JSON.stringify(access),customRoleId,id);
       return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)));
     }
   }
-  if(path==='/api/catalog'&&method==='GET')return json(res,catalog());
+  if(path==='/api/catalog'&&method==='GET'){const c=catalog();for(const [field,group]of [['employees','employees'],['positions','positions'],['workTypes','workTypes'],['signers','signers'],['permissions','workTypes']])if(!can(user,group+'.view'))c[field]=[];return json(res,c);}
   if(path==='/api/positions'&&method==='POST'){
     const d=await body(req),name=text(d.name,'Должность',150),key=name.toLocaleLowerCase('ru');
     if(db.prepare('SELECT 1 FROM positions WHERE name_key=?').get(key))throw new AppError('Такая должность уже добавлена',409);
@@ -160,7 +200,7 @@ async function api(req,res,url) {
     if(method==='POST'){
       const d=await body(req),role=d.role==='admin'?'admin':'employee';
       const u={id:randomUUID(),name:text(d.name,'Имя пользователя',150),username:username(d.username),role};
-      const access=d.access===undefined?['timesheets','database']:parseAccess(d.access);db.prepare('INSERT INTO users(id,username,name,password,role,created_at,access_json) VALUES(?,?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),role,now(),JSON.stringify(access));return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(u.id)),201);
+      const customRoleId=d.customRoleId===undefined?null:checkedRole(d.customRoleId);const access=d.access===undefined?['timesheets','database']:parseAccess(d.access);db.prepare('INSERT INTO users(id,username,name,password,role,created_at,access_json,custom_role_id) VALUES(?,?,?,?,?,?,?,?)').run(u.id,u.username,u.name,passwordHash(validatePassword(d.password)),role,now(),JSON.stringify(access),customRoleId);return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(u.id)),201);
     }
   }
   if(path==='/api/permissions'&&method==='PUT'){
@@ -217,7 +257,7 @@ async function api(req,res,url) {
     }
     const d=await body(req);
     if(!action&&method==='DELETE'){
-      admin(user);
+      need(user,'timesheets.delete');
       if(d.confirmDelete!==true)throw new AppError('Подтвердите окончательное удаление табеля');
       db.exec('BEGIN IMMEDIATE');
       try{
@@ -266,7 +306,7 @@ async function api(req,res,url) {
       s.status='completed';s.completedAt=now();s.completedBy=user.name;
     }));
     if(action==='reopen'&&method==='POST'){
-      admin(user);return json(res,change(id,d,user,'Администратор вернул табель в работу',s=>{if(s.status!=='completed')throw new AppError('Табель уже находится в работе');s.status='draft';delete s.completedAt;delete s.completedBy;},{completedAllowed:true}));
+      need(user,'timesheets.reopen');return json(res,change(id,d,user,'Табель возвращён в работу',s=>{if(s.status!=='completed')throw new AppError('Табель уже находится в работе');s.status='draft';delete s.completedAt;delete s.completedBy;},{completedAllowed:true}));
     }
   }
   throw new AppError('Действие не найдено',404);

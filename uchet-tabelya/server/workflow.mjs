@@ -13,7 +13,7 @@ export async function workflowApi({db,path,method,req,res,user,body,json,can}){
   json(res,rows.map(({rows,history,...s})=>({...s,rowCount:rows.length})));return true;
  }
  if(!id&&method==='POST'){
-  access('planning');const data=await body(req);monthDays(data.month);
+  access('planning');if(!can(user,'planning.create'))throw new AppError('Нет права создавать таблицы',403);const data=await body(req);monthDays(data.month);
   const stamp=new Date().toISOString(),s={id:randomUUID(),name:text(data.name,'Название таблицы',150),month:data.month,stage:'planning',revision:1,rows:[],history:[{at:stamp,user:user.name,action:'Создана таблица'}],updatedAt:stamp};
   db.prepare('INSERT INTO workflows VALUES(?,?,?)').run(s.id,JSON.stringify(s),stamp);json(res,s,201);return true;
  }
@@ -23,6 +23,7 @@ export async function workflowApi({db,path,method,req,res,user,body,json,can}){
   const data=await body(req);db.exec('BEGIN IMMEDIATE');
   try{
    const s=get();allowed(s);
+   if(!can(user,(s.stage==='approved'?'control':s.stage)+(method==='PATCH'?'.edit':'.confirm')))throw new AppError('Нет права редактировать или подтверждать этап',403);
    if(s.stage==='approved')throw new AppError('Контроль завершён. Таблица доступна только для просмотра',403);
    if(s.revision!==data.expectedRevision)throw new AppError('Таблица изменена другим пользователем. Откройте её заново',409);
    if(method==='PATCH'){
