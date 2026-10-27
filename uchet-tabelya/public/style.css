@@ -81,3 +81,5 @@ dialog:has(.role-editor){width:720px;max-height:94vh;overflow:auto}
 @media(max-width:760px){.home-menus{grid-template-columns:1fr;grid-auto-rows:210px;gap:14px}.home-menu{padding:22px}.work-block-panel .panel-head{flex-wrap:wrap}.work-block-panel .actions{width:100%}}
 
 .monthly-day.pending-work{position:relative}.monthly-day.pending-work:after{content:"";position:absolute;right:4px;top:4px;width:5px;height:5px;border-radius:50%;background:#9b610e}
+
+.work-block-panel .data-wrap[hidden]{display:none}
