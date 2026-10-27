@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {AppError,text,monthDays} from './domain.mjs';
+import {initCatalogues,catalogueApi,numberedWork} from './catalogues.mjs';
 import {calendar,validateCalendarOverride} from './production-calendar.mjs';
 export const defaultTypes=[{id:'trip',code:'1',name:'Командировка',color:'#dceaff'},{id:'office',code:'2',name:'Офис',color:'#ffe0de'},{id:'general',code:'3',name:'Общая',color:'#def0dd'}];
 export function initMonthly(db){
@@ -12,13 +13,14 @@ export function initMonthly(db){
  CREATE TABLE IF NOT EXISTS planning_permissions(position_id TEXT NOT NULL REFERENCES positions(id),work_id TEXT NOT NULL REFERENCES planning_works(id),PRIMARY KEY(position_id,work_id));
  CREATE TABLE IF NOT EXISTS monthly_periods(month TEXT PRIMARY KEY,workflow_id TEXT NOT NULL UNIQUE REFERENCES workflows(id));`);
  db.prepare('INSERT OR IGNORE INTO planning_settings VALUES(1,?)').run(JSON.stringify({baseCents:null,types:defaultTypes,calendars:{}}));
+ initCatalogues(db);
 }
 export function decimal(value,label,places=6){
  const v=String(value??'').trim().replace(',','.');
  if(!new RegExp('^\\d{1,9}(?:\\.\\d{1,'+places+'})?$').test(v))throw new AppError(`${label}: укажите неотрицательное число, до ${places} знаков после запятой`);
  return v;
 }
-export function moneyCents(value){const v=decimal(value,'Базовая зарплата',2),[a,b='']=v.split('.');return Number(BigInt(a)*100n+BigInt(b.padEnd(2,'0')));}
+export function moneyCents(value){const v=decimal(value,'Среднемесячная заработная плата производственного работника',2),[a,b='']=v.split('.');return Number(BigInt(a)*100n+BigInt(b.padEnd(2,'0')));}
 export function monthlySalary(baseCents,coefficient,days,worked){
  const [a,b='']=decimal(coefficient,'Коэффициент').split('.'),factor=BigInt(a)*1000000n+BigInt(b.padEnd(6,'0'));
  const round=(n,d)=>Number((n+d/2n)/d),monthlyCents=round(BigInt(baseCents)*factor,1000000n);
@@ -26,7 +28,7 @@ export function monthlySalary(baseCents,coefficient,days,worked){
  return {monthlyCents,daily:monthlyCents/100/days,worked,accruedCents:round(BigInt(monthlyCents)*BigInt(worked),BigInt(days))};
 }
 export function monthlySettings(db){return JSON.parse(db.prepare('SELECT body FROM planning_settings WHERE id=1').get().body);}
-export function planningCatalog(db){return {signers:db.prepare('SELECT id,name,position FROM signers WHERE active=1 ORDER BY name').all(),polygons:db.prepare('SELECT * FROM polygons WHERE active=1 ORDER BY number').all(),works:db.prepare('SELECT * FROM planning_works WHERE active=1 ORDER BY code').all(),permissions:db.prepare('SELECT position_id AS positionId,work_id AS workId FROM planning_permissions').all()};}
+export function planningCatalog(db){return {nextBlockNumber:Number(db.prepare('SELECT MAX(number) AS n FROM work_blocks').get().n||0)+1,types:monthlySettings(db).types,blocks:db.prepare('SELECT b.*,COALESCE((SELECT MAX(item_number) FROM planning_works WHERE block_id=b.id),0)+1 AS nextItemNumber FROM work_blocks b WHERE b.active=1 ORDER BY b.number').all(),signers:db.prepare('SELECT id,name,position FROM signers WHERE active=1 ORDER BY name').all(),polygons:db.prepare('SELECT * FROM polygons WHERE active=1 ORDER BY number').all(),works:db.prepare('SELECT w.* FROM planning_works w JOIN work_blocks b ON b.id=w.block_id WHERE w.active=1 AND b.active=1 ORDER BY b.number,w.item_number').all().map(w=>({...w,blockId:w.block_id,itemNumber:w.item_number,typeIds:JSON.parse(w.type_ids_json)})),permissions:db.prepare('SELECT position_id AS positionId,work_id AS workId FROM planning_permissions').all()};}
 export function publicMonthly(s){
  const out=structuredClone(s);delete out.legacyArchive;
  if(!['control','approved'].includes(s.stage)){
@@ -41,7 +43,7 @@ export function createMonthly(db,data,user,{id=null,legacy=null}={}){
  if(existing)throw new AppError('На этот месяц общая таблица уже создана',409);
  const employees=db.prepare('SELECT e.*,p.name AS position FROM employees e JOIN positions p ON p.id=e.position_id WHERE e.active=1 ORDER BY e.department,e.name').all();
  if(!employees.length)throw new AppError('Сначала добавьте сотрудников');
- if(config.baseCents===null)throw new AppError('Администратор должен указать базовую зарплату в настройках');
+ if(config.baseCents===null)throw new AppError('Администратор должен указать среднемесячную заработную плату производственного работника в настройках');
  for(const e of employees)if(!e.department||e.coefficient===null)throw new AppError(`Заполните подразделение и коэффициент сотрудника «${e.name}»`);
  for(const e of employees)monthlySalary(config.baseCents,e.coefficient,cal.workingDays,0);
  const stamp=new Date().toISOString();
@@ -51,11 +53,14 @@ export function createMonthly(db,data,user,{id=null,legacy=null}={}){
 export function validateMonthlyCell(db,s,row,day,value){
  if(!Number.isInteger(day)||day<1||day>monthDays(s.month))throw new AppError('Некорректный день');
  if(value===null){delete row.cells[String(day)];return;}
+ if(!value||typeof value!=='object'||Array.isArray(value)||typeof value.typeId!=='string'||typeof value.polygonId!=='string'||value.workId&&typeof value.workId!=='string')throw new AppError('Выберите тип занятости и полигон');
  if(s.calendar.nonworking.includes(day))throw new AppError('В выходные и праздничные дни работа запрещена');
- const type=s.types.find(t=>t.id===value.typeId),polygon=db.prepare('SELECT * FROM polygons WHERE id=? AND active=1').get(value.polygonId),work=db.prepare('SELECT * FROM planning_works WHERE id=? AND active=1').get(value.workId);
- if(!type||!polygon||!work)throw new AppError('Выберите тип занятости, полигон и вид работы');
- if(!db.prepare('SELECT 1 FROM planning_permissions WHERE position_id=? AND work_id=?').get(row.positionId,work.id))throw new AppError('Работа не разрешена для должности сотрудника',403);
- row.cells[String(day)]={typeId:type.id,typeCode:type.code,typeName:type.name,color:type.color,polygonId:polygon.id,polygonNumber:polygon.number,polygonName:polygon.name,workId:work.id,workCode:work.code,workName:work.label};
+ const type=s.types.find(t=>t.id===value.typeId),polygon=db.prepare('SELECT * FROM polygons WHERE id=? AND active=1').get(value.polygonId);
+ if(!type||!polygon)throw new AppError('Выберите тип занятости и полигон');
+ const work=value.workId?db.prepare('SELECT * FROM planning_works WHERE id=? AND active=1').get(value.workId):null;
+ if(value.workId&&!work)throw new AppError('Работа не найдена');
+ if(work&&(!JSON.parse(work.type_ids_json).includes(type.id)||!db.prepare('SELECT 1 FROM planning_permissions WHERE position_id=? AND work_id=?').get(row.positionId,work.id)))throw new AppError('Работа не разрешена для этой должности и типа занятости',403);
+ row.cells[String(day)]={typeId:type.id,typeCode:type.code,typeName:type.name,color:type.color,polygonId:polygon.id,polygonNumber:polygon.number,polygonName:polygon.name,workId:work?.id||null,workCode:work?.code||'',workName:work?.label||''};
 }
 function finishMonthly(db,s,user){
  const used=new Map(),stamp=new Date().toISOString();
@@ -66,6 +71,7 @@ function finishMonthly(db,s,user){
  for(const row of s.rows){
   row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);
   for(const [day,entry]of Object.entries(row.cells)){
+   if(!entry.workId||!entry.workCode)throw new AppError(`Укажите вид работы: ${row.employeeSnapshot.name}, день ${day}`);
    if(s.calendar.nonworking.includes(Number(day)))throw new AppError('Таблица содержит работу в нерабочий день');
    // A legacy manual sheet must not silently double-book this employee.
    const conflict=occupied.get(row.employeeId+':'+day);
@@ -86,6 +92,7 @@ function finishMonthly(db,s,user){
  s.stage='approved';s.generatedAt=stamp;
 }
 export async function monthlyAdminApi({db,path,method,req,res,user,body,json,can}){
+ if(await catalogueApi({db,path,method,req,res,user,body,json,can,catalog:planningCatalog}))return true;
  if(path==='/api/monthly-settings'){
   if(user.role!=='admin')throw new AppError('Настройки доступны только администратору',403);
   if(method==='GET'){json(res,monthlySettings(db));return true;}
@@ -131,8 +138,12 @@ export async function monthlyAdminApi({db,path,method,req,res,user,body,json,can
     const number=Number(d.number),name=text(d.name,'Название полигона',150);
     if(id)db.prepare('UPDATE polygons SET number=?,name=? WHERE id=?').run(number,name,id);else db.prepare('INSERT INTO polygons(id,number,name) VALUES(?,?,?)').run(key,number,name);
    }else{
-    const code=text(d.code,'Шифр работы',30),label=text(d.label,'Название работы',160);
-    if(id)db.prepare('UPDATE planning_works SET code=?,label=? WHERE id=?').run(code,label,id);else db.prepare('INSERT INTO planning_works(id,code,label) VALUES(?,?,?)').run(key,code,label);
+    db.exec('BEGIN IMMEDIATE');try{
+     const old=id?db.prepare('SELECT * FROM planning_works WHERE id=?').get(id):null,w=numberedWork(db,d,old);
+     if(id)db.prepare('UPDATE planning_works SET code=?,label=?,block_id=?,item_number=?,type_ids_json=? WHERE id=?').run(w.code,w.label,w.blockId,w.itemNumber,JSON.stringify(w.typeIds),id);
+     else db.prepare('INSERT INTO planning_works(id,code,label,block_id,item_number,type_ids_json) VALUES(?,?,?,?,?,?)').run(key,w.code,w.label,w.blockId,w.itemNumber,JSON.stringify(w.typeIds));
+     db.exec('COMMIT');
+    }catch(e){db.exec('ROLLBACK');throw e;}
    }
   }else throw new AppError('Метод не поддерживается',405);
  }

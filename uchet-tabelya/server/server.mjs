@@ -6,6 +6,7 @@ import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, text, monthDays, safeFilename } from './domain.mjs';
 import { workbook } from './xlsx.mjs';
+import {chooseDepartment} from './catalogues.mjs';
 import {initMonthly,monthlyAdminApi} from './monthly.mjs';
 import {gridWorkbook} from './grid-xlsx.mjs';
 import { workflowApi } from './workflow.mjs';
@@ -43,9 +44,9 @@ if(!columns.includes('custom_role_id'))db.exec('ALTER TABLE users ADD COLUMN cus
 const sections=['timesheets','database','planning','verification','control'];
 function userPermissions(u){
  if(u.role==='admin')return allPermissions;
- if(u.custom_role_id){const role=db.prepare('SELECT permissions_json FROM roles WHERE id=?').get(u.custom_role_id);return role?JSON.parse(role.permissions_json):[];}
+ if(u.custom_role_id){const role=db.prepare('SELECT permissions_json FROM roles WHERE id=?').get(u.custom_role_id);return role?normalizePermissions(JSON.parse(role.permissions_json)):[];}
  const access=JSON.parse(u.access_json||'["timesheets","database"]');
- return allPermissions.filter(p=>{const group=p.split('.')[0];return !['timesheets.reopen','timesheets.delete'].includes(p)&&(access.includes(group)||access.includes('database')&&['employees','positions','workTypes','permissions','signers','polygons','planWorks'].includes(group));});
+ return allPermissions.filter(p=>{const group=p.split('.')[0];return !['timesheets.reopen','timesheets.delete'].includes(p)&&(access.includes(group)||access.includes('database')&&['employees','positions','workTypes','permissions','signers','polygons','planWorks','departments','workBlocks'].includes(group));});
 }
 function userAccess(u){return sections.filter(k=>userPermissions(u).includes(k+'.view'));}
 function can(u,key){return userPermissions(u).includes(key.includes('.')?key:key+'.view');}
@@ -107,7 +108,7 @@ function selectedPosition(data) {
   if(!p)throw new AppError('Выберите должность из списка. Новые должности добавляются кнопкой «Добавить должность»');
   return p.id;
 }
-function catalog() { return {positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.department,employees.coefficient,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
+function catalog() { return {departments:db.prepare('SELECT id,name FROM departments WHERE active=1 ORDER BY name').all(),positions:db.prepare('SELECT * FROM positions ORDER BY name COLLATE NOCASE').all(),employees:db.prepare('SELECT employees.id,employees.name,employees.birthday,employees.note,employees.active,employees.department,employees.department_id AS departmentId,employees.coefficient,employees.position_id AS positionId,positions.name AS position FROM employees JOIN positions ON positions.id=employees.position_id WHERE active=1 ORDER BY employees.name COLLATE NOCASE').all(),workTypes:db.prepare('SELECT * FROM work_types WHERE active=1 ORDER BY label COLLATE NOCASE').all(),permissions:db.prepare('SELECT position_id AS positionId,work_type_id AS workTypeId FROM permissions').all(),signers:db.prepare('SELECT * FROM signers WHERE active=1 ORDER BY name COLLATE NOCASE').all()}; }
 
 async function api(req,res,url) {
   const path=url.pathname,method=req.method;
@@ -147,7 +148,7 @@ async function api(req,res,url) {
   const roleMatch=/^\/api\/roles(?:\/([a-f0-9-]+))?$/.exec(path);
   if(roleMatch){
     admin(user);const id=roleMatch[1];
-    if(method==='GET'&&!id)return json(res,{roles:db.prepare('SELECT * FROM roles ORDER BY name').all().map(r=>({id:r.id,name:r.name,permissions:JSON.parse(r.permissions_json)})),groups:permissionGroups});
+    if(method==='GET'&&!id)return json(res,{roles:db.prepare('SELECT * FROM roles ORDER BY name').all().map(r=>({id:r.id,name:r.name,permissions:normalizePermissions(JSON.parse(r.permissions_json))})),groups:permissionGroups});
     const d=await body(req);
     if(method==='DELETE'&&id){
       if(db.prepare('SELECT 1 FROM users WHERE custom_role_id=? AND deleted_at IS NULL').get(id))throw new AppError('Роль назначена пользователям. Сначала назначьте им другую роль',409);
@@ -192,7 +193,7 @@ async function api(req,res,url) {
       return json(res,publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)));
     }
   }
-  if(path==='/api/catalog'&&method==='GET'){const c=catalog();for(const [field,group]of [['employees','employees'],['positions','positions'],['workTypes','workTypes'],['signers','signers'],['permissions','workTypes']])if(!can(user,group+'.view'))c[field]=[];return json(res,c);}
+  if(path==='/api/catalog'&&method==='GET'){const c=catalog();for(const [field,group]of [['employees','employees'],['positions','positions'],['workTypes','workTypes'],['signers','signers'],['permissions','workTypes'],['departments','departments']])if(!can(user,group+'.view'))c[field]=[];return json(res,c);}
   if(path==='/api/positions'&&method==='POST'){
     const d=await body(req),name=text(d.name,'Должность',150),key=name.toLocaleLowerCase('ru');
     if(db.prepare('SELECT 1 FROM positions WHERE name_key=?').get(key))throw new AppError('Такая должность уже добавлена',409);
@@ -225,11 +226,11 @@ async function api(req,res,url) {
       if(kind==='employees'){
         const name=text(d.name,'ФИО',150),note=text(d.note,'Примечание',500,true),birthday=text(d.birthday,'Дата рождения',10,true),pid=selectedPosition(d);
         if(birthday&&(!/^\d{4}-\d{2}-\d{2}$/.test(birthday)||Number.isNaN(Date.parse(birthday))||new Date(birthday).toISOString().slice(0,10)!==birthday||birthday>now().slice(0,10)))throw new AppError('Укажите корректную дату рождения, не позднее сегодняшнего дня');
-        if(d.department!==undefined)text(d.department,'Подразделение',150,true);
+        const department=d.departmentId!==undefined||d.department!==undefined?chooseDepartment(db,d):null;
         if(d.coefficient!==undefined&&String(d.coefficient).trim()&&!/^\d{1,6}(?:[.,]\d{1,6})?$/.test(String(d.coefficient).trim()))throw new AppError('Коэффициент: неотрицательное число, до 6 знаков после запятой');
         if(id)db.prepare('UPDATE employees SET name=?,position_id=?,birthday=?,note=? WHERE id=?').run(name,pid,birthday,note,id);
         else db.prepare('INSERT INTO employees(id,name,position_id,birthday,note) VALUES(?,?,?,?,?)').run(resultId,name,pid,birthday,note);
-        if(d.department!==undefined)db.prepare('UPDATE employees SET department=? WHERE id=?').run(text(d.department,'Подразделение',150,true),resultId);
+        if(department)db.prepare('UPDATE employees SET department=?,department_id=? WHERE id=?').run(department.name,department.id,resultId);
         if(d.coefficient!==undefined){
           const v=String(d.coefficient).trim().replace(',','.');
           if(v&&!/^\d{1,6}(?:\.\d{1,6})?$/.test(v))throw new AppError('Коэффициент: неотрицательное число, до 6 знаков после запятой');
