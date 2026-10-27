@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { AppError, text, monthDays } from './domain.mjs';
-import {createMonthly,monthlyDocumentApi,publicMonthly} from './monthly.mjs';
+import {createMonthly,monthlyDocumentApi,publicMonthly,monthlyView} from './monthly.mjs';
 export const stages=['planning','verification','control'];
-export async function workflowApi({db,path,method,req,res,user,body,json,can,exportFile}){
+export async function workflowApi({db,path,method,req,res,user,body,json,can,exportFile,viewStage}){
  if(!path.startsWith('/api/workflows'))return false;
  const access=stage=>{if(!can(user,stage))throw new AppError('Нет доступа к этому этапу',403);};
  const allowed=s=>access(s.stage==='approved'?'control':s.stage);
- const match=/^\/api\/workflows(?:\/([a-f0-9-]+)(?:\/(confirm|cells|export|convert|signer))?)?$/.exec(path);
+ const match=/^\/api\/workflows(?:\/([a-f0-9-]+)(?:\/(confirm|cells|approvals|export|convert|signer))?)?$/.exec(path);
  if(!match)throw new AppError('Таблица не найдена',404);
  const [,id,action]=match;
  if(!id&&method==='GET'){
-  const rows=db.prepare('SELECT body FROM workflows ORDER BY updated_at DESC').all().map(r=>JSON.parse(r.body)).filter(s=>can(user,s.stage==='approved'?'control':s.stage));
-  json(res,rows.map(item=>{const s=item.format==='monthly-v2'?publicMonthly(item):item;const {rows,history,...rest}=s;delete rest.legacyArchive;return {...rest,rowCount:rows.length};}));return true;
+  const rows=db.prepare('SELECT body FROM workflows ORDER BY updated_at DESC').all().map(r=>JSON.parse(r.body)).filter(s=>s.format==='monthly-v2'?stages.some(k=>can(user,k+'.view')):can(user,s.stage==='approved'?'control':s.stage));
+  json(res,rows.map(item=>{const s=item.format==='monthly-v2'?publicMonthly(item,monthlyView(item,user,can,viewStage)):item;const {rows,history,...rest}=s;delete rest.legacyArchive;return {...rest,rowCount:rows.length};}));return true;
  }
  if(!id&&method==='POST'){
   access('planning');if(!can(user,'planning.create'))throw new AppError('Нет права создавать таблицы',403);const data=await body(req);monthDays(data.month);
@@ -25,7 +25,7 @@ export async function workflowApi({db,path,method,req,res,user,body,json,can,exp
   }catch(e){db.exec('ROLLBACK');throw e;}
  }
  const get=()=>{const record=db.prepare('SELECT body FROM workflows WHERE id=?').get(id);if(!record)throw new AppError('Таблица не найдена',404);return JSON.parse(record.body);};
- if(id){const doc=get();if(doc.format==='monthly-v2'||action==='convert')return await monthlyDocumentApi({db,path,method,req,res,user,body,json,can,exportFile},doc);}
+ if(id){const doc=get();if(doc.format==='monthly-v2'||action==='convert')return await monthlyDocumentApi({db,path,method,req,res,user,body,json,can,exportFile,viewStage},doc);}
  if(method==='GET'&&id&&!action){const s=get();allowed(s);json(res,s);return true;}
  if((method==='PATCH'&&!action)||(method==='POST'&&action==='confirm')){
   const data=await body(req);db.exec('BEGIN IMMEDIATE');

@@ -139,7 +139,7 @@ async function api(req,res,url) {
   if(!['GET','HEAD'].includes(method)&&req.headers['x-csrf-token']!==user.csrf)throw new AppError('Сессия страницы устарела. Обновите страницу',403);
   if(path==='/api/logout'&&method==='POST'){db.prepare('DELETE FROM sessions WHERE token=?').run(user.session_token);res.setHeader('Set-Cookie',cookie(req,'',0));return json(res,{ok:true});}
   if(await monthlyAdminApi({db,path,method,req,res,user,body,json,can}))return;
-  if(await workflowApi({db,path,method,req,res,user,body,json,can,exportFile:(res,s)=>{const bytes=gridWorkbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename=monthly-${s.month}.xlsx`,'Cache-Control':'no-store'});res.end(bytes);}}))return;
+  if(await workflowApi({db,path,method,req,res,user,body,json,can,viewStage:url.searchParams.get('stage'),exportFile:(res,s)=>{const bytes=gridWorkbook(s);res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename=monthly-${s.month}.xlsx`,'Cache-Control':'no-store'});res.end(bytes);}}))return;
   if(path==='/api/sheet-catalog'&&method==='GET'){
     need(user,'timesheets');const c=catalog();c.employees=c.employees.map(({birthday,note,coefficient,...e})=>({...e,birthday:'',note:''}));return json(res,c);
   }
