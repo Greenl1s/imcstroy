@@ -34,7 +34,7 @@ export function monthlySalary(baseCents,coefficient,days,worked){
  const [a,b='']=decimal(coefficient,'Коэффициент').split('.'),factor=BigInt(a)*1000000n+BigInt(b.padEnd(6,'0'));
  const round=(n,d)=>Number((n+d/2n)/d),monthlyCents=round(BigInt(baseCents)*factor,1000000n);
  if(!Number.isSafeInteger(monthlyCents))throw new AppError('Сумма расчёта слишком велика');
- return {monthlyCents,daily:monthlyCents/100/days,worked,accruedCents:round(BigInt(monthlyCents)*BigInt(worked),BigInt(days))};
+ return {monthlyCents,daily:monthlyCents/100/days,plannedDays:days,plannedCents:monthlyCents,worked,accruedCents:round(BigInt(monthlyCents)*BigInt(worked),BigInt(days))};
 }
 export function monthlySettings(db){const c=JSON.parse(db.prepare('SELECT body FROM planning_settings WHERE id=1').get().body);c.types=c.types.map(t=>({...t,color:cellColors[t.id].pale}));return c;}
 export function planningCatalog(db){return {nextBlockNumber:Number(db.prepare('SELECT MAX(number) AS n FROM work_blocks').get().n||0)+1,types:monthlySettings(db).types,blocks:db.prepare('SELECT b.*,COALESCE((SELECT MAX(item_number) FROM planning_works WHERE block_id=b.id),0)+1 AS nextItemNumber FROM work_blocks b WHERE b.active=1 ORDER BY b.number').all(),signers:db.prepare('SELECT id,name,position FROM signers WHERE active=1 ORDER BY name').all(),polygons:db.prepare('SELECT * FROM polygons WHERE active=1 ORDER BY number').all(),works:db.prepare('SELECT w.* FROM planning_works w JOIN work_blocks b ON b.id=w.block_id WHERE w.active=1 AND b.active=1 ORDER BY b.number,w.item_number').all().map(w=>({...w,blockId:w.block_id,itemNumber:w.item_number,typeIds:JSON.parse(w.type_ids_json)})),permissions:db.prepare('SELECT position_id AS positionId,work_id AS workId FROM planning_permissions').all()};}
@@ -42,8 +42,12 @@ export function totalMonthlyCents(s){
  const total=s.rows.reduce((sum,row)=>sum+monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length).accruedCents,0);
  if(!Number.isSafeInteger(total))throw new AppError('Общая сумма расчёта слишком велика');return total;
 }
+export function totalPlannedMonthlyCents(s){
+ const total=s.rows.reduce((sum,row)=>sum+monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,0).plannedCents,0);
+ if(!Number.isSafeInteger(total))throw new AppError('Запланированные затраты слишком велики');return total;
+}
 export function publicMonthly(s,viewStage=s.viewStage||(s.stage==='approved'?'control':s.stage)){
- const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);out.totalAccruedCents=typeof s.baseCents==='number'?totalMonthlyCents(s):s.totalAccruedCents;
+ const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);out.totalPlannedCents=typeof s.baseCents==='number'?totalPlannedMonthlyCents(s):s.totalPlannedCents;out.totalAccruedCents=typeof s.baseCents==='number'?totalMonthlyCents(s):s.totalAccruedCents;
  if(viewStage!=='control'){
   delete out.baseCents;for(const row of out.rows){delete row.coefficient;delete row.pay;}
  }else for(const row of out.rows)row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);
