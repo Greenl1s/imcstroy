@@ -11,7 +11,7 @@ export async function workflowApi({db,path,method,req,res,user,body,json,can,exp
  const [,id,action]=match;
  if(!id&&method==='GET'){
   const rows=db.prepare('SELECT body FROM workflows ORDER BY updated_at DESC').all().map(r=>JSON.parse(r.body)).filter(s=>s.format==='monthly-v2'?stages.some(k=>can(user,k+'.view')):can(user,s.stage==='approved'?'control':s.stage));
-  json(res,rows.map(item=>{const s=item.format==='monthly-v2'?publicMonthly(item,monthlyView(item,user,can,viewStage)):item;const {rows,history,...rest}=s;delete rest.legacyArchive;return {...rest,rowCount:rows.length};}));return true;
+  json(res,rows.map(item=>{const s=item.format==='monthly-v2'?publicMonthly(item,monthlyView(item,user,can,viewStage??stages.find(k=>can(user,k+'.view')))):item;const {rows,history,...rest}=s;delete rest.legacyArchive;return {...rest,rowCount:rows.length};}));return true;
  }
  if(!id&&method==='POST'){
   access('planning');if(!can(user,'planning.create'))throw new AppError('Нет права создавать таблицы',403);const data=await body(req);monthDays(data.month);

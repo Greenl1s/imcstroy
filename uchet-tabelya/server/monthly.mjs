@@ -47,10 +47,10 @@ export function totalPlannedMonthlyCents(s){
  if(!Number.isSafeInteger(total))throw new AppError('Запланированные затраты слишком велики');return total;
 }
 export function publicMonthly(s,viewStage=s.viewStage||(s.stage==='approved'?'control':s.stage)){
- const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);out.totalPlannedCents=typeof s.baseCents==='number'?totalPlannedMonthlyCents(s):s.totalPlannedCents;out.totalAccruedCents=typeof s.baseCents==='number'?totalMonthlyCents(s):s.totalAccruedCents;
+ const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);
  if(viewStage!=='control'){
-  delete out.baseCents;for(const row of out.rows){delete row.coefficient;delete row.pay;}
- }else for(const row of out.rows)row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);
+  delete out.baseCents;delete out.totalPlannedCents;delete out.totalAccruedCents;for(const row of out.rows){delete row.coefficient;delete row.pay;}
+ }else {out.totalPlannedCents=typeof s.baseCents==='number'?totalPlannedMonthlyCents(s):s.totalPlannedCents;out.totalAccruedCents=typeof s.baseCents==='number'?totalMonthlyCents(s):s.totalAccruedCents;for(const row of out.rows)row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);}
  return out;
 }
 export function monthlyView(s,user,can,requested){

@@ -6,7 +6,7 @@ import {cellAppearance} from './cell-state.mjs';
 const esc=v=>String(v??'').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 export function summaryWorkbook(source){
  const s=publicMonthly(source,source.viewStage),pay=s.viewStage==='control',days=monthDays(s.month),start=pay?8:5,lastDay=start+days-1,plannedDaysCol=lastDay+1,plannedPayCol=lastDay+2,workedCol=lastDay+3,payCol=lastDay+4,lastCol=pay?payCol:lastDay;
- const endRow=s.rows.length+3,plannedTotalRow=endRow+1,totalRow=endRow+2,noteStart=totalRow+3,signatureRow=noteStart+3,last=columnName(lastCol),dayFirst=columnName(start),dayLast=columnName(lastDay);
+ const endRow=s.rows.length+3,plannedTotalRow=endRow+1,totalRow=endRow+2,noteStart=(pay?totalRow:endRow)+3,signatureRow=noteStart+3,last=columnName(lastCol),dayFirst=columnName(start),dayLast=columnName(lastDay);
  const colors=['#eeeeee',...new Set(s.rows.flatMap(row=>Object.values(row.cells).map(e=>cellAppearance(s,e).color)))];
  const styles=[],style=(font=0,border=1,align=0,num=0,color=null)=>{const fill=color?colors.indexOf(color)+2:0,key=JSON.stringify([font,border,align,num,fill]);let id=styles.findIndex(s=>s.key===key);if(id<0){id=styles.length;styles.push({key,font,border,align,num,fill});}return id;};
  style(0,0); // default style 0
@@ -33,9 +33,11 @@ export function summaryWorkbook(source){
   const height=Math.max(14.5,Math.ceil((e.department||'').length/17)*14.5,Math.ceil((e.position||'').length/30)*14.5);
   xml+=row(n,content,height);
  });
+ if(pay){
  xml+=row(plannedTotalRow,cell(plannedTotalRow,3,'Запланированные затраты',style(1,0))+(pay?cell(plannedTotalRow,plannedPayCol,s.totalPlannedCents/100,style(1,1,0,4),s.rows.length?`SUM(${columnName(plannedPayCol)}4:${columnName(plannedPayCol)}${endRow})`:'0'):cell(plannedTotalRow,start,s.totalPlannedCents/100,style(1,0,0,4))),20);
  xml+=row(totalRow,cell(totalRow,3,'Подтвержденные затраты',style(1,0))+(pay?cell(totalRow,payCol,s.totalAccruedCents/100,style(1,1,0,4),s.rows.length?`SUM(${columnName(payCol)}4:${columnName(payCol)}${endRow})`:'0'):cell(totalRow,start,s.totalAccruedCents/100,style(1,0,0,4))),20);
- const merges=labels.map((_,i)=>`${columnName(i+1)}2:${columnName(i+1)}3`);merges.push(`${dayFirst}2:${dayLast}2`);if(!pay){for(const r of [plannedTotalRow,totalRow])merges.push(`${dayFirst}${r}:${columnName(Math.min(start+7,lastDay))}${r}`);}
+ }
+ const merges=labels.map((_,i)=>`${columnName(i+1)}2:${columnName(i+1)}3`);merges.push(`${dayFirst}2:${dayLast}2`);
  const legendEnd=columnName(pay?workedCol:lastDay);
  s.types.forEach((t,i)=>{const n=noteStart+i;const desc=`${t.code} — ${t.name}. Первая цифра — тип занятости, следующие цифры — номер полигона, включая 0.`;xml+=row(n,cell(n,start,desc,style(3,0,4)),i===0?55.5:i===1?46.5:29);merges.push(`${dayFirst}${n}:${legendEnd}${n}`);});
  const sign=s.signerSnapshot?`${s.signerSnapshot.position} · ${shortName(s.signerSnapshot.name)} ____________________`:'Подпись ____________________';
