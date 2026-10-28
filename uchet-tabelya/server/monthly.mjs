@@ -1,7 +1,7 @@
 import {cellStages,cellColors,cellAppearance,migrateCellApprovals,approvalProgress} from './cell-state.mjs';
 import {randomUUID} from 'node:crypto';
 import {AppError,text,monthDays} from './domain.mjs';
-import {initCatalogues,catalogueApi,numberedWork} from './catalogues.mjs';
+import {initCatalogues,initDefaultWorkPermissions,grantWorkPositions,catalogueApi,numberedWork} from './catalogues.mjs';
 import {calendar,validateCalendarOverride} from './production-calendar.mjs';
 export const defaultTypes=[{id:'trip',code:'1',name:'Командировка',color:'#dceaff'},{id:'office',code:'2',name:'Офис',color:'#ffe0de'},{id:'general',code:'3',name:'Общая',color:'#def0dd'}];
 export function initMonthly(db){
@@ -14,7 +14,7 @@ export function initMonthly(db){
  CREATE TABLE IF NOT EXISTS planning_permissions(position_id TEXT NOT NULL REFERENCES positions(id),work_id TEXT NOT NULL REFERENCES planning_works(id),PRIMARY KEY(position_id,work_id));
  CREATE TABLE IF NOT EXISTS monthly_periods(month TEXT PRIMARY KEY,workflow_id TEXT NOT NULL UNIQUE REFERENCES workflows(id));`);
  db.prepare('INSERT OR IGNORE INTO planning_settings VALUES(1,?)').run(JSON.stringify({baseCents:null,types:defaultTypes,calendars:{}}));
- initCatalogues(db);
+ initCatalogues(db);initDefaultWorkPermissions(db);
  // Idempotent migration preserves completed stages and all historical reports.
  db.exec('BEGIN IMMEDIATE');try{
   for(const record of db.prepare('SELECT id,body FROM workflows').all()){
@@ -38,8 +38,12 @@ export function monthlySalary(baseCents,coefficient,days,worked){
 }
 export function monthlySettings(db){const c=JSON.parse(db.prepare('SELECT body FROM planning_settings WHERE id=1').get().body);c.types=c.types.map(t=>({...t,color:cellColors[t.id].pale}));return c;}
 export function planningCatalog(db){return {nextBlockNumber:Number(db.prepare('SELECT MAX(number) AS n FROM work_blocks').get().n||0)+1,types:monthlySettings(db).types,blocks:db.prepare('SELECT b.*,COALESCE((SELECT MAX(item_number) FROM planning_works WHERE block_id=b.id),0)+1 AS nextItemNumber FROM work_blocks b WHERE b.active=1 ORDER BY b.number').all(),signers:db.prepare('SELECT id,name,position FROM signers WHERE active=1 ORDER BY name').all(),polygons:db.prepare('SELECT * FROM polygons WHERE active=1 ORDER BY number').all(),works:db.prepare('SELECT w.* FROM planning_works w JOIN work_blocks b ON b.id=w.block_id WHERE w.active=1 AND b.active=1 ORDER BY b.number,w.item_number').all().map(w=>({...w,blockId:w.block_id,itemNumber:w.item_number,typeIds:JSON.parse(w.type_ids_json)})),permissions:db.prepare('SELECT position_id AS positionId,work_id AS workId FROM planning_permissions').all()};}
+export function totalMonthlyCents(s){
+ const total=s.rows.reduce((sum,row)=>sum+monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length).accruedCents,0);
+ if(!Number.isSafeInteger(total))throw new AppError('Общая сумма расчёта слишком велика');return total;
+}
 export function publicMonthly(s,viewStage=s.viewStage||(s.stage==='approved'?'control':s.stage)){
- const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);
+ const out=structuredClone(s);delete out.legacyArchive;out.viewStage=viewStage;out.approvalProgress=approvalProgress(s);out.totalAccruedCents=typeof s.baseCents==='number'?totalMonthlyCents(s):s.totalAccruedCents;
  if(viewStage!=='control'){
   delete out.baseCents;for(const row of out.rows){delete row.coefficient;delete row.pay;}
  }else for(const row of out.rows)row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);
@@ -64,11 +68,11 @@ function targets(s,data,all=false){
  });
 }
 function approveCells(s,list,stage,user){
- const index=cellStages.indexOf(stage),stamp=new Date().toISOString();
+ if(stage!=='verification')throw new AppError('Подтверждение ячеек доступно только в Верификации');
+ const stamp=new Date().toISOString();
  for(const {row,day}of list){
   const e=row.cells[String(day)];if(!e)throw new AppError('Пустую ячейку подтверждать не нужно');
-  for(const previous of cellStages.slice(0,index))if(!e.approvals?.[previous])throw new AppError(`Сначала подтвердите предыдущий этап: ${row.employeeSnapshot.name}, день ${day}`,409);
-  e.approvals[stage]={at:stamp,userId:user.id,user:user.name};
+  e.approvals={verification:{at:stamp,userId:user.id,user:user.name}};
  }
 }
 
@@ -82,7 +86,7 @@ export function createMonthly(db,data,user,{id=null,legacy=null}={}){
  for(const e of employees)if(!e.department||e.coefficient===null)throw new AppError(`Заполните подразделение и коэффициент сотрудника «${e.name}»`);
  for(const e of employees)monthlySalary(config.baseCents,e.coefficient,cal.workingDays,0);
  const stamp=new Date().toISOString();
- const s={format:'monthly-v2',cellApprovalsVersion:1,id:id||randomUUID(),name:text(data.name,'Название таблицы',150),month:data.month,stage:'planning',revision:(legacy?.revision||0)+1,baseCents:config.baseCents,calendar:cal,types:config.types,rows:employees.map(e=>({id:randomUUID(),employeeId:e.id,positionId:e.position_id,employeeSnapshot:{name:e.name,position:e.position,department:e.department},coefficient:e.coefficient,cells:{}})),history:[...(legacy?.history||[]),{at:stamp,user:user.name,action:legacy?'Начата новая месячная форма; прежние данные сохранены в архиве записи':'Создана месячная таблица'}],updatedAt:stamp,...(legacy?{legacyArchive:legacy}:{})};
+ const s={format:'monthly-v2',cellApprovalsVersion:2,id:id||randomUUID(),name:text(data.name,'Название таблицы',150),month:data.month,stage:'planning',revision:(legacy?.revision||0)+1,baseCents:config.baseCents,calendar:cal,types:config.types,rows:employees.map(e=>({id:randomUUID(),employeeId:e.id,positionId:e.position_id,employeeSnapshot:{name:e.name,position:e.position,department:e.department},coefficient:e.coefficient,cells:{}})),history:[...(legacy?.history||[]),{at:stamp,user:user.name,action:legacy?'Начата новая месячная форма; прежние данные сохранены в архиве записи':'Создана месячная таблица'}],updatedAt:stamp,...(legacy?{legacyArchive:legacy}:{})};
  return s;
 }
 export function validateMonthlyCell(db,s,row,day,value){
@@ -102,7 +106,7 @@ export function validateMonthlyCell(db,s,row,day,value){
  const work=value.workId?db.prepare('SELECT * FROM planning_works WHERE id=? AND active=1').get(value.workId):null;
  if(value.workId&&!work)throw new AppError('Работа не найдена');
  if(work&&(!JSON.parse(work.type_ids_json).includes(type.id)||!db.prepare('SELECT 1 FROM planning_permissions WHERE position_id=? AND work_id=?').get(row.positionId,work.id)))throw new AppError('Работа не разрешена для этой должности и типа занятости',403);
- row.cells[String(day)]={typeId:type.id,typeCode:type.code,typeName:type.name,color:cellColors[type.id].pale,approvals:{planning:null,verification:null,control:null},polygonId:polygon.id,polygonNumber:polygon.number,polygonName:polygon.name,workId:work?.id||null,workCode:work?.code||'',workName:work?.label||''};
+ row.cells[String(day)]={typeId:type.id,typeCode:type.code,typeName:type.name,color:cellColors[type.id].pale,approvals:{verification:null},polygonId:polygon.id,polygonNumber:polygon.number,polygonName:polygon.name,workId:work?.id||null,workCode:work?.code||'',workName:work?.label||''};
 }
 function finishMonthly(db,s,user){
  const used=new Map(),stamp=new Date().toISOString();
@@ -113,7 +117,7 @@ function finishMonthly(db,s,user){
  for(const row of s.rows){
   row.pay=monthlySalary(s.baseCents,row.coefficient,s.calendar.workingDays,Object.keys(row.cells).length);
   for(const [day,entry]of Object.entries(row.cells)){
-   if(cellStages.some(stage=>!entry.approvals?.[stage]))throw new AppError(`Подтвердите все этапы: ${row.employeeSnapshot.name}, день ${day}`,409);
+   if(!entry.approvals?.verification)throw new AppError(`Подтвердите день в Верификации: ${row.employeeSnapshot.name}, день ${day}`,409);
    if(!entry.workId||!entry.workCode)throw new AppError(`Укажите вид работы: ${row.employeeSnapshot.name}, день ${day}`);
    if(s.calendar.nonworking.includes(Number(day)))throw new AppError('Таблица содержит работу в нерабочий день');
    // A legacy manual sheet must not silently double-book this employee.
@@ -184,7 +188,7 @@ export async function monthlyAdminApi({db,path,method,req,res,user,body,json,can
     db.exec('BEGIN IMMEDIATE');try{
      const old=id?db.prepare('SELECT * FROM planning_works WHERE id=?').get(id):null,w=numberedWork(db,d,old);
      if(id)db.prepare('UPDATE planning_works SET code=?,label=?,block_id=?,item_number=?,type_ids_json=? WHERE id=?').run(w.code,w.label,w.blockId,w.itemNumber,JSON.stringify(w.typeIds),id);
-     else db.prepare('INSERT INTO planning_works(id,code,label,block_id,item_number,type_ids_json) VALUES(?,?,?,?,?,?)').run(key,w.code,w.label,w.blockId,w.itemNumber,JSON.stringify(w.typeIds));
+     else {db.prepare('INSERT INTO planning_works(id,code,label,block_id,item_number,type_ids_json) VALUES(?,?,?,?,?,?)').run(key,w.code,w.label,w.blockId,w.itemNumber,JSON.stringify(w.typeIds));grantWorkPositions(db,key);}
      db.exec('COMMIT');
     }catch(e){db.exec('ROLLBACK');throw e;}
    }
@@ -224,16 +228,15 @@ export async function monthlyDocumentApi({db,path,method,req,res,user,body,json,
      if(!signer)throw new AppError('Подписант не найден');s.signerId=signer.id;s.signerSnapshot={name:signer.name,position:signer.position};
     }
    }else if(action==='confirm'&&method==='POST'){
-    const list=targets(s,data,true);approveCells(s,list,viewStage,user);
-    if(viewStage==='control')finishMonthly(db,s,user);
+    if(viewStage==='control')finishMonthly(db,s,user);else approveCells(s,targets(s,data,true),viewStage,user);
    }else throw new AppError('Для месячной таблицы изменяются только ячейки дней');
    if(s.stage!=='approved'){
     const p=approvalProgress(s);
-    s.stage=p.total&&p.verification===p.total?'control':p.total&&p.planning===p.total?'verification':'planning';
+    s.stage=p.total&&p.verification===p.total?'control':p.total?'verification':'planning';
    }
    s.revision++;
   }
-  s.updatedAt=new Date().toISOString();s.history.push({at:s.updatedAt,user:user.name,action:action==='confirm'?viewStage==='control'?'Подтверждён контроль и сформированы табели':'Подтверждены все заполненные ячейки: '+viewStage:action==='approvals'?'Подтверждены выбранные ячейки: '+viewStage:action==='convert'?'Создана месячная форма':action==='signer'?'Изменён подписант':'Изменены ячейки; их подтверждения сброшены',stage:viewStage,...(['cells','approvals'].includes(action)?{cells:(data.cells||[{rowId:data.rowId,day:data.day}])}:{})});
+  s.updatedAt=new Date().toISOString();s.history.push({at:s.updatedAt,user:user.name,action:action==='confirm'?viewStage==='control'?'Сформированы табели после контроля':'Подтверждены все заполненные ячейки: '+viewStage:action==='approvals'?'Подтверждены выбранные ячейки: '+viewStage:action==='convert'?'Создана месячная форма':action==='signer'?'Изменён подписант':'Изменены ячейки; их верификация сброшена',stage:viewStage,...(['cells','approvals'].includes(action)?{cells:(data.cells||[{rowId:data.rowId,day:data.day}])}:{})});
   db.prepare('UPDATE workflows SET body=?,updated_at=? WHERE id=?').run(JSON.stringify(s),s.updatedAt,id);
   db.exec('COMMIT');json(res,publicMonthly(s,viewStage));return true;
  }catch(e){db.exec('ROLLBACK');throw e;}

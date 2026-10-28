@@ -6,7 +6,7 @@ import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, text, monthDays, safeFilename } from './domain.mjs';
 import { workbook } from './xlsx.mjs';
-import {chooseDepartment} from './catalogues.mjs';
+import {chooseDepartment,grantPositionWorks} from './catalogues.mjs';
 import {initMonthly,monthlyAdminApi} from './monthly.mjs';
 import {gridWorkbook} from './grid-xlsx.mjs';
 import { workflowApi } from './workflow.mjs';
@@ -197,7 +197,7 @@ async function api(req,res,url) {
   if(path==='/api/positions'&&method==='POST'){
     const d=await body(req),name=text(d.name,'Должность',150),key=name.toLocaleLowerCase('ru');
     if(db.prepare('SELECT 1 FROM positions WHERE name_key=?').get(key))throw new AppError('Такая должность уже добавлена',409);
-    db.prepare('INSERT INTO positions VALUES(?,?,?)').run(randomUUID(),name,key);
+    db.exec('BEGIN IMMEDIATE');try{const id=randomUUID();db.prepare('INSERT INTO positions VALUES(?,?,?)').run(id,name,key);grantPositionWorks(db,id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
     return json(res,catalog(),201);
   }
   if(path==='/api/users'){

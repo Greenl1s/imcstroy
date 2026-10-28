@@ -96,3 +96,16 @@ export async function catalogueApi({db,path,method,req,res,user,body,json,can,ca
  }catch(e){db.exec('ROLLBACK');throw e;}
  json(res,kind==='departments'?{departments:db.prepare('SELECT id,name FROM departments WHERE active=1 ORDER BY name').all()}:catalog(db));return true;
 }
+
+// Apply the requested all-jobs default once; later manual exclusions survive restarts.
+export function initDefaultWorkPermissions(db){
+ db.exec('CREATE TABLE IF NOT EXISTS catalogue_migrations(name TEXT PRIMARY KEY)');
+ const name='all-position-works-default-v1';
+ if(db.prepare('SELECT 1 FROM catalogue_migrations WHERE name=?').get(name))return;
+ db.exec('BEGIN IMMEDIATE');try{
+  db.exec('INSERT OR IGNORE INTO planning_permissions(position_id,work_id) SELECT p.id,w.id FROM positions p CROSS JOIN planning_works w WHERE w.active=1');
+  db.prepare('INSERT INTO catalogue_migrations VALUES(?)').run(name);db.exec('COMMIT');
+ }catch(e){db.exec('ROLLBACK');throw e;}
+}
+export function grantPositionWorks(db,positionId){db.prepare('INSERT OR IGNORE INTO planning_permissions(position_id,work_id) SELECT ?,id FROM planning_works WHERE active=1').run(positionId);}
+export function grantWorkPositions(db,workId){db.prepare('INSERT OR IGNORE INTO planning_permissions(position_id,work_id) SELECT id,? FROM positions').run(workId);}

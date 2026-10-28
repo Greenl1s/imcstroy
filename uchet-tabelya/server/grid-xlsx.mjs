@@ -1,9 +1,11 @@
+import {summaryWorkbook} from './summary-xlsx.mjs';
 import {cellAppearance} from './cell-state.mjs';
 import {zip,columnName} from './xlsx.mjs';
 import {monthDays,shortName} from './domain.mjs';
 import {publicMonthly} from './monthly.mjs';
 const esc=v=>String(v??'').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 export function gridWorkbook(source){
+ if(source.format==='monthly-v2')return summaryWorkbook(source);
  const s=source.format==='monthly-v2'?publicMonthly(source,source.viewStage):source,total=monthDays(s.month),pay=s.format==='monthly-v2'&&s.viewStage==='control',generated=s.format==='polygon-v2';
  const heads=['№','Подразделение','Ф.И.О.','Должность',...(pay?['Коэффициент','З/п ВСМ','З/п ВСМ в день']:[]),...Array.from({length:total},(_,i)=>String(i+1)),...(pay?['Общее кол-во отработанных дней','З/п за отработанные дни']:[])];
  const colors=['#ffffff','#edf2e9','#eeeeee',...(s.types||[]).map(t=>t.color)];
