@@ -1,6 +1,6 @@
 {
   "name": "uchet-tabelya",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "type": "module",
   "description": "Система табельного учёта",
